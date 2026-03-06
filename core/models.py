@@ -20,7 +20,8 @@ class Event(BaseModel):
 class Project(BaseModel):
     id: UUID
     name: str
-    repo_path: str
+    repo_url: str
+    local_path: str
     status: str
     created_at: datetime
     updated_at: datetime
