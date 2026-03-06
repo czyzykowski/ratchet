@@ -1,0 +1,11 @@
+.direnv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+.venv/
+
+# Explicitly track project CLAUDE.md
+!CLAUDE.md
