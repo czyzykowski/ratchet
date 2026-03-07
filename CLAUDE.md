@@ -63,6 +63,69 @@ alembic upgrade head
 scripts/run-spec.sh specs/02-state-machine.md
 ```
 
+## Operational Scripts
+
+```
+scripts/
+  add-project.py    — register a repo as a managed project
+  add-task.py       — create a task in ready_for_spec status
+  add-spec.py       — add and assign a spec, advance task to ready_for_implementation
+  run-next.py       — execute next ready task via worker
+  board.py          — display task board grouped by status
+  review-blocked.py — show blocked tasks with failure reasons
+```
+
+### Usage
+
+```bash
+# Register a project (repo_url and local_path both set to --path in v1)
+python scripts/add-project.py --name <name> --path <repo_path>
+
+# Create a task
+python scripts/add-task.py --project-id <uuid> --title <title>
+
+# Add a spec file and advance task to ready_for_implementation
+python scripts/add-spec.py --task-id <uuid> --file <spec_file_path>
+
+# Run the next ready_for_implementation task
+python scripts/run-next.py
+#   or equivalently:
+python -m worker
+
+# View task board
+python scripts/board.py
+
+# Review blocked tasks with failure context
+python scripts/review-blocked.py
+```
+
+### Full Workflow
+
+```bash
+# 1. Register your project
+python scripts/add-project.py --name my-project --path $(pwd)
+
+# 2. Create a task
+python scripts/add-task.py --project-id <project-uuid> --title "My task"
+
+# 3. Write a spec file and assign it
+python scripts/add-spec.py --task-id <task-uuid> --file path/to/spec.md
+
+# 4. Run the worker to execute the task
+python scripts/run-next.py
+#   or equivalently:
+python -m worker
+
+# 5. Check the board
+python scripts/board.py
+
+# 6. If a task is blocked, review failure reasons and re-assign spec
+python scripts/review-blocked.py
+python scripts/add-spec.py --task-id <task-uuid> --file path/to/revised-spec.md
+```
+
+All scripts read `DATABASE_URL` from environment and exit 1 with a clear message if not set.
+
 ## Commit Convention
 
 After completing all tasks in a spec, commit with:
