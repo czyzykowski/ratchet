@@ -52,5 +52,6 @@ class Execution(BaseModel):
     spec_id: UUID
     status: str
     failure_reason: str | None
+    branch_name: str | None
     started_at: datetime
     completed_at: datetime | None

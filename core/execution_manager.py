@@ -15,16 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_task_environment(repo_path: str, execution_id: UUID) -> str:
-    """Create git worktree for execution.
+    """Create git worktree on a named branch for execution.
 
     Worktree path: <repo_path>/.worktrees/<execution_id>
-    Runs: git worktree add <worktree_path> HEAD
+    Branch name: execution/<execution_id>
+    Runs: git worktree add <worktree_path> -b execution/<execution_id> HEAD
     Returns worktree_path on success.
     Raises subprocess.CalledProcessError on failure.
     """
     worktree_path = os.path.join(repo_path, ".worktrees", str(execution_id))
+    branch_name = f"execution/{execution_id}"
     subprocess.run(
-        ["git", "worktree", "add", worktree_path, "HEAD"],
+        ["git", "worktree", "add", worktree_path, "-b", branch_name, "HEAD"],
         cwd=repo_path,
         check=True,
         capture_output=True,
@@ -33,9 +35,10 @@ def prepare_task_environment(repo_path: str, execution_id: UUID) -> str:
 
 
 def cleanup_task_environment(repo_path: str, execution_id: UUID) -> None:
-    """Remove git worktree for execution.
+    """Remove git worktree directory. Branch is preserved intentionally.
 
     Runs: git worktree remove --force <worktree_path>
+    Does NOT delete branch execution/<execution_id>.
     Logs warning on failure but does not raise.
     """
     worktree_path = os.path.join(repo_path, ".worktrees", str(execution_id))
@@ -75,6 +78,8 @@ def _build_execution(execution_events: list[Event]) -> Execution | None:
     spec_id = UUID(p["spec_id"])
     started_at = started_event.occurred_at
 
+    branch_name = p.get("branch_name")
+
     if final_event is None:
         return Execution(
             id=execution_id,
@@ -82,6 +87,7 @@ def _build_execution(execution_events: list[Event]) -> Execution | None:
             spec_id=spec_id,
             status="running",
             failure_reason=None,
+            branch_name=branch_name,
             started_at=started_at,
             completed_at=None,
         )
@@ -93,6 +99,7 @@ def _build_execution(execution_events: list[Event]) -> Execution | None:
         spec_id=spec_id,
         status=fp["status"],
         failure_reason=fp.get("failure_reason"),
+        branch_name=branch_name,
         started_at=started_at,
         completed_at=final_event.occurred_at,
     )
@@ -130,11 +137,13 @@ class ExecutionManager:
             )
             raise OSError(failure_reason) from exc
 
+        branch_name = f"execution/{execution_id}"
         payload = {
             "execution_id": str(execution_id),
             "task_id": str(task_id),
             "spec_id": str(spec_id),
             "worktree_path": worktree_path,
+            "branch_name": branch_name,
             "status": "running",
         }
         event = await self._store.append_event(
@@ -157,6 +166,7 @@ class ExecutionManager:
             spec_id=spec_id,
             status="running",
             failure_reason=None,
+            branch_name=branch_name,
             started_at=event.occurred_at,
             completed_at=None,
         )

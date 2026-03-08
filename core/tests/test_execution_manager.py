@@ -67,6 +67,23 @@ async def test_start_execution_appends_execution_started_event() -> None:
     assert p["spec_id"] == str(spec_id)
     assert p["status"] == "running"
     assert "worktree_path" in p
+    assert p["branch_name"] == f"execution/{execution.id}"
+
+
+async def test_start_execution_branch_name_in_execution_and_payload() -> None:
+    em, store = _make_em()
+    task_id = uuid.uuid4()
+    spec_id = uuid.uuid4()
+
+    with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
+        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        execution = await em.start_execution(task_id, spec_id)
+
+    assert execution.branch_name == f"execution/{execution.id}"
+
+    execution_events = await store.get_events(execution.id, "execution")
+    p = execution_events[0].payload
+    assert p["branch_name"] == f"execution/{execution.id}"
 
 
 async def test_start_execution_calls_prepare_with_correct_args() -> None:
