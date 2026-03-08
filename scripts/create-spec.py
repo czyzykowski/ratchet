@@ -1,0 +1,341 @@
+"""Interactive conversational spec creation script."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from uuid import UUID
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Interactively create a spec for a task via conversation with Claude."
+    )
+    parser.add_argument("--task-id", required=True, help="Task UUID")
+    return parser.parse_args()
+
+
+def slugify(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s-]+", "-", text)
+    return text.strip("-")
+
+
+def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
+    """Run claude -p with the given prompt, stream output to terminal, and return full output."""
+    if debug:
+        print("\n--- DEBUG: PROMPT SENT TO CLAUDE ---", file=sys.stderr)
+        print(prompt, file=sys.stderr)
+        print("--- END PROMPT ---\n", file=sys.stderr)
+
+    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob"]
+    proc = subprocess.Popen(
+        cmd,
+        cwd=local_path,
+        stdout=subprocess.PIPE,
+        stderr=sys.stderr,
+        text=True,
+    )
+
+    output_lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        output_lines.append(line)
+
+    proc.wait()
+    return "".join(output_lines)
+
+
+def build_initial_prompt(intent_md: str, task_title: str, user_description: str) -> str:
+    return f"""You are helping design a software task for the Ratchet project.
+
+## Project Intent
+{intent_md}
+
+## Task
+Title: {task_title}
+
+## Your Role
+Help the user think through this task by asking clarifying questions one at a time.
+Questions should be specific and concrete — multiple choice where possible,
+open-ended when necessary. Only one question per message. No preamble before the question.
+
+After sufficient clarification, describe your understanding of the task in chunks of 200-300 words,
+asking after each chunk whether it looks right.
+Keep to chunked format even when the picture is clear.
+
+When the user types 'done', 'generate', or 'go', produce the spec in this exact format:
+
+## SPEC READY
+# Spec N: <title>
+
+## Objective
+...
+
+## Success Criteria
+- [ ] ...
+
+## Out of Scope
+...
+
+## Technical Context
+...
+
+## Tasks
+- [ ] ...
+
+## Assumptions
+...
+
+## Verification Commands
+```bash
+...
+```
+
+## What Exists After This Spec
+
+...
+
+Use the standard Ratchet spec format exactly as shown. Be specific about file paths,
+function names, and test requirements. Read the codebase to understand current patterns
+before generating the spec.
+
+## User's Opening Description
+
+{user_description}"""
+
+
+def build_continuation_prompt(
+    initial_prompt: str, history: list[dict], user_input: str
+) -> str:
+    return f"""{initial_prompt}
+
+## Conversation History
+
+{json.dumps(history, indent=2)}
+
+## Latest User Message
+
+{user_input}"""
+
+
+def build_generation_prompt(
+    initial_prompt: str, history: list[dict], user_input: str
+) -> str:
+    gen_instruction = (
+        "The user has indicated they are ready to generate the spec. "
+        "Produce the spec now in the exact format specified, "
+        "preceded by '## SPEC READY' on its own line."
+    )
+    return f"""{initial_prompt}
+
+## Conversation History
+
+{json.dumps(history, indent=2)}
+
+## Latest User Message
+
+{user_input}
+
+{gen_instruction}"""
+
+
+def extract_spec(output: str) -> str:
+    marker = "## SPEC READY"
+    idx = output.find(marker)
+    if idx == -1:
+        return ""
+    return output[idx + len(marker) :].strip()
+
+
+async def load_task_info(task_id: UUID, store):
+    """Return (current_status, task_title, project_id) from event replay."""
+    from core import events as ev
+
+    task_events = await store.get_events(task_id, "task")
+    status: str | None = None
+    task_title: str | None = None
+    project_id: UUID | None = None
+
+    for event in task_events:
+        if event.event_type == ev.TASK_CREATED:
+            status = event.payload.get("status", ev.READY_FOR_SPEC)
+            task_title = event.payload.get("title", "")
+            project_id = UUID(event.payload["project_id"])
+        elif event.event_type == ev.TASK_STATUS_CHANGED:
+            status = event.payload["to_status"]
+
+    return status, task_title, project_id
+
+
+async def assign_spec_to_task(task_id: UUID, spec_content: str, store) -> None:
+    """Create and assign spec, then advance task status."""
+    from core import events as ev
+    from core.spec_manager import SpecManager
+    from core.state_machine import InvalidTransitionError, TaskStateMachine
+
+    state_machine = TaskStateMachine(store)
+    spec_manager = SpecManager(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    current_spec = await spec_manager.get_current_spec(task_id)
+    previous_spec_id = current_spec.id if current_spec is not None else None
+
+    spec = await spec_manager.create_spec(task_id, spec_content, previous_spec_id)
+    await spec_manager.assign_spec(task_id, spec.id)
+
+    try:
+        if current_status == ev.READY_FOR_SPEC:
+            await state_machine.transition(task_id, ev.SPEC_QA)
+            await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+        elif current_status in (ev.SPEC_QA, ev.BLOCKED, ev.READY_FOR_IMPLEMENTATION):
+            await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    except InvalidTransitionError as exc:
+        print(f"Error transitioning task status: {exc}", file=sys.stderr)
+        raise
+
+
+async def main() -> None:
+    if not os.environ.get("DATABASE_URL"):
+        print("Error: DATABASE_URL environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
+
+    args = parse_args()
+    debug = bool(os.environ.get("RATCHET_DEBUG"))
+
+    try:
+        task_id = UUID(args.task_id)
+    except ValueError:
+        print(f"Error: invalid task-id: {args.task_id!r}", file=sys.stderr)
+        sys.exit(1)
+
+    if not shutil.which("claude"):
+        print("Error: claude binary not found in PATH.", file=sys.stderr)
+        sys.exit(1)
+
+    from core import events as ev
+    from core.db import close_pool
+    from core.project_manager import ProjectManager
+    from core.store import PostgresStore
+
+    store = PostgresStore()
+    try:
+        current_status, task_title, project_id = await load_task_info(task_id, store)
+
+        if current_status is None:
+            print(f"Error: task {task_id} not found.", file=sys.stderr)
+            sys.exit(1)
+
+        if current_status != ev.READY_FOR_SPEC:
+            print(
+                f"Error: task {task_id} is in status {current_status!r},"
+                f" expected ready_for_spec.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        pm = ProjectManager(store)
+        project = await pm.get_project(project_id)
+        if project is None:
+            print(f"Error: project {project_id} not found.", file=sys.stderr)
+            sys.exit(1)
+
+        local_path = project.local_path
+        intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+        if not intent_md_path.exists():
+            print(f"Error: INTENT.md not found at {intent_md_path}", file=sys.stderr)
+            sys.exit(1)
+
+        intent_md = intent_md_path.read_text()
+
+        print(f"Task: {task_title}")
+        print(f"Project: {project.name} ({local_path})")
+        print("\nDescribe what you want to build:")
+
+        try:
+            user_description = input("> ").strip()
+        except KeyboardInterrupt:
+            print("\nSession ended, spec not saved.")
+            sys.exit(0)
+
+        initial_prompt = build_initial_prompt(intent_md, task_title, user_description)
+        history: list[dict] = []
+
+        print("\n--- Claude ---")
+        output = run_claude(initial_prompt, local_path, debug)
+        history.append({"role": "user", "content": user_description})
+        history.append({"role": "assistant", "content": output})
+
+        while True:
+            try:
+                user_input = input("\n> ").strip()
+            except KeyboardInterrupt:
+                print("\nSession ended, spec not saved.")
+                sys.exit(0)
+
+            if not user_input:
+                continue
+
+            is_trigger = user_input.lower() in ("done", "generate", "go")
+
+            if is_trigger:
+                prompt = build_generation_prompt(initial_prompt, history, user_input)
+            else:
+                prompt = build_continuation_prompt(initial_prompt, history, user_input)
+
+            print("\n--- Claude ---")
+            output = run_claude(prompt, local_path, debug)
+
+            if is_trigger:
+                if "## SPEC READY" not in output:
+                    print(
+                        "\nWarning: ## SPEC READY marker not found. Continuing conversation."
+                    )
+                    history.append({"role": "user", "content": user_input})
+                    history.append({"role": "assistant", "content": output})
+                    continue
+
+                spec_content = extract_spec(output)
+
+                try:
+                    confirm = input("\nSave and assign this spec? [y/n] ").strip().lower()
+                except KeyboardInterrupt:
+                    print("\nSession ended, spec not saved.")
+                    sys.exit(0)
+
+                if confirm == "y":
+                    short_title = slugify(task_title[:40]) if task_title else "spec"
+                    short_id = str(task_id)[:8]
+                    filename = f"{short_title}-{short_id}.md"
+                    specs_dir = Path("specs")
+                    specs_dir.mkdir(exist_ok=True)
+                    spec_file = specs_dir / filename
+                    spec_file.write_text(spec_content)
+
+                    await assign_spec_to_task(task_id, spec_content, store)
+                    print(f"Spec saved to specs/{filename} and assigned to task")
+                    break
+                else:
+                    history.append({"role": "user", "content": user_input})
+                    history.append({"role": "assistant", "content": output})
+            else:
+                history.append({"role": "user", "content": user_input})
+                history.append({"role": "assistant", "content": output})
+
+    except KeyboardInterrupt:
+        print("\nSession ended, spec not saved.")
+    finally:
+        await close_pool()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
