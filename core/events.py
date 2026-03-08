@@ -27,6 +27,8 @@ READY_FOR_QA = "ready_for_qa"
 READY_FOR_DEPLOYMENT = "ready_for_deployment"
 DEPLOYED = "deployed"
 
+ABANDONED = "abandoned"
+
 TASK_STATUSES = (
     READY_FOR_SPEC,
     SPEC_QA,
@@ -36,4 +38,5 @@ TASK_STATUSES = (
     READY_FOR_QA,
     READY_FOR_DEPLOYMENT,
     DEPLOYED,
+    ABANDONED,
 )

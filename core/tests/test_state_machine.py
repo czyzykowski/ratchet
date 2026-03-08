@@ -220,6 +220,67 @@ async def test_transition_unknown_task_raises_invalid_transition() -> None:
         await sm.transition(uuid.uuid4(), ev.SPEC_QA)
 
 
+# ---------------------------------------------------------------------------
+# Abandon transitions
+# ---------------------------------------------------------------------------
+
+
+async def test_abandon_from_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_SPEC)
+    await sm.transition(task_id, ev.ABANDONED)
+    assert await sm.get_current_status(task_id) == ev.ABANDONED
+
+
+async def test_abandon_from_ready_for_implementation() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task_id, ev.ABANDONED)
+    assert await sm.get_current_status(task_id) == ev.ABANDONED
+
+
+async def test_abandon_from_in_progress() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.ABANDONED)
+    assert await sm.get_current_status(task_id) == ev.ABANDONED
+
+
+async def test_abandon_from_blocked() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.BLOCKED)
+    await sm.transition(task_id, ev.ABANDONED)
+    assert await sm.get_current_status(task_id) == ev.ABANDONED
+
+
+async def test_abandon_from_deployed() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.DEPLOYED)
+    await sm.transition(task_id, ev.ABANDONED)
+    assert await sm.get_current_status(task_id) == ev.ABANDONED
+
+
+async def test_invalid_abandoned_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.ABANDONED)
+    with pytest.raises(InvalidTransitionError):
+        await sm.transition(task_id, ev.READY_FOR_SPEC)
+
+
+async def test_invalid_abandoned_to_in_progress() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.ABANDONED)
+    with pytest.raises(InvalidTransitionError):
+        await sm.transition(task_id, ev.IN_PROGRESS)
+
+
 async def test_multiple_sequential_transitions_produce_correct_status() -> None:
     sm, store = _make_sm()
     task_id = uuid.uuid4()

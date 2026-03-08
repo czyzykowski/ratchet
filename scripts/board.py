@@ -30,6 +30,7 @@ STATUS_LABELS = {
     ev.READY_FOR_QA: "READY FOR QA",
     ev.READY_FOR_DEPLOYMENT: "READY FOR DEPLOYMENT",
     ev.DEPLOYED: "DEPLOYED",
+    ev.ABANDONED: "ABANDONED",
 }
 
 
@@ -58,6 +59,7 @@ def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | No
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Print the current task board.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show full 36-char task UUIDs instead of truncated 8-char IDs.")
+    parser.add_argument("--abandoned", action="store_true", help="Show only abandoned tasks instead of the default board.")
     args = parser.parse_args()
 
     if not os.environ.get("DATABASE_URL"):
@@ -74,7 +76,7 @@ async def main() -> None:
         projects = await pm.list_projects()
         project_by_id = {p.id: p for p in projects}
 
-        tasks_by_status: dict[str, list[dict]] = {s: [] for s in STATUS_ORDER}
+        all_tasks: list[dict] = []
 
         for project in projects:
             project_task_events = await store.get_events(project.id, "project_tasks")
@@ -92,12 +94,34 @@ async def main() -> None:
                 task_events = await store.get_events(task_id, "task")
                 task = _build_task(task_id, project.id, task_events)
                 if task is not None:
-                    status = task["status"]
-                    if status not in tasks_by_status:
-                        tasks_by_status[status] = []
-                    tasks_by_status[status].append(task)
+                    all_tasks.append(task)
 
         print("=== RATCHET BOARD ===")
+
+        if args.abandoned:
+            abandoned_tasks = [t for t in all_tasks if t["status"] == ev.ABANDONED]
+            if not abandoned_tasks:
+                print("\nNo abandoned tasks found.")
+                return
+            label = STATUS_LABELS.get(ev.ABANDONED, "ABANDONED")
+            print(f"\n{label} ({len(abandoned_tasks)})")
+            for task in abandoned_tasks:
+                task_id_display = str(task["id"]) if args.verbose else str(task["id"])[:8]
+                project_name = project_by_id.get(task["project_id"], None)
+                project_label = project_name.name if project_name else "unknown"
+                count = task["refinement_count"]
+                ref_label = f"{count} refinement{'s' if count != 1 else ''}"
+                print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
+            return
+
+        tasks_by_status: dict[str, list[dict]] = {s: [] for s in STATUS_ORDER}
+        for task in all_tasks:
+            status = task["status"]
+            if status == ev.ABANDONED:
+                continue
+            if status not in tasks_by_status:
+                tasks_by_status[status] = []
+            tasks_by_status[status].append(task)
 
         total = sum(len(v) for v in tasks_by_status.values())
         if total == 0:
