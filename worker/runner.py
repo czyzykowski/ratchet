@@ -6,14 +6,22 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from uuid import UUID
+import subprocess as _subprocess
+from uuid import UUID, uuid4
 
 from core import events as ev
-from core.context_assembler import ContextAssembler, ContextAssemblyError
+from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
 from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
+from core.qa_runner import (
+    build_review_prompt,
+    get_git_diff,
+    load_qa_config,
+    parse_review_output,
+    run_qa_steps,
+)
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
@@ -213,6 +221,178 @@ async def run_once(
         await execution_manager.fail_execution(execution_id, failure_reason)
         await state_machine.transition(task.id, ev.BLOCKED)
         logger.info("Execution failed: task=%s reason=%s", task.id, failure_reason)
+
+
+async def get_next_qa_task(
+    store: Store,
+    project_manager: ProjectManager,
+    spec_manager: SpecManager,
+    state_machine: TaskStateMachine,
+) -> tuple[Task, Project, Spec] | None:
+    """Find oldest ready_for_qa task with active project and assigned spec.
+
+    Returns (task, project, spec) tuple or None if nothing ready.
+    """
+    active_projects = await project_manager.list_projects()
+    candidates: list[tuple[Task, Project, Spec]] = []
+
+    for project in active_projects:
+        project_task_events = await store.get_events(project.id, "project_tasks")
+
+        task_ids_seen: set[UUID] = set()
+        task_ids_ordered: list[UUID] = []
+        for event in project_task_events:
+            tid_str = event.payload.get("task_id")
+            if tid_str:
+                tid = UUID(tid_str)
+                if tid not in task_ids_seen:
+                    task_ids_seen.add(tid)
+                    task_ids_ordered.append(tid)
+
+        for task_id in task_ids_ordered:
+            task_events = await store.get_events(task_id, "task")
+            if not task_events:
+                continue
+
+            task = _build_task_from_events(task_id, project.id, task_events)
+            if task is None or task.status != ev.READY_FOR_QA:
+                continue
+
+            spec = await spec_manager.get_current_spec(task_id)
+            if spec is None:
+                logger.warning("Task %s has no spec assigned, skipping", task_id)
+                continue
+
+            candidates.append((task, project, spec))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda c: c[0].created_at)
+    return candidates[0]
+
+
+def _get_qa_fix_attempts(task_events: list) -> int:
+    """Read qa_fix_attempts from the latest TASK_STATUS_CHANGED event payload (default 0)."""
+    attempts = 0
+    for event in reversed(task_events):
+        if event.event_type == ev.TASK_STATUS_CHANGED:
+            val = event.payload.get("qa_fix_attempts")
+            if val is not None:
+                attempts = int(val)
+                break
+    return attempts
+
+
+async def run_qa_once(
+    store: Store,
+    invoker: "ClaudeCodeInvoker | None" = None,
+) -> None:
+    """Single-pass QA execution.
+
+    invoker parameter allows injection for testing — defaults to ClaudeCodeInvoker().
+    """
+    if invoker is None:
+        invoker = ClaudeCodeInvoker()
+
+    project_manager = ProjectManager(store)
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    # Step 1: find next QA task
+    result = await get_next_qa_task(store, project_manager, spec_manager, state_machine)
+    if result is None:
+        logger.info("No QA tasks ready. Exiting.")
+        return
+
+    task, project, spec = result
+
+    # Step 2: load QA config
+    config = load_qa_config(project.local_path)
+    if config is None:
+        logger.info(
+            "No QA config found for task=%s, transitioning to ready_for_deployment", task.id
+        )
+        await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
+        return
+
+    # Step 3: run tool steps
+    step_results = run_qa_steps(config, project.local_path)
+    failed_steps = [r for r in step_results if r.returncode != 0]
+
+    if failed_steps:
+        # Read current qa_fix_attempts
+        task_events = await store.get_events(task.id, "task")
+        qa_fix_attempts = _get_qa_fix_attempts(task_events)
+
+        if qa_fix_attempts >= config.max_fix_attempts:
+            combined_output = "\n\n".join(
+                f"Step '{r.step_name}':\n{r.output}" for r in failed_steps
+            )
+            logger.info(
+                "Max fix attempts reached for task=%s, transitioning to blocked", task.id
+            )
+            await state_machine.transition(
+                task.id,
+                ev.BLOCKED,
+                extra_payload={
+                    "failure_reason": combined_output,
+                    "qa_fix_attempts": qa_fix_attempts,
+                },
+            )
+            return
+
+        # Build auto-fix prompt and invoke Claude Code
+        failed_output = "\n\n".join(
+            f"Step '{r.step_name}' (exit {r.returncode}):\n{r.output}" for r in failed_steps
+        )
+        fix_prompt = (
+            f"{spec.content}\n\n"
+            f"QA tools found errors after implementation was marked complete:\n{failed_output}"
+        )
+        fix_context = ExecutionContext(
+            execution_id=uuid4(),
+            task_id=task.id,
+            spec_id=spec.id,
+            worktree_path=project.local_path,
+            prompt=fix_prompt,
+        )
+        logger.info(
+            "Auto-fix attempt %d/%d for task=%s", qa_fix_attempts + 1, config.max_fix_attempts, task.id
+        )
+        await asyncio.to_thread(invoker.invoke, fix_context)
+        await state_machine.transition(
+            task.id,
+            ev.READY_FOR_QA,
+            extra_payload={"qa_fix_attempts": qa_fix_attempts + 1},
+        )
+        return
+
+    # Step 4: all steps pass — run Claude review
+    diff = get_git_diff(project.local_path)
+    review_prompt = build_review_prompt(spec.content, diff, step_results)
+
+    review_proc = _subprocess.run(
+        ["claude", "-p", review_prompt, "--allowedTools", "Bash,Read,Glob,Grep"],
+        cwd=project.local_path,
+        capture_output=True,
+        text=True,
+    )
+    review_output = review_proc.stdout + review_proc.stderr
+
+    # Step 5: parse review output
+    review_result = parse_review_output(review_output)
+
+    if review_result.verdict == "passed":
+        logger.info("QA review passed for task=%s", task.id)
+        await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
+    else:
+        logger.info("QA review failed for task=%s", task.id)
+        await state_machine.transition(
+            task.id,
+            ev.BLOCKED,
+            extra_payload={"failure_reason": review_result.full_output},
+        )
 
 
 def main() -> None:

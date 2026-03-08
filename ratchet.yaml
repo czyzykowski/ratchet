@@ -1,0 +1,6 @@
+qa:
+  max_fix_attempts: 3
+  steps:
+    test: "pytest core/tests/ -v"
+    lint: "ruff check ."
+    typecheck: "mypy core/ worker/"
