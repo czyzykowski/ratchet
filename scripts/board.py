@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import sys
@@ -55,6 +56,10 @@ def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | No
 
 
 async def main() -> None:
+    parser = argparse.ArgumentParser(description="Print the current task board.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show full 36-char task UUIDs instead of truncated 8-char IDs.")
+    args = parser.parse_args()
+
     if not os.environ.get("DATABASE_URL"):
         print("Error: DATABASE_URL environment variable is not set.", file=sys.stderr)
         sys.exit(1)
@@ -106,12 +111,12 @@ async def main() -> None:
             label = STATUS_LABELS.get(status, status.upper())
             print(f"\n{label} ({len(task_list)})")
             for task in task_list:
-                short_id = str(task["id"])[:8]
+                task_id_display = str(task["id"]) if args.verbose else str(task["id"])[:8]
                 project_name = project_by_id.get(task["project_id"], None)
                 project_label = project_name.name if project_name else "unknown"
                 count = task["refinement_count"]
                 ref_label = f"{count} refinement{'s' if count != 1 else ''}"
-                print(f"  [{short_id}] {task['title']} — {project_label} — {ref_label}")
+                print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
     finally:
         await close_pool()
 
