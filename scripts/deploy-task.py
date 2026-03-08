@@ -16,7 +16,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--task-id", required=True, help="Task UUID")
     parser.add_argument(
-        "--branch", default="develop", help="Target branch to merge into (default: develop)"
+        "--branch",
+        default="develop",
+        help="Target branch to merge into (default: develop)",
     )
     return parser.parse_args()
 
@@ -115,7 +117,10 @@ async def main() -> None:
                 capture_output=True,
             )
         except subprocess.CalledProcessError as exc:
-            print(f"Error: git merge --squash failed: {exc.stderr.decode()}", file=sys.stderr)
+            print(
+                f"Error: git merge --squash failed: {exc.stderr.decode()}",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         commit_msg = f"feat: {title} (task/{task_id})"
@@ -132,13 +137,15 @@ async def main() -> None:
 
         try:
             subprocess.run(
-                ["git", "branch", "-d", branch_name],
+                ["git", "branch", "-D", branch_name],
                 cwd=local_path,
                 check=True,
                 capture_output=True,
             )
         except subprocess.CalledProcessError as exc:
-            print(f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr)
+            print(
+                f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr
+            )
 
         try:
             await state_machine.transition(task_id, ev.DEPLOYED)
