@@ -58,8 +58,14 @@ def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | No
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Print the current task board.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Show full 36-char task UUIDs instead of truncated 8-char IDs.")
-    parser.add_argument("--abandoned", action="store_true", help="Show only abandoned tasks instead of the default board.")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show full 36-char task UUIDs instead of truncated 8-char IDs.",
+    )
+    parser.add_argument(
+        "--abandoned", action="store_true",
+        help="Show only abandoned tasks instead of the default board.",
+    )
     args = parser.parse_args()
 
     if not os.environ.get("DATABASE_URL"):

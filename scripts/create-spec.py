@@ -10,9 +10,12 @@ import re
 import shutil
 import subprocess
 import sys
-import readline
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from core.store import Store
 
 
 def parse_args() -> argparse.Namespace:
@@ -74,7 +77,8 @@ After sufficient clarification, describe your understanding of the task in chunk
 asking after each chunk whether it looks right.
 Keep to chunked format even when the picture is clear.
 
-When the user types 'done', 'generate', or 'go', produce the spec in this exact format:
+When you have gathered enough information and confirmed your understanding with the user,
+produce the spec in this exact format:
 
 ## SPEC READY
 # Spec N: <title>
@@ -116,7 +120,7 @@ before generating the spec.
 
 
 def build_continuation_prompt(
-    initial_prompt: str, history: list[dict], user_input: str
+    initial_prompt: str, history: list[dict[str, str]], user_input: str
 ) -> str:
     return f"""{initial_prompt}
 
@@ -130,7 +134,7 @@ def build_continuation_prompt(
 
 
 def build_generation_prompt(
-    initial_prompt: str, history: list[dict], user_input: str
+    initial_prompt: str, history: list[dict[str, str]], user_input: str
 ) -> str:
     gen_instruction = (
         "The user has indicated they are ready to generate the spec. "
@@ -158,7 +162,7 @@ def extract_spec(output: str) -> str:
     return output[idx + len(marker) :].strip()
 
 
-async def load_task_info(task_id: UUID, store):
+async def load_task_info(task_id: UUID, store: Store) -> tuple[str | None, str | None, UUID | None]:
     """Return (current_status, task_title, project_id) from event replay."""
     from core import events as ev
 
@@ -178,7 +182,7 @@ async def load_task_info(task_id: UUID, store):
     return status, task_title, project_id
 
 
-async def assign_spec_to_task(task_id: UUID, spec_content: str, store) -> None:
+async def assign_spec_to_task(task_id: UUID, spec_content: str, store: Store) -> None:
     """Create and assign spec, then advance task status."""
     from core import events as ev
     from core.spec_manager import SpecManager
@@ -203,6 +207,43 @@ async def assign_spec_to_task(task_id: UUID, spec_content: str, store) -> None:
     except InvalidTransitionError as exc:
         print(f"Error transitioning task status: {exc}", file=sys.stderr)
         raise
+
+
+async def _handle_spec_ready(
+    output: str,
+    task_id: UUID,
+    task_title: str | None,
+    store: Store,
+) -> bool:
+    """Check for ## SPEC READY marker and handle save confirmation.
+
+    Returns True if spec was saved, False if marker absent or user declined.
+    """
+    if "## SPEC READY" not in output:
+        return False
+
+    spec_content = extract_spec(output)
+
+    try:
+        confirm = input("\nSave and assign this spec? [y/n] ").strip().lower()
+    except KeyboardInterrupt:
+        print("\nSession ended, spec not saved.")
+        sys.exit(0)
+
+    if confirm != "y":
+        return False
+
+    short_title = slugify(task_title[:40]) if task_title else "spec"
+    short_id = str(task_id)[:8]
+    filename = f"{short_title}-{short_id}.md"
+    specs_dir = Path("specs")
+    specs_dir.mkdir(exist_ok=True)
+    spec_file = specs_dir / filename
+    spec_file.write_text(spec_content)
+
+    await assign_spec_to_task(task_id, spec_content, store)
+    print(f"Spec saved to specs/{filename} and assigned to task")
+    return True
 
 
 async def main() -> None:
@@ -244,6 +285,10 @@ async def main() -> None:
             )
             sys.exit(1)
 
+        if project_id is None:
+            print(f"Error: task {task_id} has no project.", file=sys.stderr)
+            sys.exit(1)
+
         pm = ProjectManager(store)
         project = await pm.get_project(project_id)
         if project is None:
@@ -268,13 +313,16 @@ async def main() -> None:
             print("\nSession ended, spec not saved.")
             sys.exit(0)
 
-        initial_prompt = build_initial_prompt(intent_md, task_title, user_description)
-        history: list[dict] = []
+        initial_prompt = build_initial_prompt(intent_md, task_title or "", user_description)
+        history: list[dict[str, str]] = []
 
         print("\n--- Claude ---")
         output = run_claude(initial_prompt, local_path, debug)
         history.append({"role": "user", "content": user_description})
         history.append({"role": "assistant", "content": output})
+
+        if await _handle_spec_ready(output, task_id, task_title, store):
+            return
 
         while True:
             try:
@@ -296,43 +344,16 @@ async def main() -> None:
             print("\n--- Claude ---")
             output = run_claude(prompt, local_path, debug)
 
+            if await _handle_spec_ready(output, task_id, task_title, store):
+                break
+
             if is_trigger:
-                if "## SPEC READY" not in output:
-                    print(
-                        "\nWarning: ## SPEC READY marker not found. Continuing conversation."
-                    )
-                    history.append({"role": "user", "content": user_input})
-                    history.append({"role": "assistant", "content": output})
-                    continue
+                print(
+                    "\nWarning: ## SPEC READY marker not found. Continuing conversation."
+                )
 
-                spec_content = extract_spec(output)
-
-                try:
-                    confirm = (
-                        input("\nSave and assign this spec? [y/n] ").strip().lower()
-                    )
-                except KeyboardInterrupt:
-                    print("\nSession ended, spec not saved.")
-                    sys.exit(0)
-
-                if confirm == "y":
-                    short_title = slugify(task_title[:40]) if task_title else "spec"
-                    short_id = str(task_id)[:8]
-                    filename = f"{short_title}-{short_id}.md"
-                    specs_dir = Path("specs")
-                    specs_dir.mkdir(exist_ok=True)
-                    spec_file = specs_dir / filename
-                    spec_file.write_text(spec_content)
-
-                    await assign_spec_to_task(task_id, spec_content, store)
-                    print(f"Spec saved to specs/{filename} and assigned to task")
-                    break
-                else:
-                    history.append({"role": "user", "content": user_input})
-                    history.append({"role": "assistant", "content": output})
-            else:
-                history.append({"role": "user", "content": user_input})
-                history.append({"role": "assistant", "content": output})
+            history.append({"role": "user", "content": user_input})
+            history.append({"role": "assistant", "content": output})
 
     except KeyboardInterrupt:
         print("\nSession ended, spec not saved.")

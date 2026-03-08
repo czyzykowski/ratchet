@@ -6,18 +6,13 @@ import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from core.qa_runner import (
     QaConfig,
-    QaReviewResult,
     QaStep,
-    QaStepResult,
     load_qa_config,
     parse_review_output,
     run_qa_steps,
 )
-
 
 # ---------------------------------------------------------------------------
 # load_qa_config

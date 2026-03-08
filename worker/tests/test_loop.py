@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from core import events as ev
 from core.invoker import InvocationResult

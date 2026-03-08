@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -124,7 +124,8 @@ def build_review_prompt(
     Instructs Claude to output QA_PASSED: or QA_FAILED: marker.
     """
     steps_summary = "\n\n".join(
-        f"### Step: {r.step_name}\nCommand: `{r.command}`\nReturn code: {r.returncode}\n```\n{r.output}\n```"
+        f"### Step: {r.step_name}\nCommand: `{r.command}`\n"
+        f"Return code: {r.returncode}\n```\n{r.output}\n```"
         for r in step_results
     )
 
@@ -144,7 +145,8 @@ You are performing a QA review of a completed implementation task.
 
 ## Instructions
 
-Review whether the implementation satisfies the spec's success criteria, given the tool results and diff above.
+Review whether the implementation satisfies the spec's success criteria,
+given the tool results and diff above.
 
 - If the implementation is correct and all success criteria are met, output exactly:
   QA_PASSED: <brief rationale>
@@ -170,4 +172,5 @@ def parse_review_output(output: str) -> QaReviewResult:
             idx = output.index("QA_FAILED:")
             return QaReviewResult(verdict="failed", full_output=output[idx:].strip())
 
-    return QaReviewResult(verdict="failed", full_output=output.strip() or "No QA marker found in output")
+    fallback = output.strip() or "No QA marker found in output"
+    return QaReviewResult(verdict="failed", full_output=fallback)

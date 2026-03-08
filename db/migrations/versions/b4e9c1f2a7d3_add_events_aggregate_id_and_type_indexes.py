@@ -20,7 +20,9 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     """Add single-column indexes on events.aggregate_id and events.aggregate_type."""
     op.execute("""CREATE INDEX IF NOT EXISTS events_aggregate_id_idx ON events (aggregate_id)""")
-    op.execute("""CREATE INDEX IF NOT EXISTS events_aggregate_type_idx ON events (aggregate_type)""")
+    op.execute(
+        """CREATE INDEX IF NOT EXISTS events_aggregate_type_idx ON events (aggregate_type)"""
+    )
 
 
 def downgrade() -> None:

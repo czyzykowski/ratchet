@@ -15,7 +15,8 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     ev.READY_FOR_IMPLEMENTATION: {ev.IN_PROGRESS, ev.BLOCKED, ev.READY_FOR_SPEC, ev.ABANDONED},
     ev.IN_PROGRESS: {ev.BLOCKED, ev.READY_FOR_QA, ev.READY_FOR_SPEC, ev.ABANDONED},
     ev.READY_FOR_QA: {
-        ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT, ev.BLOCKED, ev.READY_FOR_SPEC, ev.READY_FOR_IMPLEMENTATION, ev.ABANDONED
+        ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT, ev.BLOCKED,
+        ev.READY_FOR_SPEC, ev.READY_FOR_IMPLEMENTATION, ev.ABANDONED
     },
     ev.READY_FOR_DEPLOYMENT: {
         ev.DEPLOYED, ev.BLOCKED, ev.READY_FOR_SPEC, ev.READY_FOR_IMPLEMENTATION, ev.ABANDONED
@@ -71,7 +72,9 @@ class TaskStateMachine:
                 f"Cannot transition task {task_id} from {current!r} to {new_status!r}"
             )
         # "status" key required by current_tasks materialized view (payload->>'status')
-        payload: dict[str, Any] = {"from_status": current, "to_status": new_status, "status": new_status}
+        payload: dict[str, Any] = {
+            "from_status": current, "to_status": new_status, "status": new_status
+        }
         if extra_payload:
             payload.update(extra_payload)
         return await self._store.append_event(

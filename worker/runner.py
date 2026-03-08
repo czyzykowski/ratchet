@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from pathlib import Path
 import subprocess as _subprocess
-from uuid import UUID, uuid4
-
+from pathlib import Path
 from typing import Any
+from uuid import UUID, uuid4
 
 from core import events as ev
 from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
@@ -291,7 +290,7 @@ def _get_qa_fix_attempts(task_events: list[Any]) -> int:
 
 async def run_qa_once(
     store: Store,
-    invoker: "ClaudeCodeInvoker | None" = None,
+    invoker: ClaudeCodeInvoker | None = None,
 ) -> bool:
     """Single-pass QA execution.
 
@@ -364,7 +363,8 @@ async def run_qa_once(
             prompt=fix_prompt,
         )
         logger.info(
-            "Auto-fix attempt %d/%d for task=%s", qa_fix_attempts + 1, config.max_fix_attempts, task.id
+            "Auto-fix attempt %d/%d for task=%s",
+            qa_fix_attempts + 1, config.max_fix_attempts, task.id
         )
         await asyncio.to_thread(invoker.invoke, fix_context)
         await state_machine.transition(

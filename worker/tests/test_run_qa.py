@@ -5,8 +5,6 @@ from __future__ import annotations
 import uuid
 from unittest.mock import patch
 
-import pytest
-
 from core import events as ev
 from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
