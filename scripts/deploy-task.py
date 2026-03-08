@@ -20,6 +20,11 @@ def parse_args() -> argparse.Namespace:
         default="develop",
         help="Target branch to merge into (default: develop)",
     )
+    parser.add_argument(
+        "--skip-merge",
+        action="store_true",
+        help="Skip all git operations and advance task directly to deployed status",
+    )
     return parser.parse_args()
 
 
@@ -79,73 +84,74 @@ async def main() -> None:
             print(f"Error: project {project_id} not found.", file=sys.stderr)
             sys.exit(1)
 
-        execution_events = await store.get_events(task_id, "task_executions")
-        branch_name = None
-        for event in reversed(execution_events):
-            if event.event_type == ev.EXECUTION_STARTED:
-                bn = event.payload.get("branch_name")
-                if bn:
-                    branch_name = bn
-                    break
+        if not args.skip_merge:
+            execution_events = await store.get_events(task_id, "task_executions")
+            branch_name = None
+            for event in reversed(execution_events):
+                if event.event_type == ev.EXECUTION_STARTED:
+                    bn = event.payload.get("branch_name")
+                    if bn:
+                        branch_name = bn
+                        break
 
-        if branch_name is None:
-            print(
-                "Error: branch_name not found in execution events for this task.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            if branch_name is None:
+                print(
+                    "Error: branch_name not found in execution events for this task.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
-        local_path = project.local_path
-        target_branch = args.branch
+            local_path = project.local_path
+            target_branch = args.branch
 
-        try:
-            subprocess.run(
-                ["git", "checkout", target_branch],
-                cwd=local_path,
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            print(f"Error: git checkout failed: {exc.stderr.decode()}", file=sys.stderr)
-            sys.exit(1)
+            try:
+                subprocess.run(
+                    ["git", "checkout", target_branch],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"Error: git checkout failed: {exc.stderr.decode()}", file=sys.stderr)
+                sys.exit(1)
 
-        try:
-            subprocess.run(
-                ["git", "merge", "--squash", branch_name],
-                cwd=local_path,
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            print(
-                f"Error: git merge --squash failed: {exc.stderr.decode()}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            try:
+                subprocess.run(
+                    ["git", "merge", "--squash", branch_name],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(
+                    f"Error: git merge --squash failed: {exc.stderr.decode()}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
-        commit_msg = f"feat: {title} (task/{task_id})"
-        try:
-            subprocess.run(
-                ["git", "commit", "-m", commit_msg],
-                cwd=local_path,
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            print(f"Error: git commit failed: {exc.stderr.decode()}", file=sys.stderr)
-            sys.exit(1)
+            commit_msg = f"feat: {title} (task/{task_id})"
+            try:
+                subprocess.run(
+                    ["git", "commit", "-m", commit_msg],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(f"Error: git commit failed: {exc.stderr.decode()}", file=sys.stderr)
+                sys.exit(1)
 
-        try:
-            subprocess.run(
-                ["git", "branch", "-D", branch_name],
-                cwd=local_path,
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            print(
-                f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr
-            )
+            try:
+                subprocess.run(
+                    ["git", "branch", "-D", branch_name],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                print(
+                    f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr
+                )
 
         try:
             await state_machine.transition(task_id, ev.DEPLOYED)
@@ -153,7 +159,10 @@ async def main() -> None:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        print(f"Deployed task {title!r} — merged to {target_branch}")
+        if args.skip_merge:
+            print(f"Deployed task {title!r} — skipped merge")
+        else:
+            print(f"Deployed task {title!r} — merged to {args.branch}")
     finally:
         await close_pool()
 
