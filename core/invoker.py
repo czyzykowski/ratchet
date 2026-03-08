@@ -82,6 +82,7 @@ class ClaudeCodeInvoker:
             path = Path(traces_dir)
             path.mkdir(parents=True, exist_ok=True)
             self.traces_dir = str(path.resolve())
+        assert Path(self.traces_dir).is_dir(), f"traces dir not created: {self.traces_dir}"
 
     def invoke(self, context: ExecutionContext) -> InvocationResult:
         """Invoke Claude Code with assembled context.

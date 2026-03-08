@@ -111,7 +111,12 @@ async def _find_last_failure_reason(store, task_id: UUID) -> str | None:
                 FROM events
                 WHERE aggregate_type = 'execution'
                   AND event_type = 'execution.failed'
-                  AND payload->>'task_id' = %s
+                  AND aggregate_id IN (
+                    SELECT aggregate_id FROM events
+                    WHERE aggregate_type = 'execution'
+                      AND event_type = 'execution.started'
+                      AND payload->>'task_id' = %s
+                  )
                 ORDER BY sequence DESC
                 LIMIT 1
                 """,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from pathlib import Path
 from uuid import UUID
 
 from core import events as ev
@@ -173,6 +175,12 @@ async def run_once(
         await state_machine.transition(task.id, ev.BLOCKED)
         return
 
+    if os.environ.get('RATCHET_DEBUG') == '1':
+        print(f'[DEBUG] Assembled prompt ({len(context.prompt)} chars):')
+        print(context.prompt[:2000])  # first 2000 chars to avoid overwhelming output
+        print(f'[DEBUG] Worktree: {context.worktree_path}')
+        print('[DEBUG] Command: claude -p <prompt> --allowedTools Bash,Read,Write,Edit,Glob,Grep')
+
     try:
         invocation_result = await asyncio.to_thread(invoker.invoke, context)
     except Exception as exc:
@@ -181,6 +189,16 @@ async def run_once(
         await execution_manager.fail_execution(execution_id, failure_reason)
         await state_machine.transition(task.id, ev.BLOCKED)
         raise
+
+    if os.environ.get('RATCHET_DEBUG') == '1':
+        print(f'[DEBUG] Invocation status: {invocation_result.status}')
+        print(f'[DEBUG] Trace path: {invocation_result.trace_path}')
+        print('[DEBUG] Raw output preview:')
+        try:
+            trace_content = Path(invocation_result.trace_path).read_text()[:1000]
+            print(trace_content)
+        except Exception:
+            print('[DEBUG] Could not read trace file')
 
     if invocation_result.status == "completed":
         await execution_manager.complete_execution(execution_id)

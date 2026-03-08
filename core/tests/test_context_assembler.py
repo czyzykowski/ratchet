@@ -322,3 +322,22 @@ def test_build_prompt_section_order() -> None:
     assert prompt.index("## Instructions") < prompt.index("## Project Intent")
     assert prompt.index("## Project Intent") < prompt.index("## Knowledge")
     assert prompt.index("## Knowledge") < prompt.index("## Spec")
+
+
+def test_build_prompt_contains_completion_instructions() -> None:
+    prompt = build_prompt("intent text", "spec text")
+    assert "COMPLETED:" in prompt
+    assert "BLOCKED:" in prompt
+    assert "## Completion Instructions" in prompt
+
+
+async def test_assemble_prompt_contains_completion_instructions(tmp_path: Path) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, _, _ = await _seed_store(store, worktree)
+
+    assembler = ContextAssembler(store)
+    ctx = await assembler.assemble(execution_id)
+
+    assert "COMPLETED:" in ctx.prompt
+    assert "BLOCKED:" in ctx.prompt

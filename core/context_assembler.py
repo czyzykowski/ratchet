@@ -26,6 +26,35 @@ _KNOWLEDGE_PLACEHOLDER = """\
 
 ---"""
 
+_COMPLETION_INSTRUCTIONS = """\
+---
+
+## Completion Instructions
+When you have finished all tasks and verifications, you MUST output one of these markers:
+
+On success:
+```
+COMPLETED: <spec title or brief description>
+Tasks completed: N/N
+Files created/modified:
+- <file 1>
+- <file 2>
+```
+
+On failure or if you cannot complete the task:
+```
+BLOCKED: <task name that failed>
+Reason: <what went wrong>
+Missing:
+- <item 1>
+User action required:
+<exact steps to unblock>
+Resume: re-run after fixing the above
+```
+
+These markers are parsed by the orchestrator. Without them the execution will be
+marked as failed."""
+
 
 @dataclass
 class ExecutionContext:
@@ -66,6 +95,7 @@ def build_prompt(intent_content: str, spec_content: str) -> str:
         "---",
         _KNOWLEDGE_PLACEHOLDER,
         f"## Spec\n{spec_content}",
+        _COMPLETION_INSTRUCTIONS,
     ])
 
 
