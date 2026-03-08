@@ -15,6 +15,9 @@ core/
   state_machine.py — InvalidTransitionError, TaskStateMachine
   spec_manager.py  — SpecManager
   db.py            — async connection pool, reads DATABASE_URL from environment
+  execution_manager.py — ExecutionManager, prepare/cleanup worktree environment
+  context_assembler.py — ContextAssembler, ExecutionContext, assembles Claude Code prompt
+  invoker.py           — ClaudeCodeInvoker, runs Claude Code subprocess, captures traces
   tests/           — unit tests, no database required
 db/
   migrations/      — Alembic migrations (alembic upgrade head)
@@ -23,6 +26,11 @@ docs/
   INTENT.md        — project intent statement (injected by orchestrator at runtime)
 scripts/
   run-spec.sh      — execute a spec file via Claude Code
+worker/
+  __init__.py
+  __main__.py     — enables python -m worker
+  runner.py       — get_next_task, run_once, main — single-pass task executor
+  tests/          — integration tests
 pyproject.toml     — dependencies
 flake.nix          — reproducible dev shell (nix develop)
 .env.example       — connection string templates
@@ -43,6 +51,11 @@ flake.nix          — reproducible dev shell (nix develop)
 - `PostgresStore` uses lazy import of `core.db` to avoid psycopg import during test collection
 - Events are append-only — never update or delete rows in the `events` table
 - State is always derived from event replay — do not trust materialized views for correctness
+- `ContextAssembler` assembles execution prompt from INTENT.md, spec content, and knowledge placeholder
+- `ClaudeCodeInvoker` runs `claude -p <prompt>` as subprocess in worktree, detects COMPLETED/BLOCKED markers
+- Traces written to `$XDG_DATA_HOME/ratchet/traces/` (default `~/.local/share/ratchet/traces/`)
+- `flake.nix` shellHook sets `LD_LIBRARY_PATH` for libpq — required for psycopg to find PostgreSQL client library
+- All scripts must be run with `.venv/bin/python` — system Python does not have dependencies
 
 ## Running Things
 
@@ -60,7 +73,14 @@ python db/smoke_test.py
 alembic upgrade head
 
 # Execute a spec
-scripts/run-spec.sh specs/02-state-machine.md
+scripts/run-spec.sh specs/10-update-claude-md.md
+
+# Run worker single pass (pick and execute next ready task)
+.venv/bin/python -m worker
+
+# Run operational scripts (must use .venv/bin/python)
+.venv/bin/python scripts/board.py
+.venv/bin/python scripts/add-task.py --project-id <uuid> --title "My task"
 ```
 
 ## Operational Scripts
