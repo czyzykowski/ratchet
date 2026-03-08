@@ -40,7 +40,7 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
         print(prompt, file=sys.stderr)
         print("--- END PROMPT ---\n", file=sys.stderr)
 
-    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob,WebSearch"]
+    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob,WebSearch,Bash"]
     proc = subprocess.Popen(
         cmd,
         cwd=local_path,
@@ -162,7 +162,9 @@ def extract_spec(output: str) -> str:
     return output[idx + len(marker) :].strip()
 
 
-async def load_task_info(task_id: UUID, store: Store) -> tuple[str | None, str | None, UUID | None]:
+async def load_task_info(
+    task_id: UUID, store: Store
+) -> tuple[str | None, str | None, UUID | None]:
     """Return (current_status, task_title, project_id) from event replay."""
     from core import events as ev
 
@@ -313,7 +315,9 @@ async def main() -> None:
             print("\nSession ended, spec not saved.")
             sys.exit(0)
 
-        initial_prompt = build_initial_prompt(intent_md, task_title or "", user_description)
+        initial_prompt = build_initial_prompt(
+            intent_md, task_title or "", user_description
+        )
         history: list[dict[str, str]] = []
 
         print("\n--- Claude ---")
