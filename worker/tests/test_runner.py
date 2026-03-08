@@ -116,7 +116,7 @@ async def test_no_tasks_ready_logs_and_returns(caplog: pytest.LogCaptureFixture)
     with caplog.at_level(logging.INFO, logger="worker.runner"):
         await run_once(store, invoker)
 
-    assert "No tasks ready for implementation. Exiting." in caplog.text
+    assert "No tasks ready for implementation." in caplog.text
     invoker.invoke.assert_not_called()
 
 
@@ -164,7 +164,7 @@ async def test_task_with_no_spec_is_skipped_with_warning(
         await run_once(store, invoker)
 
     assert "has no spec assigned, skipping" in caplog.text
-    assert "No tasks ready for implementation. Exiting." in caplog.text
+    assert "No tasks ready for implementation." in caplog.text
     invoker.invoke.assert_not_called()
 
 

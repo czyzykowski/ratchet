@@ -126,10 +126,11 @@ async def get_next_task(
 async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
-) -> None:
+) -> bool:
     """Single-pass task execution.
 
     invoker parameter allows injection for testing — defaults to ClaudeCodeInvoker().
+    Returns True if a task was found and processed, False otherwise.
     """
     if invoker is None:
         invoker = ClaudeCodeInvoker()
@@ -140,8 +141,8 @@ async def run_once(
 
     result = await get_next_task(store, project_manager, spec_manager, state_machine)
     if result is None:
-        logger.info("No tasks ready for implementation. Exiting.")
-        return
+        logger.info("No tasks ready for implementation.")
+        return False
 
     task, project, spec = result
     execution_manager = ExecutionManager(store, project.local_path)
@@ -164,7 +165,7 @@ async def run_once(
             "Environment preparation failed: task=%s reason=%s", task.id, failure_reason
         )
         await state_machine.transition(task.id, ev.BLOCKED)
-        return
+        return True
 
     execution_id = execution.id
     logger.info("Execution started: task=%s execution=%s", task.id, execution_id)
@@ -181,7 +182,7 @@ async def run_once(
         )
         await execution_manager.fail_execution(execution_id, failure_reason)
         await state_machine.transition(task.id, ev.BLOCKED)
-        return
+        return True
 
     if os.environ.get('RATCHET_DEBUG') == '1':
         print(f'[DEBUG] Assembled prompt ({len(context.prompt)} chars):')
@@ -221,6 +222,8 @@ async def run_once(
         await execution_manager.fail_execution(execution_id, failure_reason)
         await state_machine.transition(task.id, ev.BLOCKED)
         logger.info("Execution failed: task=%s reason=%s", task.id, failure_reason)
+
+    return True
 
 
 async def get_next_qa_task(
@@ -287,10 +290,11 @@ def _get_qa_fix_attempts(task_events: list) -> int:
 async def run_qa_once(
     store: Store,
     invoker: "ClaudeCodeInvoker | None" = None,
-) -> None:
+) -> bool:
     """Single-pass QA execution.
 
     invoker parameter allows injection for testing — defaults to ClaudeCodeInvoker().
+    Returns True if a QA task was found and processed, False otherwise.
     """
     if invoker is None:
         invoker = ClaudeCodeInvoker()
@@ -302,8 +306,8 @@ async def run_qa_once(
     # Step 1: find next QA task
     result = await get_next_qa_task(store, project_manager, spec_manager, state_machine)
     if result is None:
-        logger.info("No QA tasks ready. Exiting.")
-        return
+        logger.info("No QA tasks ready.")
+        return False
 
     task, project, spec = result
 
@@ -314,7 +318,7 @@ async def run_qa_once(
             "No QA config found for task=%s, transitioning to ready_for_deployment", task.id
         )
         await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
-        return
+        return True
 
     # Step 3: run tool steps
     step_results = run_qa_steps(config, project.local_path)
@@ -340,7 +344,7 @@ async def run_qa_once(
                     "qa_fix_attempts": qa_fix_attempts,
                 },
             )
-            return
+            return True
 
         # Build auto-fix prompt and invoke Claude Code
         failed_output = "\n\n".join(
@@ -366,7 +370,7 @@ async def run_qa_once(
             ev.READY_FOR_QA,
             extra_payload={"qa_fix_attempts": qa_fix_attempts + 1},
         )
-        return
+        return True
 
     # Step 4: all steps pass — run Claude review
     diff = get_git_diff(project.local_path)
@@ -394,6 +398,24 @@ async def run_qa_once(
             extra_payload={"failure_reason": review_result.full_output},
         )
 
+    return True
+
+
+async def main_loop(store: Store, invoker: ClaudeCodeInvoker) -> None:
+    """Poll for both implementation and QA tasks indefinitely.
+
+    Sleeps 30 s only when both run_once and run_qa_once found nothing to do.
+    Exits cleanly on KeyboardInterrupt.
+    """
+    try:
+        while True:
+            did_impl = await run_once(store, invoker)
+            did_qa = await run_qa_once(store, invoker)
+            if not did_impl and not did_qa:
+                await asyncio.sleep(30)
+    except KeyboardInterrupt:
+        logger.info("Worker stopped.")
+
 
 def main() -> None:
     """Initialize all components with PostgresStore and run once."""
@@ -411,5 +433,26 @@ async def _main_async() -> None:
     invoker = ClaudeCodeInvoker()
     try:
         await run_once(store, invoker)
+        await run_qa_once(store, invoker)
     finally:
         await close_pool()
+
+
+async def _main_loop_async() -> None:
+    from core.db import close_pool
+    from core.store import PostgresStore
+
+    store = PostgresStore()
+    invoker = ClaudeCodeInvoker()
+    try:
+        await main_loop(store, invoker)
+    finally:
+        await close_pool()
+
+
+def main_loop_entry() -> None:
+    """Initialize all components with PostgresStore and run the continuous loop."""
+    import logging as _logging
+
+    _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    asyncio.run(_main_loop_async())
