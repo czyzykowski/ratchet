@@ -36,7 +36,7 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
         print(prompt, file=sys.stderr)
         print("--- END PROMPT ---\n", file=sys.stderr)
 
-    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob"]
+    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob,WebSearch"]
     proc = subprocess.Popen(
         cmd,
         cwd=local_path,
@@ -307,7 +307,9 @@ async def main() -> None:
                 spec_content = extract_spec(output)
 
                 try:
-                    confirm = input("\nSave and assign this spec? [y/n] ").strip().lower()
+                    confirm = (
+                        input("\nSave and assign this spec? [y/n] ").strip().lower()
+                    )
                 except KeyboardInterrupt:
                     print("\nSession ended, spec not saved.")
                     sys.exit(0)
