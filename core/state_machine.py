@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from core import events as ev
@@ -49,7 +50,7 @@ class TaskStateMachine:
         return status
 
     async def transition(
-        self, task_id: UUID, new_status: str, extra_payload: dict | None = None
+        self, task_id: UUID, new_status: str, extra_payload: dict[str, Any] | None = None
     ) -> Event:
         """Validate and execute a status transition.
 
@@ -70,7 +71,7 @@ class TaskStateMachine:
                 f"Cannot transition task {task_id} from {current!r} to {new_status!r}"
             )
         # "status" key required by current_tasks materialized view (payload->>'status')
-        payload: dict = {"from_status": current, "to_status": new_status, "status": new_status}
+        payload: dict[str, Any] = {"from_status": current, "to_status": new_status, "status": new_status}
         if extra_payload:
             payload.update(extra_payload)
         return await self._store.append_event(

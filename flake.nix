@@ -23,6 +23,7 @@
             pkgs.python312
             pkgs.python312Packages.pip
             pkgs.ruff
+            pkgs.mypy
             pkgs.postgresql_16
             pkgs.git
           ];

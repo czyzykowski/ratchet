@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess as _subprocess
 from uuid import UUID, uuid4
 
+from typing import Any
+
 from core import events as ev
 from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
 from core.execution_manager import ExecutionManager
@@ -29,7 +31,7 @@ from core.store import Store
 logger = logging.getLogger(__name__)
 
 
-def _build_task_from_events(task_id: UUID, project_id: UUID, events: list) -> Task | None:
+def _build_task_from_events(task_id: UUID, project_id: UUID, events: list[Any]) -> Task | None:
     """Replay task events to build a Task model. Returns None if no TASK_CREATED event found."""
     task: Task | None = None
     current_spec_id: UUID | None = None
@@ -275,7 +277,7 @@ async def get_next_qa_task(
     return candidates[0]
 
 
-def _get_qa_fix_attempts(task_events: list) -> int:
+def _get_qa_fix_attempts(task_events: list[Any]) -> int:
     """Read qa_fix_attempts from the latest TASK_STATUS_CHANGED event payload (default 0)."""
     attempts = 0
     for event in reversed(task_events):

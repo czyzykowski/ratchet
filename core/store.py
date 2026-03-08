@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID, uuid4
 
 from core.models import Event
@@ -19,7 +19,7 @@ class Store(Protocol):
         aggregate_id: UUID,
         aggregate_type: str,
         event_type: str,
-        payload: dict,
+        payload: dict[str, Any],
         schema_version: int = 1,
     ) -> Event: ...
 
@@ -44,7 +44,7 @@ class InMemoryStore:
         aggregate_id: UUID,
         aggregate_type: str,
         event_type: str,
-        payload: dict,
+        payload: dict[str, Any],
         schema_version: int = 1,
     ) -> Event:
         self._seq += 1
@@ -93,7 +93,7 @@ class PostgresStore:
         aggregate_id: UUID,
         aggregate_type: str,
         event_type: str,
-        payload: dict,
+        payload: dict[str, Any],
         schema_version: int = 1,
     ) -> Event:
         pool = await self._get_pool()
@@ -117,6 +117,7 @@ class PostgresStore:
                     ),
                 )
                 row = await cur.fetchone()
+        assert row is not None
         return Event(
             id=row[0],
             aggregate_id=row[1],

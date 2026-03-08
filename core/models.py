@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ class Event(BaseModel):
     aggregate_id: UUID
     aggregate_type: str
     event_type: str
-    payload: dict
+    payload: dict[str, Any]
     schema_version: int = 1
     occurred_at: datetime
     sequence: int
