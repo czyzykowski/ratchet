@@ -6,11 +6,18 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-      in {
+      in
+      {
         devShells.default = pkgs.mkShell {
           buildInputs = [
             pkgs.python312
@@ -29,6 +36,8 @@
               echo "WARNING: TEST_DATABASE_URL is not set."
               echo "  Example: export TEST_DATABASE_URL=postgresql+psycopg://ratchet_test@127.0.0.1:5432/ratchet"
             fi
+            export LD_LIBRARY_PATH="${pkgs.postgresql_16.lib}/lib:$LD_LIBRARY_PATH"
+            export PYTHONPATH=$(pwd)
           '';
         };
       }
