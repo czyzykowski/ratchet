@@ -42,6 +42,7 @@ asyncio_mode = "auto"
 strict = true
 python_version = "3.12"
 exclude = ["core/tests/", "worker/tests/"]
+python_executable = ".venv/bin/python"
 
 [[tool.mypy.overrides]]
 module = ["psycopg.*", "psycopg_pool.*"]
