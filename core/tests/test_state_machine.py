@@ -102,6 +102,70 @@ async def test_transition_blocked_to_ready_for_implementation() -> None:
     assert await sm.get_current_status(task_id) == ev.READY_FOR_IMPLEMENTATION
 
 
+async def test_transition_ready_for_qa_to_ready_for_deployment() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_QA)
+    await sm.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_DEPLOYMENT
+
+
+async def test_transition_spec_qa_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.SPEC_QA)
+    await sm.transition(task_id, ev.READY_FOR_SPEC)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_SPEC
+
+
+async def test_transition_ready_for_implementation_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task_id, ev.READY_FOR_SPEC)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_SPEC
+
+
+async def test_transition_in_progress_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.READY_FOR_SPEC)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_SPEC
+
+
+async def test_transition_ready_for_qa_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_QA)
+    await sm.transition(task_id, ev.READY_FOR_SPEC)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_SPEC
+
+
+async def test_transition_ready_for_qa_to_ready_for_implementation() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_QA)
+    await sm.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_IMPLEMENTATION
+
+
+async def test_transition_ready_for_deployment_to_ready_for_spec() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_DEPLOYMENT)
+    await sm.transition(task_id, ev.READY_FOR_SPEC)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_SPEC
+
+
+async def test_transition_ready_for_deployment_to_ready_for_implementation() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.READY_FOR_DEPLOYMENT)
+    await sm.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    assert await sm.get_current_status(task_id) == ev.READY_FOR_IMPLEMENTATION
+
+
 # ---------------------------------------------------------------------------
 # Invalid transitions
 # ---------------------------------------------------------------------------
@@ -113,14 +177,6 @@ async def test_invalid_ready_for_spec_to_in_progress() -> None:
     await _seed_task(store, task_id, ev.READY_FOR_SPEC)
     with pytest.raises(InvalidTransitionError):
         await sm.transition(task_id, ev.IN_PROGRESS)
-
-
-async def test_invalid_in_progress_to_ready_for_spec() -> None:
-    sm, store = _make_sm()
-    task_id = uuid.uuid4()
-    await _seed_task(store, task_id, ev.IN_PROGRESS)
-    with pytest.raises(InvalidTransitionError):
-        await sm.transition(task_id, ev.READY_FOR_SPEC)
 
 
 async def test_invalid_deployed_to_in_progress() -> None:
