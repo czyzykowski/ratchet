@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import readline
 from pathlib import Path
 from uuid import UUID
 
