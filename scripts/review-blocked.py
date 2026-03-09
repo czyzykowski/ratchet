@@ -94,15 +94,40 @@ async def main() -> None:
 
 
 async def _find_last_failure_reason(store, task_id: UUID) -> str | None:
-    """Find the failure reason from the most recent EXECUTION_FAILED event for this task.
+    """Find the failure reason for the most recent blocking event for this task.
 
-    Execution events are stored under execution aggregate IDs. We query the events table
-    directly by scanning for execution.failed events that reference this task_id in their payload.
-    Since PostgresStore.get_events() requires an aggregate_id, we use a raw query via the pool.
+    Two-stage lookup:
+    1. First checks task.status_changed events (aggregate_type='task') with
+       to_status='blocked' and a failure_reason in the payload. This covers QA
+       failures (tool step failures and Claude review failures) which are recorded
+       directly on the task aggregate when transitioning to blocked.
+    2. If no reason is found, falls back to querying execution.failed events
+       (aggregate_type='execution') that reference this task_id. This covers
+       implementation execution failures recorded on the execution aggregate.
     """
     from core.db import get_pool
 
     pool = await get_pool()
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT payload->>'failure_reason'
+                FROM events
+                WHERE aggregate_type = 'task'
+                  AND aggregate_id = %s
+                  AND event_type = 'task.status_changed'
+                  AND payload->>'to_status' = 'blocked'
+                  AND payload->>'failure_reason' IS NOT NULL
+                ORDER BY sequence DESC
+                LIMIT 1
+                """,
+                (str(task_id),),
+            )
+            row = await cur.fetchone()
+    if row:
+        return row[0]
+
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
