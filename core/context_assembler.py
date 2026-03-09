@@ -30,7 +30,17 @@ _COMPLETION_INSTRUCTIONS = """\
 ---
 
 ## Completion Instructions
-When you have finished all tasks and verifications, you MUST output one of these markers:
+
+**Before declaring COMPLETED you MUST commit your changes.**
+The QA system verifies your work by inspecting the git diff on your branch.
+Without a commit your changes are lost and QA will always fail.
+
+Commit step (required):
+```bash
+git add -A && git commit -m "feat: <brief description of change>"
+```
+
+Only after committing, output one of these markers:
 
 On success:
 ```

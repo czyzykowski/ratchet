@@ -148,11 +148,20 @@ All scripts read `DATABASE_URL` from environment and exit 1 with a clear message
 
 ## Commit Convention
 
+**CRITICAL: You MUST commit before outputting COMPLETED.**
+The QA pipeline checks the git diff on your execution branch. If you do not commit,
+your changes are invisible to QA and the task will be marked as failed.
+
 After completing all tasks in a spec, commit with:
 
 ```bash
-git add -A && git commit -m "spec(N): description"
+git add -A && git commit -m "feat: <brief description>"
 ```
 
-Example: `git commit -m "spec(03): spec entity and lineage chain"`
+Then verify the commit exists before declaring done:
+
+```bash
+git log --oneline -3
+```
+
 Every spec execution must end with a commit if all tasks succeeded.

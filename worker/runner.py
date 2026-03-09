@@ -375,7 +375,16 @@ async def run_qa_once(
         return True
 
     # Step 4: all steps pass — run Claude review
-    diff = get_git_diff(project.local_path)
+    # Look up the execution branch so QA diffs the right thing.
+    execution_events = await store.get_events(task.id, "task_executions")
+    execution_branch: str | None = None
+    for event in reversed(execution_events):
+        if event.event_type == ev.EXECUTION_STARTED:
+            bn = event.payload.get("branch_name")
+            if bn:
+                execution_branch = bn
+            break
+    diff = get_git_diff(project.local_path, execution_branch)
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
     review_proc = _subprocess.run(

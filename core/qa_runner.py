@@ -105,10 +105,19 @@ def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     return results
 
 
-def get_git_diff(cwd: str) -> str:
-    """Run git diff HEAD~1..HEAD in cwd and return stdout."""
+def get_git_diff(cwd: str, execution_branch: str | None = None, base_ref: str = "develop") -> str:
+    """Get git diff showing changes made by an execution.
+
+    If execution_branch is provided, diffs base_ref..execution_branch to show
+    exactly what the execution agent committed relative to the base branch.
+    Falls back to HEAD~1..HEAD when no branch is given (legacy behaviour).
+    """
+    if execution_branch:
+        ref_range = f"{base_ref}..{execution_branch}"
+    else:
+        ref_range = "HEAD~1..HEAD"
     proc = subprocess.run(
-        ["git", "diff", "HEAD~1..HEAD"],
+        ["git", "diff", ref_range],
         cwd=cwd,
         capture_output=True,
         text=True,
