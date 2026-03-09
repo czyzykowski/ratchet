@@ -93,20 +93,24 @@ def read_intent(worktree_path: str) -> str:
     return intent_path.read_text()
 
 
-def build_prompt(intent_content: str, spec_content: str) -> str:
+def build_prompt(intent_content: str, spec_content: str, qa_feedback: str | None = None) -> str:
     """Assemble final prompt string from components.
 
-    Follows section order: preamble → intent → knowledge placeholder → spec.
+    Follows section order: preamble → intent → knowledge placeholder → spec
+    → (optional) previous attempt feedback → completion instructions.
     Returns complete prompt string.
     """
-    return "\n\n".join([
+    parts = [
         _PREAMBLE,
         f"## Project Intent\n{intent_content}",
         "---",
         _KNOWLEDGE_PLACEHOLDER,
         f"## Spec\n{spec_content}",
-        _COMPLETION_INSTRUCTIONS,
-    ])
+    ]
+    if qa_feedback is not None:
+        parts.append(f"## Previous Attempt Feedback\n{qa_feedback}")
+    parts.append(_COMPLETION_INSTRUCTIONS)
+    return "\n\n".join(parts)
 
 
 class ContextAssembler:
@@ -167,8 +171,19 @@ class ContextAssembler:
         # Step 3: read INTENT.md (may raise ContextAssemblyError)
         intent_content = read_intent(worktree_path)
 
+        # Step 3b: find most recent BLOCKED event with failure_reason
+        task_events = await self._store.get_events(task_id, "task")
+        qa_feedback: str | None = None
+        for event in task_events:
+            if (
+                event.event_type == ev.TASK_STATUS_CHANGED
+                and event.payload.get("to_status") == "blocked"
+                and event.payload.get("failure_reason")
+            ):
+                qa_feedback = event.payload["failure_reason"]
+
         # Step 4: build prompt
-        prompt = build_prompt(intent_content, spec_content)
+        prompt = build_prompt(intent_content, spec_content, qa_feedback=qa_feedback)
 
         # Step 5: return context
         return ExecutionContext(

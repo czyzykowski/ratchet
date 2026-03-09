@@ -341,3 +341,69 @@ async def test_assemble_prompt_contains_completion_instructions(tmp_path: Path) 
 
     assert "COMPLETED:" in ctx.prompt
     assert "BLOCKED:" in ctx.prompt
+
+
+# ---------------------------------------------------------------------------
+# QA feedback — build_prompt unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_includes_qa_feedback_section_when_provided() -> None:
+    feedback = "Tests failed: missing import in module X"
+    prompt = build_prompt("intent", "spec", qa_feedback=feedback)
+    assert "## Previous Attempt Feedback" in prompt
+    assert feedback in prompt
+
+
+def test_build_prompt_excludes_qa_feedback_section_when_none() -> None:
+    prompt = build_prompt("intent", "spec", qa_feedback=None)
+    assert "## Previous Attempt Feedback" not in prompt
+
+
+def test_build_prompt_qa_feedback_section_order() -> None:
+    feedback = "QA_FAILURE_TEXT"
+    prompt = build_prompt("INTENT_TEXT", "SPEC_TEXT", qa_feedback=feedback)
+    spec_pos = prompt.index("## Spec")
+    feedback_pos = prompt.index("## Previous Attempt Feedback")
+    completion_pos = prompt.index("## Completion Instructions")
+    assert spec_pos < feedback_pos < completion_pos
+
+
+# ---------------------------------------------------------------------------
+# QA feedback — ContextAssembler integration tests
+# ---------------------------------------------------------------------------
+
+
+async def test_assemble_includes_qa_feedback_when_task_was_blocked(tmp_path: Path) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, task_id, _ = await _seed_store(store, worktree)
+
+    failure_reason = "QA detected missing implementation of feature X"
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_STATUS_CHANGED,
+        payload={
+            "task_id": str(task_id),
+            "to_status": "blocked",
+            "failure_reason": failure_reason,
+        },
+    )
+
+    assembler = ContextAssembler(store)
+    ctx = await assembler.assemble(execution_id)
+
+    assert "## Previous Attempt Feedback" in ctx.prompt
+    assert failure_reason in ctx.prompt
+
+
+async def test_assemble_excludes_qa_feedback_when_task_never_blocked(tmp_path: Path) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, _, _ = await _seed_store(store, worktree)
+
+    assembler = ContextAssembler(store)
+    ctx = await assembler.assemble(execution_id)
+
+    assert "## Previous Attempt Feedback" not in ctx.prompt
