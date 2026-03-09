@@ -18,7 +18,6 @@ STATUS_ORDER = [
     ev.BLOCKED,
     ev.READY_FOR_QA,
     ev.READY_FOR_DEPLOYMENT,
-    ev.DEPLOYED,
 ]
 
 STATUS_LABELS = {
@@ -65,6 +64,10 @@ async def main() -> None:
     parser.add_argument(
         "--abandoned", action="store_true",
         help="Show only abandoned tasks instead of the default board.",
+    )
+    parser.add_argument(
+        "--deployed", action="store_true",
+        help="Show only deployed tasks instead of the default board.",
     )
     args = parser.parse_args()
 
@@ -120,10 +123,28 @@ async def main() -> None:
                 print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
             return
 
+        if args.deployed:
+            deployed_tasks = [t for t in all_tasks if t["status"] == ev.DEPLOYED]
+            if not deployed_tasks:
+                print("\nNo deployed tasks found.")
+                return
+            label = STATUS_LABELS.get(ev.DEPLOYED, "DEPLOYED")
+            print(f"\n{label} ({len(deployed_tasks)})")
+            for task in deployed_tasks:
+                task_id_display = str(task["id"]) if args.verbose else str(task["id"])[:8]
+                project_name = project_by_id.get(task["project_id"], None)
+                project_label = project_name.name if project_name else "unknown"
+                count = task["refinement_count"]
+                ref_label = f"{count} refinement{'s' if count != 1 else ''}"
+                print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
+            return
+
         tasks_by_status: dict[str, list[dict]] = {s: [] for s in STATUS_ORDER}
         for task in all_tasks:
             status = task["status"]
             if status == ev.ABANDONED:
+                continue
+            if status == ev.DEPLOYED:
                 continue
             if status not in tasks_by_status:
                 tasks_by_status[status] = []
