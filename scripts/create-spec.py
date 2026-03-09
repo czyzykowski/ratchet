@@ -307,22 +307,15 @@ async def main() -> None:
 
         print(f"Task: {task_title}")
         print(f"Project: {project.name} ({local_path})")
-        print("\nDescribe what you want to build:")
-
-        try:
-            user_description = input("> ").strip()
-        except KeyboardInterrupt:
-            print("\nSession ended, spec not saved.")
-            sys.exit(0)
 
         initial_prompt = build_initial_prompt(
-            intent_md, task_title or "", user_description
+            intent_md, task_title or "", task_title or ""
         )
         history: list[dict[str, str]] = []
 
         print("\n--- Claude ---")
         output = run_claude(initial_prompt, local_path, debug)
-        history.append({"role": "user", "content": user_description})
+        history.append({"role": "user", "content": task_title or ""})
         history.append({"role": "assistant", "content": output})
 
         if await _handle_spec_ready(output, task_id, task_title, store):
