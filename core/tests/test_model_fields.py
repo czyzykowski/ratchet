@@ -26,6 +26,7 @@ def test_task_fields() -> None:
         "refinement_count",
         "created_at",
         "updated_at",
+        "depends_on",
     }
     assert set(Task.model_fields) == expected
 

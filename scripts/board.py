@@ -33,9 +33,24 @@ STATUS_LABELS = {
 }
 
 
+def _get_task_status(task_id: UUID, task_events_cache: dict) -> str | None:
+    """Return the current status of a task from the event cache, or None if unknown."""
+    events = task_events_cache.get(task_id)
+    if not events:
+        return None
+    status = None
+    for event in events:
+        if event.event_type == ev.TASK_CREATED:
+            status = event.payload.get("status", ev.READY_FOR_SPEC)
+        elif event.event_type == ev.TASK_STATUS_CHANGED:
+            status = event.payload["to_status"]
+    return status
+
+
 def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | None:
     task: dict | None = None
     refinement_count = 0
+    depends_on: list[str] = []
     for event in task_events:
         if event.event_type == ev.TASK_CREATED:
             p = event.payload
@@ -45,13 +60,17 @@ def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | No
                 "status": p.get("status", ev.READY_FOR_SPEC),
                 "project_id": project_id,
                 "refinement_count": 0,
+                "depends_on": [],
             }
         elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
             task["status"] = event.payload["to_status"]
         elif event.event_type == ev.TASK_SPEC_ASSIGNED:
             refinement_count += 1
+        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
+            depends_on.extend(event.payload.get("depends_on", []))
     if task is not None:
         task["refinement_count"] = refinement_count
+        task["depends_on"] = depends_on
     return task
 
 
@@ -86,6 +105,8 @@ async def main() -> None:
         project_by_id = {p.id: p for p in projects}
 
         all_tasks: list[dict] = []
+        # Cache task events by task_id for dep status lookups
+        task_events_cache: dict[UUID, list] = {}
 
         for project in projects:
             project_task_events = await store.get_events(project.id, "project_tasks")
@@ -101,6 +122,7 @@ async def main() -> None:
 
             for task_id in task_ids:
                 task_events = await store.get_events(task_id, "task")
+                task_events_cache[task_id] = task_events
                 task = _build_task(task_id, project.id, task_events)
                 if task is not None:
                     all_tasks.append(task)
@@ -168,6 +190,19 @@ async def main() -> None:
                 count = task["refinement_count"]
                 ref_label = f"{count} refinement{'s' if count != 1 else ''}"
                 print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
+                # Annotate with unmet deps
+                unmet_deps = []
+                for dep_id_str in task.get("depends_on", []):
+                    try:
+                        dep_id = UUID(dep_id_str)
+                    except ValueError:
+                        unmet_deps.append(dep_id_str)
+                        continue
+                    dep_status = _get_task_status(dep_id, task_events_cache)
+                    if dep_status != ev.DEPLOYED:
+                        unmet_deps.append(dep_id_str)
+                if unmet_deps:
+                    print(f"    [depends on: {', '.join(unmet_deps)}]")
     finally:
         await close_pool()
 

@@ -37,6 +37,7 @@ class Task(BaseModel):
     refinement_count: int
     created_at: datetime
     updated_at: datetime
+    depends_on: list[str] = []
 
 
 class Spec(BaseModel):

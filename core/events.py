@@ -8,6 +8,7 @@ PROJECT_ARCHIVED = "project.archived"
 TASK_CREATED = "task.created"
 TASK_STATUS_CHANGED = "task.status_changed"
 TASK_SPEC_ASSIGNED = "task.spec_assigned"
+TASK_DEPENDENCY_ADDED = "task.dependency_added"
 
 # Spec events
 SPEC_CREATED = "spec.created"

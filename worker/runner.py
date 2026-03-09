@@ -34,6 +34,7 @@ def _build_task_from_events(task_id: UUID, project_id: UUID, events: list[Any]) 
     """Replay task events to build a Task model. Returns None if no TASK_CREATED event found."""
     task: Task | None = None
     current_spec_id: UUID | None = None
+    depends_on: list[str] = []
 
     for event in events:
         if event.event_type == ev.TASK_CREATED:
@@ -61,6 +62,12 @@ def _build_task_from_events(task_id: UUID, project_id: UUID, events: list[Any]) 
             current_spec_id = UUID(spec_id_str) if spec_id_str else None
             if task is not None:
                 task = task.model_copy(update={"current_spec_id": current_spec_id})
+        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
+            deps = event.payload.get("depends_on", [])
+            depends_on.extend(deps)
+
+    if task is not None:
+        task = task.model_copy(update={"depends_on": depends_on})
 
     return task
 
@@ -109,6 +116,25 @@ async def get_next_task(
             task = _build_task_from_events(task_id, project.id, task_events)
             if task is None or task.status != ev.READY_FOR_IMPLEMENTATION:
                 continue
+
+            # Skip if any dependency is not yet deployed
+            if task.depends_on:
+                unmet = False
+                for dep_id_str in task.depends_on:
+                    try:
+                        dep_id = UUID(dep_id_str)
+                    except ValueError:
+                        logger.debug("Task %s has invalid dep UUID %s, skipping", task_id, dep_id_str)
+                        unmet = True
+                        break
+                    dep_events = await store.get_events(dep_id, "task")
+                    dep_task = _build_task_from_events(dep_id, project.id, dep_events)
+                    if dep_task is None or dep_task.status != ev.DEPLOYED:
+                        logger.debug("Task %s skipped: dep %s not deployed", task_id, dep_id_str)
+                        unmet = True
+                        break
+                if unmet:
+                    continue
 
             spec = await spec_manager.get_current_spec(task_id)
             if spec is None:
