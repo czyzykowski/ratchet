@@ -124,7 +124,11 @@ async def get_next_task(
                     try:
                         dep_id = UUID(dep_id_str)
                     except ValueError:
-                        logger.debug("Task %s has invalid dep UUID %s, skipping", task_id, dep_id_str)
+                        logger.debug(
+                            "Task %s has invalid dep UUID %s, skipping",
+                            task_id,
+                            dep_id_str,
+                        )
                         unmet = True
                         break
                     dep_events = await store.get_events(dep_id, "task")
