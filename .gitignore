@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 dist/
 .venv/
+.worktrees/
 
 # Explicitly track project CLAUDE.md
 !CLAUDE.md
