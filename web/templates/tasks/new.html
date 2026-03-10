@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}New Task — {{ project.name }} — Ratchet{% endblock %}
+
+{% block content %}
+<h1>New Task</h1>
+<p>Project: <a href="/projects/{{ project.id }}">{{ project.name }}</a></p>
+
+<form method="post" action="/projects/{{ project.id }}/tasks">
+  <p>
+    <label for="title">Title</label><br>
+    <input type="text" name="title" id="title" required style="background:#111;color:#e0e0e0;border:1px solid #444;padding:0.4rem;font-family:monospace;width:400px;">
+  </p>
+  {% if project_tasks %}
+  <p>
+    <label for="depends_on">Depends On (hold Ctrl/Cmd to select multiple)</label><br>
+    <select name="depends_on" id="depends_on" multiple size="8" style="background:#111;color:#e0e0e0;border:1px solid #444;padding:0.4rem;font-family:monospace;width:600px;">
+      {% for t in project_tasks %}
+      <option value="{{ t.id }}">{{ t.title }} ({{ t.status }})</option>
+      {% endfor %}
+    </select>
+  </p>
+  {% endif %}
+  <p><button type="submit" style="background:#1a3a4a;color:#7ec8e3;border:1px solid #7ec8e3;padding:0.4rem 1rem;cursor:pointer;font-family:monospace;">Create Task</button></p>
+</form>
+{% endblock %}

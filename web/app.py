@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from core.store import PostgresStore, Store
 from web.routes import board as board_router
 from web.routes import projects as projects_router
+from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
 from web.templating import templates  # noqa: F401
 
@@ -18,8 +19,9 @@ from web.templating import templates  # noqa: F401
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from core.db import close_pool, get_pool
 
-    await get_pool()
-    app.state.store = PostgresStore()
+    pool = await get_pool()
+    app.state.pool = pool
+    app.state.store = PostgresStore(pool)
     yield
     await close_pool()
 
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="Ratchet", lifespan=lifespan)
 app.include_router(board_router.router)
 app.include_router(projects_router.router)
+app.include_router(specs_router.router)
 app.include_router(tasks_router.router)
 
 

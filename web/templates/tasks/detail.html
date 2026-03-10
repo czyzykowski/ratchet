@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{{ task.title }} — Ratchet{% endblock %}
+
+{% block content %}
+<h1>{{ task.title }}</h1>
+<dl>
+  <dt>ID</dt><dd>{{ task.id }}</dd>
+  <dt>Status</dt>
+  <dd><span class="badge badge-{{ task.status }}">{{ task.status | upper | replace('_', ' ') }}</span></dd>
+  <dt>Project</dt>
+  <dd>
+    {% if project %}
+    <a href="/projects/{{ task.project_id }}">{{ project.name }}</a>
+    {% else %}
+    <a href="/projects/{{ task.project_id }}">{{ task.project_id }}</a>
+    {% endif %}
+  </dd>
+  <dt>Refinements</dt><dd>{{ task.refinement_count }}</dd>
+</dl>
+
+{% if deps %}
+<h2>Dependencies</h2>
+<ul>
+  {% for dep in deps %}
+  <li>
+    <a href="/tasks/{{ dep.id }}">{{ dep.title or dep.id }}</a>
+    {% if dep.status %}
+    <span class="badge badge-{{ dep.status }}">{{ dep.status | upper | replace('_', ' ') }}</span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Current Spec</h2>
+{% if current_spec %}
+<p><a href="/tasks/{{ task.id }}/spec/new">Assign new spec</a></p>
+<pre>{{ current_spec.content }}</pre>
+{% else %}
+<p>No spec assigned. <a href="/tasks/{{ task.id }}/spec/new">Assign a spec</a></p>
+{% endif %}
+
+<h2>Spec History</h2>
+{% if specs %}
+<table>
+  <thead>
+    <tr>
+      <th>Spec ID</th>
+      <th>Created At</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for spec in specs %}
+    <tr>
+      <td><a href="/specs/{{ spec.id }}">{{ spec.id }}</a></td>
+      <td>{{ spec.created_at }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="count">No specs yet.</p>
+{% endif %}
+
+<h2>Execution History</h2>
+{% if executions %}
+<table>
+  <thead>
+    <tr>
+      <th>Execution ID</th>
+      <th>Status</th>
+      <th>Started</th>
+      <th>Completed</th>
+      <th>Failure Reason</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for exe in executions %}
+    <tr>
+      <td><a href="/executions/{{ exe.id }}">{{ exe.id }}</a></td>
+      <td><span class="badge badge-{{ exe.status }}">{{ exe.status | upper | replace('_', ' ') }}</span></td>
+      <td>{{ exe.started_at }}</td>
+      <td>{{ exe.completed_at or '—' }}</td>
+      <td>{% if exe.failure_reason %}<span class="warn">{{ exe.failure_reason }}</span>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="count">No executions yet.</p>
+{% endif %}
+{% endblock %}
