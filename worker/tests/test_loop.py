@@ -1,9 +1,10 @@
-"""Tests for continuous loop behaviour: return values and main_loop control flow."""
+"""Tests for continuous loop behaviour: return values and notification_loop control flow."""
 
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncGenerator
+from unittest.mock import MagicMock, patch
 
 from core import events as ev
 from core.invoker import InvocationResult
@@ -11,7 +12,7 @@ from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
-from worker.runner import main_loop, run_once, run_qa_once
+from worker.runner import notification_loop, run_once, run_qa_once
 
 PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
@@ -157,75 +158,111 @@ async def test_run_qa_once_returns_true_when_qa_task_found() -> None:
 
 
 # ---------------------------------------------------------------------------
-# main_loop control flow
+# notification_loop control flow
 # ---------------------------------------------------------------------------
 
 
-async def test_main_loop_exits_on_keyboard_interrupt() -> None:
+class _MockNotificationListener:
+    """Mock NotificationListener that yields controlled notifications then stops."""
+
+    def __init__(self, notifications: list[tuple[str, str]]) -> None:
+        self._notifications = notifications
+
+    async def __aenter__(self) -> _MockNotificationListener:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+    async def listen(self) -> AsyncGenerator[tuple[str, str], None]:
+        for item in self._notifications:
+            yield item
+
+
+async def test_notification_loop_runs_catchup_on_startup() -> None:
+    """notification_loop calls run_once and run_qa_once on startup before listening."""
     store = InMemoryStore()
     invoker = _make_invoker()
 
-    call_count = 0
+    catchup_calls: list[str] = []
 
     async def fake_run_once(*args, **kwargs) -> bool:
-        nonlocal call_count
-        call_count += 1
-        if call_count >= 2:
-            raise KeyboardInterrupt
+        catchup_calls.append("run_once")
         return False
+
+    async def fake_run_qa_once(*args, **kwargs) -> bool:
+        catchup_calls.append("run_qa_once")
+        return False
+
+    mock_listener = _MockNotificationListener([])  # no notifications → loop ends quickly
 
     with (
         patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", return_value=False),
-        patch("asyncio.sleep", new_callable=AsyncMock),
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+    assert "run_once" in catchup_calls
+    assert "run_qa_once" in catchup_calls
+
+
+async def test_notification_loop_dispatches_queued_notifications() -> None:
+    """notification_loop calls run_once + run_qa_once for each queued notification."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+
+    task_id = str(uuid.uuid4())
+    dispatch_calls: list[str] = []
+
+    async def fake_run_once(*args, **kwargs) -> bool:
+        dispatch_calls.append("run_once")
+        return True
+
+    async def fake_run_qa_once(*args, **kwargs) -> bool:
+        dispatch_calls.append("run_qa_once")
+        return False
+
+    # Two notifications: one impl, one QA
+    notifications = [
+        (task_id, ev.READY_FOR_IMPLEMENTATION),
+        (task_id, ev.READY_FOR_QA),
+    ]
+    mock_listener = _MockNotificationListener(notifications)
+
+    with (
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+    # Startup catchup = 1 run_once + 1 run_qa_once
+    # 2 notifications = 2 more run_once + 2 more run_qa_once
+    run_once_count = dispatch_calls.count("run_once")
+    run_qa_count = dispatch_calls.count("run_qa_once")
+    assert run_once_count >= 3  # 1 catchup + 2 notifications
+    assert run_qa_count >= 3
+
+
+async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
+    """notification_loop exits without error when the notification source is exhausted."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+
+    async def fake_run_once(*args, **kwargs) -> bool:
+        return False
+
+    async def fake_run_qa_once(*args, **kwargs) -> bool:
+        return False
+
+    # Empty listener → producer finishes immediately → loop exits
+    mock_listener = _MockNotificationListener([])
+
+    with (
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         # Should not raise
-        await main_loop(store, invoker)
-
-
-async def test_main_loop_skips_sleep_when_impl_task_processed() -> None:
-    store = InMemoryStore()
-    invoker = _make_invoker()
-
-    call_count = 0
-    sleep_mock = AsyncMock()
-
-    async def fake_run_once(*args, **kwargs) -> bool:
-        nonlocal call_count
-        call_count += 1
-        if call_count >= 2:
-            raise KeyboardInterrupt
-        return True  # task was processed
-
-    with (
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", return_value=False),
-        patch("asyncio.sleep", sleep_mock),
-    ):
-        await main_loop(store, invoker)
-
-    sleep_mock.assert_not_called()
-
-
-async def test_main_loop_sleeps_when_no_tasks_found() -> None:
-    store = InMemoryStore()
-    invoker = _make_invoker()
-
-    call_count = 0
-    sleep_mock = AsyncMock()
-
-    async def fake_run_once(*args, **kwargs) -> bool:
-        nonlocal call_count
-        call_count += 1
-        if call_count >= 2:
-            raise KeyboardInterrupt
-        return False
-
-    with (
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", return_value=False),
-        patch("asyncio.sleep", sleep_mock),
-    ):
-        await main_loop(store, invoker)
-
-    sleep_mock.assert_called_once_with(30)
+        await notification_loop(store, invoker, dsn="postgresql://fake/test")

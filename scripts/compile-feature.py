@@ -226,6 +226,25 @@ async def compile_hls(
         print(f"  ERROR: state transition failed: {exc}", file=sys.stderr)
         return False
 
+    # Propagate HLS dependencies to task dependencies
+    if hls.dependencies:
+        # Resolve HLS IDs to task IDs
+        all_specs = await fm.get_high_level_specs(hls.feature_id)
+        specs_by_id = {s.id: s for s in all_specs}
+        dep_task_ids = []
+        for dep_hls_id in hls.dependencies:
+            dep_spec = specs_by_id.get(dep_hls_id)
+            if dep_spec is not None and dep_spec.task_id is not None:
+                dep_task_ids.append(str(dep_spec.task_id))
+        if dep_task_ids:
+            await store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_DEPENDENCY_ADDED,
+                payload={"depends_on": dep_task_ids},
+            )
+            print(f"  Depends on tasks: {', '.join(dep_task_ids)}")
+
     # Mark the high-level spec as compiled
     await fm.mark_compiled(hls.id, task_id, hls.feature_id)
 

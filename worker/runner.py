@@ -26,6 +26,7 @@ from core.qa_runner import (
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
+from worker.listener import NotificationListener
 
 logger = logging.getLogger(__name__)
 
@@ -442,18 +443,74 @@ async def run_qa_once(
     return True
 
 
-async def main_loop(store: Store, invoker: ClaudeCodeInvoker) -> None:
-    """Poll for both implementation and QA tasks indefinitely.
+async def notification_loop(
+    store: Store,
+    invoker: ClaudeCodeInvoker,
+    dsn: str,
+    max_workers: int = 1,
+) -> None:
+    """React to Postgres LISTEN/NOTIFY events for task status changes.
 
-    Sleeps 30 s only when both run_once and run_qa_once found nothing to do.
-    Exits cleanly on KeyboardInterrupt.
+    1. Runs startup catchup by calling run_once and run_qa_once before listening.
+    2. Enters the notification-driven loop.
+    3. Queues notifications received during execution using asyncio.Queue.
+    4. Processes queued items after each task completes.
+
+    With max_workers=1, only one task runs at a time; additional notifications
+    are queued and processed sequentially after each task completes.
     """
-    try:
+    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    active = False
+
+    async def _dispatch_one() -> None:
+        """Run one pass of run_once + run_qa_once."""
+        await run_once(store, invoker)
+        await run_qa_once(store, invoker)
+
+    async def _notification_producer(listener: NotificationListener) -> None:
+        async for task_id, status in listener.listen():
+            await queue.put((task_id, status))
+
+    async def _run_loop() -> None:
+        nonlocal active
+        # Startup catchup
+        logger.info("Worker: running startup catchup")
+        await _dispatch_one()
+
         while True:
-            did_impl = await run_once(store, invoker)
-            did_qa = await run_qa_once(store, invoker)
-            if not did_impl and not did_qa:
-                await asyncio.sleep(30)
+            task_id, status = await queue.get()
+            logger.info(
+                "Worker: dequeued notification task=%s status=%s", task_id, status
+            )
+            active = True
+            try:
+                await _dispatch_one()
+            finally:
+                active = False
+                queue.task_done()
+
+    try:
+        async with NotificationListener(dsn, max_workers=max_workers) as listener:
+            producer_task = asyncio.create_task(_notification_producer(listener))
+            consumer_task = asyncio.create_task(_run_loop())
+            done, pending = await asyncio.wait(
+                [producer_task, consumer_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    pass
+            for task in done:
+                if not task.cancelled():
+                    try:
+                        exc = task.exception()
+                    except BaseException:
+                        exc = None
+                    if exc is not None and not isinstance(exc, KeyboardInterrupt):
+                        raise exc
     except KeyboardInterrupt:
         logger.info("Worker stopped.")
 
@@ -480,13 +537,16 @@ async def _main_async() -> None:
 
 
 async def _main_loop_async() -> None:
+    import os
+
     from core.db import close_pool
     from core.store import PostgresStore
 
+    dsn = os.environ["DATABASE_URL"]
     store = PostgresStore()
     invoker = ClaudeCodeInvoker()
     try:
-        await main_loop(store, invoker)
+        await notification_loop(store, invoker, dsn)
     finally:
         await close_pool()
 
