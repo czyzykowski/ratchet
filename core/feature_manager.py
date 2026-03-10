@@ -219,7 +219,6 @@ class FeatureManager:
         if not task_statuses:
             return ev.FEATURE_DRAFT
 
-        early_statuses = {ev.READY_FOR_SPEC, ev.SPEC_QA, ev.READY_FOR_IMPLEMENTATION}
         advanced_statuses = {ev.IN_PROGRESS, ev.BLOCKED, ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT}
 
         if all(s == ev.DEPLOYED for s in task_statuses):

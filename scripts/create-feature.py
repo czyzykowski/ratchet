@@ -11,9 +11,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from uuid import UUID
-
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 if TYPE_CHECKING:
     from core.store import Store
@@ -204,7 +203,7 @@ async def persist_feature(
     title: str,
     description: str,
     specs: list[dict],
-    store: "Store",
+    store: Store,
 ) -> None:
     """Persist the feature and its high-level specs to the database."""
     from core.feature_manager import FeatureManager
@@ -234,7 +233,7 @@ async def persist_feature(
 async def _handle_feature_ready(
     output: str,
     project_id: UUID,
-    store: "Store",
+    store: Store,
 ) -> bool:
     """Check for ## FEATURE READY marker and handle save confirmation."""
     if "## FEATURE READY" not in output:
@@ -243,9 +242,10 @@ async def _handle_feature_ready(
     block = extract_feature_block(output)
     title, description, specs = parse_feature_block(block)
 
-    print(f"\n--- Feature Summary ---")
+    print("\n--- Feature Summary ---")
     print(f"Title: {title}")
-    print(f"Description: {description[:200]}..." if len(description) > 200 else f"Description: {description}")
+    desc_text = description[:200] + "..." if len(description) > 200 else description
+    print(f"Description: {desc_text}")
     print(f"High-level specs: {len(specs)}")
     for s in specs:
         deps = s.get("dep_indices", [])

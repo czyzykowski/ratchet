@@ -9,9 +9,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from uuid import UUID, uuid4
-
 from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from core.feature_manager import FeatureManager
@@ -53,7 +52,7 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
     return "".join(output_lines)
 
 
-def build_compile_prompt(intent_md: str, feature_title: str, hls: "HighLevelSpec") -> str:
+def build_compile_prompt(intent_md: str, feature_title: str, hls: HighLevelSpec) -> str:
     """Build the non-interactive compilation prompt for a single high-level spec."""
     return f"""You are generating a detailed implementation spec for a software task.
 
@@ -115,7 +114,7 @@ def extract_spec(output: str) -> str:
     return output[idx + len(marker) :].strip()
 
 
-async def get_task_status(task_id: UUID, store: "Store") -> str | None:
+async def get_task_status(task_id: UUID, store: Store) -> str | None:
     """Get current task status by replaying events."""
     from core import events as ev
 
@@ -129,7 +128,7 @@ async def get_task_status(task_id: UUID, store: "Store") -> str | None:
     return status
 
 
-async def is_eligible(hls: "HighLevelSpec", fm: "FeatureManager", store: "Store") -> bool:
+async def is_eligible(hls: HighLevelSpec, fm: FeatureManager, store: Store) -> bool:
     """Check whether a high-level spec is eligible for compilation.
 
     A spec is eligible when:
@@ -161,13 +160,13 @@ async def is_eligible(hls: "HighLevelSpec", fm: "FeatureManager", store: "Store"
 
 
 async def compile_hls(
-    hls: "HighLevelSpec",
+    hls: HighLevelSpec,
     feature_title: str,
     project_id: UUID,
     intent_md: str,
     local_path: str,
-    store: "Store",
-    fm: "FeatureManager",
+    store: Store,
+    fm: FeatureManager,
     debug: bool = False,
 ) -> bool:
     """Compile a single high-level spec into a task.
@@ -185,7 +184,7 @@ async def compile_hls(
 
     spec_content = extract_spec(output)
     if not spec_content:
-        print(f"  ERROR: ## SPEC READY marker not found in Claude output.", file=sys.stderr)
+        print("  ERROR: ## SPEC READY marker not found in Claude output.", file=sys.stderr)
         return False
 
     # Create task
@@ -320,7 +319,7 @@ async def main() -> None:
             else:
                 failed_count += 1
 
-        print(f"\n--- Compilation Summary ---")
+        print("\n--- Compilation Summary ---")
         print(f"Compiled: {compiled_count}")
         print(f"Failed:   {failed_count}")
         print(f"Skipped (not eligible): {len(specs) - len(eligible)}")

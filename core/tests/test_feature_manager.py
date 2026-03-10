@@ -347,7 +347,7 @@ async def test_dependency_eligibility_no_deps_immediately_eligible() -> None:
     fm, _ = _make_fm()
     project_id = uuid.uuid4()
     feature = await fm.create_feature(project_id, "Feature", "desc")
-    hls = await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
+    await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
     specs = await fm.get_high_level_specs(feature.id)
     assert specs[0].compiled is False
     assert specs[0].dependencies == []
