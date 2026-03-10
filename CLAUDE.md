@@ -83,12 +83,6 @@ scripts/run-spec.sh specs/10-update-claude-md.md
 .venv/bin/python scripts/add-task.py --project-id <uuid> --title "My task"
 ```
 
-## QA Pipeline
-
-Any new top-level module directory must have its `tests/` subdirectory added to both the `test` and `typecheck` steps in `ratchet.yaml`. For example, adding a `newmodule/` package requires:
-- `test` step: append `newmodule/tests/` to the pytest command
-- `typecheck` step: append `newmodule/` to the mypy command
-
 ## Operational Scripts
 
 ```
@@ -151,6 +145,18 @@ python scripts/add-spec.py --task-id <task-uuid> --file path/to/revised-spec.md
 ```
 
 All scripts read `DATABASE_URL` from environment and exit 1 with a clear message if not set.
+
+## QA Pipeline
+
+The `ratchet.yaml` file defines the QA steps that run on every task execution:
+
+- `test`: `.venv/bin/python -m pytest core/tests/ web/tests/ -v`
+- `typecheck`: `mypy core/ worker/ web/`
+- `lint`: `ruff check .`
+
+**IMPORTANT:** Any new top-level module directory must have its `tests/` added to both the
+`test` and `typecheck` steps in `ratchet.yaml`. Failure to do so means the new module's
+tests will never run in QA and type errors will go undetected.
 
 ## Commit Convention
 
