@@ -556,4 +556,7 @@ def main_loop_entry() -> None:
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    asyncio.run(_main_loop_async())
+    try:
+        asyncio.run(_main_loop_async())
+    except KeyboardInterrupt:
+        pass
