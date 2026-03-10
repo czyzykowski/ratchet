@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 
-export function useSSE(url: string) {
-  const queryClient = useQueryClient()
+export function useSSE(handler: (event: Record<string, unknown>) => void): void {
+  const handlerRef = useRef(handler)
+  handlerRef.current = handler
   const retryDelay = useRef(1000)
 
   useEffect(() => {
@@ -10,12 +10,17 @@ export function useSSE(url: string) {
     let timeoutId: ReturnType<typeof setTimeout>
 
     function connect() {
-      es = new EventSource(url)
+      es = new EventSource('/api/events')
       es.onopen = () => {
         retryDelay.current = 1000
       }
-      es.addEventListener('task_updated', () => {
-        queryClient.invalidateQueries({ queryKey: ['board'] })
+      es.addEventListener('task_updated', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as Record<string, unknown>
+          handlerRef.current(data)
+        } catch {
+          handlerRef.current({})
+        }
       })
       es.onerror = () => {
         es.close()
@@ -31,5 +36,5 @@ export function useSSE(url: string) {
       es.close()
       clearTimeout(timeoutId)
     }
-  }, [url, queryClient])
+  }, [])
 }

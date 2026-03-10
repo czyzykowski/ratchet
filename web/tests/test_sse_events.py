@@ -108,8 +108,10 @@ async def test_sse_event_format() -> None:
     gen = response.body_iterator
     item = await gen.__anext__()
     assert item["event"] == "task_updated"
-    assert item["data"] == payload
-    assert json.loads(item["data"]) == {"task_id": task_id}
+    data = json.loads(item["data"])
+    assert data["type"] == "task_updated"
+    assert data["task_id"] == task_id
+    assert "project_id" in data
 
     # Clean up
     try:

@@ -7,8 +7,10 @@ import { TaskDetailModal } from '../components/TaskDetailModal'
 
 export function BoardPage() {
   const { data, isLoading, error } = useBoard()
-  useSSE('/api/events')
   const queryClient = useQueryClient()
+  useSSE(() => {
+    queryClient.invalidateQueries({ queryKey: ['board'] })
+  })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   async function runNextTask() {

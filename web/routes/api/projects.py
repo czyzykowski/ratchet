@@ -40,10 +40,12 @@ async def get_project(project_id: UUID, request: Request) -> JSONResponse:
     project_tasks: list[dict[str, Any]] = [
         {
             "id": str(t["id"]),
+            "project_id": str(t["project_id"]),
             "title": t["title"],
             "status": t["status"],
-            "project_id": str(t["project_id"]),
-            "depends_on": t.get("depends_on", []),
+            "refinement_count": t.get("refinement_count", 0),
+            "created_at": t["updated_at"].isoformat() if t.get("updated_at") is not None else None,
+            "updated_at": t["updated_at"].isoformat() if t.get("updated_at") is not None else None,
         }
         for t in all_tasks
         if t["project_id"] == project_id
