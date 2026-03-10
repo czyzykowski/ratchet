@@ -19,6 +19,12 @@
   <dt>Refinements</dt><dd>{{ task.refinement_count }}</dd>
 </dl>
 
+{% if task.status == "ready_for_deployment" %}
+<p>
+  <a href="/tasks/{{ task.id }}/deploy" class="btn">Deploy</a>
+</p>
+{% endif %}
+
 {% if deps %}
 <h2>Dependencies</h2>
 <ul>

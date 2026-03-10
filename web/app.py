@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from starlette.middleware.sessions import SessionMiddleware
 
 from core.store import PostgresStore, Store
 from web.routes import blocked as blocked_router
@@ -17,6 +19,7 @@ from web.routes import features as features_router
 from web.routes import projects as projects_router
 from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
+from web.routes import worker as worker_router
 from web.templating import templates  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -51,6 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Ratchet", lifespan=lifespan)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("SESSION_SECRET", "dev-secret"),
+)
 app.include_router(blocked_router.router)
 app.include_router(board_router.router)
 app.include_router(executions_router.router)
@@ -58,6 +65,7 @@ app.include_router(features_router.router)
 app.include_router(projects_router.router)
 app.include_router(specs_router.router)
 app.include_router(tasks_router.router)
+app.include_router(worker_router.router)
 
 
 def get_store(request: Request) -> Store:

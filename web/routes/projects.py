@@ -1,4 +1,4 @@
-"""Projects routes: GET /projects, GET /projects/{project_id}, task creation."""
+"""Projects routes: GET /projects, GET /projects/{project_id}, task creation, project reg."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from core import events as ev
-from core.project_manager import ProjectManager
+from core.project_manager import OnboardingError, ProjectManager
 from core.store import Store
 from web import queries
 from web.board_builder import get_task_status, load_board
@@ -31,6 +31,34 @@ async def projects_list(request: Request) -> HTMLResponse:
         "projects.html",
         {"request": request, "projects": project_list},
     )
+
+
+@router.get("/projects/new", response_class=HTMLResponse)
+async def new_project_form(request: Request) -> Response:
+    return templates.TemplateResponse(
+        "projects/new.html",
+        {"request": request, "error": None},
+    )
+
+
+@router.post("/projects")
+async def create_project(
+    request: Request,
+    name: Annotated[str, Form()],
+    path: Annotated[str, Form()],
+) -> Response:
+    store = _get_store(request)
+    pm = ProjectManager(store)
+    try:
+        await pm.register_project(name=name, repo_url=path, local_path=path)
+    except OnboardingError as exc:
+        return templates.TemplateResponse(
+            "projects/new.html",
+            {"request": request, "error": str(exc)},
+            status_code=400,
+        )
+    request.session["flash"] = f"Project registered: {name}"
+    return RedirectResponse(url="/", status_code=303)
 
 
 @router.get("/projects/{project_id}", response_class=HTMLResponse)

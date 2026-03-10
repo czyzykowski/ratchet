@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Deploy {{ task.title }} — Ratchet{% endblock %}
+
+{% block content %}
+<h1>Deploy Task</h1>
+<dl>
+  <dt>Title</dt><dd>{{ task.title }}</dd>
+  <dt>Execution Branch</dt><dd>{{ branch_name or '(none)' }}</dd>
+</dl>
+
+<form method="post" action="/tasks/{{ task.id }}/deploy">
+  <p>
+    <label for="target_branch">Target Branch</label><br>
+    <input type="text" id="target_branch" name="target_branch" value="{{ target_branch }}">
+  </p>
+  <p>
+    <label>
+      <input type="checkbox" name="skip_merge" value="on">
+      Skip merge (advance to deployed without git operations)
+    </label>
+  </p>
+  <p>
+    <input type="submit" value="Deploy">
+    &nbsp;
+    <a href="/tasks/{{ task.id }}">Cancel</a>
+  </p>
+</form>
+{% endblock %}

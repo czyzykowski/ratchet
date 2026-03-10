@@ -38,16 +38,27 @@
         section { margin-bottom: 2rem; }
         dt { color: #aaa; font-size: 0.85rem; margin-top: 0.5rem; }
         dd { margin-left: 1rem; }
+        .flash { background: #1f3a1f; color: #7ee37e; border: 1px solid #3a5a3a; padding: 0.4rem 0.8rem; border-radius: 3px; margin-bottom: 1rem; font-size: 0.9rem; }
+        input[type=text], textarea { background: #222; color: #e0e0e0; border: 1px solid #444; padding: 0.3rem 0.5rem; border-radius: 3px; font-family: monospace; }
+        input[type=submit], button[type=submit] { background: #1f3a5f; color: #79c0ff; border: 1px solid #2a5a8f; padding: 0.3rem 0.8rem; border-radius: 3px; cursor: pointer; font-family: monospace; }
+        input[type=submit]:hover, button[type=submit]:hover { background: #2a5a8f; }
+        label { color: #aaa; font-size: 0.85rem; }
+        .error { color: #e37e7e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+        form p { margin: 0.5rem 0; }
     </style>
 </head>
 <body>
     <nav>
         <a href="/">Board</a>
         <a href="/projects">Projects</a>
+        <a href="/projects/new">New Project</a>
         <a href="/features">Features</a>
         <a href="/blocked">Blocked</a>
     </nav>
     <main>
+        {% if "session" in request.scope and request.session.get("flash") %}
+        <div class="flash">{{ request.session.pop("flash") }}</div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </body>

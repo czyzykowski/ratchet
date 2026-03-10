@@ -1,13 +1,17 @@
-"""Tasks routes: GET/POST /tasks/{task_id}, spec assignment."""
+"""Tasks routes: GET/POST /tasks/{task_id}, spec assignment, deploy."""
 
 from __future__ import annotations
 
+import subprocess
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from core import events as ev
+from core.state_machine import TaskStateMachine
+from core.store import PostgresStore
 from web import queries
 from web.templating import templates
 
@@ -125,3 +129,137 @@ async def assign_spec(
         )
 
     return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
+
+
+@router.get("/tasks/{task_id}/deploy", response_class=HTMLResponse)
+async def deploy_confirm(task_id: UUID, request: Request) -> Response:
+    pool = request.app.state.pool
+    store = PostgresStore(pool)
+    state_machine = TaskStateMachine(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status != ev.READY_FOR_DEPLOYMENT:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not ready for deployment")
+
+    async with pool.connection() as conn:
+        task = await queries.get_task(conn, task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    execution_events = await store.get_events(task_id, "task_executions")
+    branch_name: str | None = None
+    for event in reversed(execution_events):
+        if event.event_type == ev.EXECUTION_STARTED:
+            bn = event.payload.get("branch_name")
+            if bn:
+                branch_name = bn
+            break
+
+    return templates.TemplateResponse(
+        "tasks/deploy_confirm.html",
+        {
+            "request": request,
+            "task": task,
+            "branch_name": branch_name,
+            "target_branch": "develop",
+        },
+    )
+
+
+@router.post("/tasks/{task_id}/deploy")
+async def deploy_task(
+    request: Request,
+    task_id: UUID,
+    target_branch: Annotated[str, Form()] = "develop",
+    skip_merge: Annotated[str | None, Form()] = None,
+) -> Response:
+    pool = request.app.state.pool
+    store = PostgresStore(pool)
+    state_machine = TaskStateMachine(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status != ev.READY_FOR_DEPLOYMENT:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not ready for deployment")
+
+    async with pool.connection() as conn:
+        task = await queries.get_task(conn, task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        project_id = UUID(str(task["project_id"]))
+        project = await queries.get_project(conn, project_id)
+
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project for task {task_id} not found")
+
+    if not skip_merge:
+        execution_events = await store.get_events(task_id, "task_executions")
+        branch_name: str | None = None
+        for event in reversed(execution_events):
+            if event.event_type == ev.EXECUTION_STARTED:
+                bn = event.payload.get("branch_name")
+                if bn:
+                    branch_name = bn
+                break
+
+        if branch_name is None:
+            raise HTTPException(status_code=400, detail="No execution branch found for this task")
+
+        local_path = str(project["local_path"])
+        title = str(task["title"])
+
+        try:
+            subprocess.run(
+                ["git", "checkout", target_branch],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return templates.TemplateResponse(
+                "400.html",
+                {"request": request, "detail": exc.stderr.decode()},
+                status_code=400,
+            )
+
+        try:
+            subprocess.run(
+                ["git", "merge", "--squash", branch_name],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return templates.TemplateResponse(
+                "400.html",
+                {"request": request, "detail": exc.stderr.decode()},
+                status_code=400,
+            )
+
+        commit_msg = f"feat: {title} (task/{task_id})"
+        try:
+            subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return templates.TemplateResponse(
+                "400.html",
+                {"request": request, "detail": exc.stderr.decode()},
+                status_code=400,
+            )
+
+        try:
+            subprocess.run(
+                ["git", "branch", "-D", branch_name],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass  # non-fatal
+
+    await state_machine.transition(task_id, ev.DEPLOYED)
+    request.session["flash"] = f"Deployed: {task['title']}"
+    return RedirectResponse(url="/", status_code=303)

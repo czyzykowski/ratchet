@@ -3,7 +3,11 @@
 {% block title %}Board — Ratchet{% endblock %}
 
 {% block content %}
-<h1>RATCHET BOARD</h1>
+<h1>RATCHET BOARD
+  <form method="post" action="/worker/run-next" style="display:inline; margin-left:1rem;">
+    <button type="submit" class="btn">Run Next Task</button>
+  </form>
+</h1>
 {% for status in STATUS_ORDER %}
   {% set task_list = tasks_by_status.get(status, []) %}
   {% if task_list %}
