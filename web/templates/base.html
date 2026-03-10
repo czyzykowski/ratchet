@@ -45,6 +45,11 @@
         label { color: #aaa; font-size: 0.85rem; }
         .error { color: #e37e7e; font-size: 0.85rem; margin-bottom: 0.5rem; }
         form p { margin: 0.5rem 0; }
+        .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:flex-start; justify-content:center; overflow-y:auto; z-index:100; padding:2rem 1rem; }
+        .modal { background:#1a1a1a; border:1px solid #444; border-radius:4px; width:100%; max-width:860px; padding:1.5rem; position:relative; }
+        .modal-close { position:absolute; top:0.5rem; right:0.8rem; background:none; border:none; color:#aaa; font-size:1.4rem; cursor:pointer; line-height:1; }
+        .modal-close:hover { color:#fff; }
+        .task-row { cursor: pointer; }
     </style>
 </head>
 <body>
@@ -61,5 +66,12 @@
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+    <div id="task-modal-backdrop" class="modal-backdrop" hidden>
+        <div id="task-modal" class="modal" role="dialog" aria-modal="true">
+            <button id="task-modal-close" class="modal-close">&times;</button>
+            <div id="task-modal-body"></div>
+        </div>
+    </div>
+    <script src="/static/modal.js"></script>
 </body>
 </html>

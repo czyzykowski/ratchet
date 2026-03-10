@@ -25,7 +25,7 @@
       </thead>
       <tbody>
         {% for task in task_list %}
-        <tr>
+        <tr class="task-row" data-task-id="{{ task.id }}">
           <td><a href="/tasks/{{ task.id }}">{{ task.id | string | truncate(8, True, '') }}</a></td>
           <td>{{ task.title }}</td>
           <td>

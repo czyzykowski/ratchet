@@ -24,7 +24,7 @@
   </thead>
   <tbody>
     {% for task in tasks %}
-    <tr>
+    <tr class="task-row" data-task-id="{{ task.id }}">
       <td><a href="/tasks/{{ task.id }}">{{ task.id | string | truncate(8, True, '') }}</a></td>
       <td>{{ task.title }}</td>
       <td><span class="badge badge-{{ task.status }}">{{ task.status | upper | replace('_', ' ') }}</span></td>

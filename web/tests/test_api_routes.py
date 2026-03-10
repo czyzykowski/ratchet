@@ -132,6 +132,77 @@ def test_should_return_404_when_task_not_found(
     assert response.status_code == 404
 
 
+def test_get_task_json_returns_200(client: TestClient, store: InMemoryStore) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
+    asyncio.get_event_loop().run_until_complete(
+        store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_CREATED,
+            payload={
+                "task_id": str(task_id),
+                "project_id": str(project_id),
+                "title": "Test Task",
+                "status": ev.READY_FOR_SPEC,
+            },
+        )
+    )
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert "task" in data
+    assert "specs" in data
+    assert "executions" in data
+    assert "qa_failure" in data
+    assert data["task"]["id"] == str(task_id)
+    assert data["task"]["title"] == "Test Task"
+
+
+def test_get_task_json_404(client: TestClient, store: InMemoryStore) -> None:
+    unknown_id = uuid4()
+    response = client.get(f"/api/tasks/{unknown_id}")
+    assert response.status_code == 404
+
+
+async def test_task_sse_stream_emits_status() -> None:
+    from web.routes.api.tasks import _task_status_generator
+
+    store = InMemoryStore()
+    task_id = uuid4()
+    project_id = uuid4()
+
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_CREATED,
+        payload={
+            "task_id": str(task_id),
+            "project_id": str(project_id),
+            "title": "SSE Task",
+            "status": ev.READY_FOR_SPEC,
+        },
+    )
+
+    disconnect_calls = 0
+
+    class FakeRequest:
+        async def is_disconnected(self) -> bool:
+            nonlocal disconnect_calls
+            disconnect_calls += 1
+            # disconnect after one poll
+            return disconnect_calls > 1
+
+    gen = _task_status_generator(store, task_id, FakeRequest())
+    first_event = await gen.__anext__()
+    assert "status" in first_event
+    import json as _json
+    payload = _json.loads(first_event.removeprefix("data: ").strip())
+    assert "status" in payload
+
+
 def test_should_return_text_event_stream_content_type_for_sse_endpoint(
     client: TestClient,
 ) -> None:

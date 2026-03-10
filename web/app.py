@@ -85,6 +85,11 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET", "dev-secret"),
 )
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="web_static",
+)
 app.include_router(blocked_router.router)
 app.include_router(board_router.router)
 app.include_router(executions_router.router)

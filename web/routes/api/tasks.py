@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import subprocess
+from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from core import events as ev
@@ -111,14 +114,52 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
             qa_failure = event.payload.get("failure_reason")
             break
 
+    # Project name
+    project_id = UUID(task["project_id"])
+    pm = ProjectManager(store)
+    project = await pm.get_project(project_id)
+    project_name = project.name if project is not None else None
+
     return JSONResponse(
         {
             "task": task,
+            "project_name": project_name,
             "specs": specs_data,
             "executions": executions_data,
             "dependencies": task.get("depends_on", []),
             "qa_failure": qa_failure,
         }
+    )
+
+
+async def _task_status_generator(
+    store: Any, task_id: UUID, request: Any
+) -> AsyncGenerator[str, None]:
+    """Async generator that emits SSE events when task status changes."""
+    last_status: str | None = None
+    try:
+        while True:
+            if await request.is_disconnected():
+                break
+            task_events = await store.get_events(task_id, "task")
+            task = _build_task_dict(task_id, task_events)
+            if task is not None:
+                current_status = task["status"]
+                if current_status != last_status:
+                    last_status = current_status
+                    data = json.dumps({"status": current_status})
+                    yield f"data: {data}\n\n"
+            await asyncio.sleep(2)
+    except asyncio.CancelledError:
+        pass
+
+
+@router.get("/tasks/{task_id}/events")
+async def task_sse_events(task_id: UUID, request: Request) -> StreamingResponse:
+    store = request.app.state.store
+    return StreamingResponse(
+        content=_task_status_generator(store, task_id, request),
+        media_type="text/event-stream",
     )
 
 
