@@ -1,9 +1,10 @@
-"""Integration tests for all /api/* endpoints using InMemoryStore."""
+"""Integration tests for /api/* endpoints per spec requirements."""
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core import events as ev
+from core.models import Project, Spec, Task
 from core.store import InMemoryStore
 from web.routes.api import events as api_events_router
 from web.routes.api.router import api_router
@@ -22,7 +24,8 @@ def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.pool = MagicMock()
-    app.state.sse_queues: set[asyncio.Queue[str]] = set()
+    app.state.sse_queues = set()
+    app.state.sse_clients = []
     app.include_router(api_router)
     app.include_router(api_events_router.router)
     return app
@@ -60,75 +63,144 @@ async def _seed_project(store: InMemoryStore, project_id: UUID, name: str = "Tes
     )
 
 
-async def _seed_feature(
-    store: InMemoryStore, feature_id: UUID, project_id: UUID, title: str
+async def _seed_task(
+    store: InMemoryStore,
+    task_id: UUID,
+    project_id: UUID,
+    title: str,
+    status: str = ev.READY_FOR_SPEC,
 ) -> None:
-    payload = {
-        "feature_id": str(feature_id),
-        "project_id": str(project_id),
-        "title": title,
-        "description": f"Description for {title}",
-    }
-    await store.append_event(
-        aggregate_id=feature_id,
-        aggregate_type="feature",
-        event_type=ev.FEATURE_CREATED,
-        payload=payload,
-    )
     await store.append_event(
         aggregate_id=project_id,
-        aggregate_type="project_features",
-        event_type=ev.FEATURE_CREATED,
-        payload=payload,
+        aggregate_type="project_tasks",
+        event_type=ev.TASK_CREATED,
+        payload={"task_id": str(task_id), "project_id": str(project_id), "title": title},
+    )
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_CREATED,
+        payload={
+            "task_id": str(task_id),
+            "project_id": str(project_id),
+            "title": title,
+            "status": status,
+        },
     )
 
 
-def test_should_return_200_with_groups_from_board_endpoint(
+# --- Board endpoint tests ---
+
+def test_should_return_board_json_with_columns_in_status_order(
     client: TestClient, store: InMemoryStore
 ) -> None:
+    project_id = uuid4()
+    task1_id = uuid4()
+    task2_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task1_id, project_id, "Task 1", ev.READY_FOR_SPEC)
+    )
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task2_id, project_id, "Task 2", ev.BLOCKED)
+    )
+
     response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
-    assert "groups" in data
-    assert isinstance(data["groups"], list)
+    assert "columns" in data
+    assert isinstance(data["columns"], list)
+
+    statuses = [c["status"] for c in data["columns"]]
+    assert statuses == [
+        ev.READY_FOR_SPEC,
+        ev.SPEC_QA,
+        ev.READY_FOR_IMPLEMENTATION,
+        ev.IN_PROGRESS,
+        ev.BLOCKED,
+        ev.READY_FOR_QA,
+        ev.READY_FOR_DEPLOYMENT,
+    ]
+
+    columns_by_status = {c["status"]: c for c in data["columns"]}
+    rfs = columns_by_status[ev.READY_FOR_SPEC]
+    assert len(rfs["tasks"]) == 1
+    assert rfs["tasks"][0]["title"] == "Task 1"
+
+    blocked = columns_by_status[ev.BLOCKED]
+    assert len(blocked["tasks"]) == 1
+    assert blocked["tasks"][0]["title"] == "Task 2"
 
 
-def test_should_return_200_with_projects_list(
+def test_should_exclude_deployed_and_abandoned_tasks_from_board(
     client: TestClient, store: InMemoryStore
 ) -> None:
     project_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
-
-    response = client.get("/api/projects")
-    assert response.status_code == 200
-    data = response.json()
-    assert "projects" in data
-    assert isinstance(data["projects"], list)
-    assert len(data["projects"]) == 1
-
-
-def test_should_return_200_with_features_list(
-    client: TestClient, store: InMemoryStore
-) -> None:
-    project_id = uuid4()
-    feature_id = uuid4()
+    deployed_id = uuid4()
+    abandoned_id = uuid4()
     asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
     asyncio.get_event_loop().run_until_complete(
-        _seed_feature(store, feature_id, project_id, "My Feature")
+        _seed_task(store, deployed_id, project_id, "Deployed Task", ev.DEPLOYED)
+    )
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, abandoned_id, project_id, "Abandoned Task", ev.ABANDONED)
     )
 
-    response = client.get("/api/features")
+    response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
-    assert "features" in data
-    assert isinstance(data["features"], list)
+
+    all_task_ids = [t["id"] for col in data["columns"] for t in col["tasks"]]
+    assert str(deployed_id) not in all_task_ids
+    assert str(abandoned_id) not in all_task_ids
 
 
-def test_should_return_404_when_task_not_found(
+# --- Task PATCH tests ---
+
+def test_should_rename_task_title_via_patch(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Old Title")
+    )
+
+    response = client.patch(f"/api/tasks/{task_id}", json={"title": "New Title"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "New Title"
+    assert data["id"] == str(task_id)
+
+    # Re-fetch board to confirm new title
+    board_response = client.get("/api/board")
+    assert board_response.status_code == 200
+    board_data = board_response.json()
+    all_tasks = [t for col in board_data["columns"] for t in col["tasks"]]
+    task_in_board = next(t for t in all_tasks if t["id"] == str(task_id))
+    assert task_in_board["title"] == "New Title"
+
+
+def test_should_return_400_when_patch_title_is_empty(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Some Title")
+    )
+
+    response = client.patch(f"/api/tasks/{task_id}", json={"title": ""})
+    assert response.status_code == 400
+
+
+def test_should_return_404_when_patching_unknown_task(
     client: TestClient, store: InMemoryStore
 ) -> None:
     unknown_id = uuid4()
-    response = client.get(f"/api/tasks/{unknown_id}")
+    response = client.patch(f"/api/tasks/{unknown_id}", json={"title": "Whatever"})
     assert response.status_code == 404
 
 
@@ -203,8 +275,10 @@ async def test_task_sse_stream_emits_status() -> None:
     assert "status" in payload
 
 
-def test_should_return_text_event_stream_content_type_for_sse_endpoint(
-    client: TestClient,
+# --- SSE test ---
+
+def test_should_stream_task_updated_event_via_sse(
+    client: TestClient, store: InMemoryStore
 ) -> None:
     from web.routes.api.events import sse_events
 
@@ -225,3 +299,95 @@ def test_should_return_text_event_stream_content_type_for_sse_endpoint(
 
     media_type = asyncio.get_event_loop().run_until_complete(_get_media_type())
     assert "text/event-stream" in media_type
+
+
+# --- Worker endpoint tests ---
+
+def test_should_return_json_from_post_run_next_when_no_tasks(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    with patch(
+        "web.routes.api.worker.get_next_task",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        response = client.post("/api/worker/run-next")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "no_tasks_ready"
+
+
+def test_should_return_json_from_post_run_next_when_task_found(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    task_id = uuid4()
+    project_id = uuid4()
+    spec_id = uuid4()
+    now = datetime.now(UTC)
+
+    fake_task = Task(
+        id=task_id,
+        project_id=project_id,
+        title="My Ready Task",
+        status=ev.READY_FOR_IMPLEMENTATION,
+        current_spec_id=spec_id,
+        refinement_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    fake_project = Project(
+        id=project_id,
+        name="Test Project",
+        repo_url="/tmp/repo",
+        local_path="/tmp/repo",
+        status="active",
+        created_at=now,
+        updated_at=now,
+    )
+    fake_spec = Spec(
+        id=spec_id,
+        task_id=task_id,
+        content="Do the thing",
+        previous_spec_id=None,
+        created_at=now,
+    )
+
+    with (
+        patch(
+            "web.routes.api.worker.get_next_task",
+            new_callable=AsyncMock,
+            return_value=(fake_task, fake_project, fake_spec),
+        ),
+        patch("web.routes.api.worker.run_once", new_callable=AsyncMock, return_value=True),
+    ):
+        response = client.post("/api/worker/run-next")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "started"
+    assert data["task_id"] == str(task_id)
+
+
+# --- Legacy tests kept for backward compatibility ---
+
+def test_should_return_200_with_projects_list(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
+
+    response = client.get("/api/projects")
+    assert response.status_code == 200
+    data = response.json()
+    assert "projects" in data
+    assert isinstance(data["projects"], list)
+    assert len(data["projects"]) == 1
+
+
+def test_should_return_404_when_task_not_found(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    unknown_id = uuid4()
+    response = client.get(f"/api/tasks/{unknown_id}")
+    assert response.status_code == 404

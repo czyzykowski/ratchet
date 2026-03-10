@@ -21,6 +21,7 @@ def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.pool = MagicMock()
+    app.state.sse_clients = []
     app.include_router(api_router)
     return app
 
@@ -135,7 +136,8 @@ def test_should_update_task_title(client: TestClient, store: InMemoryStore) -> N
     response = client.patch(f"/api/tasks/{task_id}", json={"title": "New Title"})
     assert response.status_code == 200
     data = response.json()
-    assert data["task"]["title"] == "New Title"
+    assert data["title"] == "New Title"
+    assert data["id"] == str(task_id)
 
 
 def test_should_assign_spec_to_task(client: TestClient, store: InMemoryStore) -> None:

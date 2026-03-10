@@ -9,6 +9,7 @@ from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import PostgresStore
+from web.sse import broadcast_task_updated
 from worker.runner import get_next_task, run_once
 
 router = APIRouter(prefix="/worker")
@@ -29,5 +30,6 @@ async def run_next(request: Request, background_tasks: BackgroundTasks) -> Respo
         task, _project, _spec = result
         request.session["flash"] = f"Started: {task.title} (task/{task.id})"
         background_tasks.add_task(run_once, store)
+        broadcast_task_updated(request.app)
 
     return RedirectResponse(url="/", status_code=303)

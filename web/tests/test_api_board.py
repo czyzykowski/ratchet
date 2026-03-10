@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.pool = MagicMock()
+    app.state.sse_clients = []
     app.include_router(api_router)
     return app
 
@@ -85,8 +87,6 @@ async def _seed_task(
 def test_should_return_board_grouped_by_status_when_tasks_exist(
     client: TestClient, store: InMemoryStore
 ) -> None:
-    import asyncio
-
     project_id = uuid4()
     task_id = uuid4()
 
@@ -99,16 +99,16 @@ def test_should_return_board_grouped_by_status_when_tasks_exist(
     assert response.status_code == 200
     data = response.json()
 
-    assert "groups" in data
-    groups = {g["status"]: g for g in data["groups"]}
+    assert "columns" in data
+    columns = {c["status"]: c for c in data["columns"]}
 
-    assert ev.READY_FOR_SPEC in groups
-    rfs_group = groups[ev.READY_FOR_SPEC]
-    assert rfs_group["label"] == "READY FOR SPEC"
-    assert len(rfs_group["tasks"]) == 1
-    assert rfs_group["tasks"][0]["title"] == "My Task"
-    assert rfs_group["tasks"][0]["project_name"] == "Test Project"
-    assert rfs_group["tasks"][0]["unmet_dependencies"] == []
+    assert ev.READY_FOR_SPEC in columns
+    rfs_col = columns[ev.READY_FOR_SPEC]
+    assert rfs_col["label"] == "READY FOR SPEC"
+    assert len(rfs_col["tasks"]) == 1
+    assert rfs_col["tasks"][0]["title"] == "My Task"
+    assert rfs_col["tasks"][0]["project_name"] == "Test Project"
+    assert rfs_col["tasks"][0]["unmet_deps"] == []
 
 
 def test_should_return_empty_groups_when_no_tasks(
@@ -118,6 +118,6 @@ def test_should_return_empty_groups_when_no_tasks(
     assert response.status_code == 200
     data = response.json()
 
-    assert "groups" in data
-    for group in data["groups"]:
-        assert group["tasks"] == []
+    assert "columns" in data
+    for col in data["columns"]:
+        assert col["tasks"] == []

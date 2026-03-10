@@ -56,6 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.store = PostgresStore(pool)
     sse_queues: set[asyncio.Queue[str]] = set()
     app.state.sse_queues = sse_queues
+    app.state.sse_clients = []
 
     async def _refresh_loop() -> None:
         while True:
@@ -113,6 +114,14 @@ if os.path.isdir(_UI_DIST):
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> FileResponse:
         return FileResponse(os.path.join(_UI_DIST, "index.html"))
+
+_SPA_DIST = os.path.join(os.path.dirname(__file__), "spa", "dist")
+if os.path.isdir(os.path.join(_SPA_DIST, "assets")):
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(_SPA_DIST, "assets")),
+        name="spa-assets",
+    )
 
 
 def get_store(request: Request) -> Store:

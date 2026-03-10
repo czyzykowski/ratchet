@@ -20,6 +20,7 @@ def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.pool = MagicMock()
+    app.state.sse_clients = []
     app.include_router(api_router)
     return app
 
@@ -83,6 +84,7 @@ def test_should_return_started_with_task_id_when_task_is_ready(
     data = response.json()
     assert data["status"] == "started"
     assert data["task_id"] == str(task_id)
+    assert data["title"] == "Ready Task"
 
 
 def test_should_return_no_task_when_no_ready_task(
@@ -97,4 +99,4 @@ def test_should_return_no_task_when_no_ready_task(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "no_task"
+    assert data["status"] == "no_tasks_ready"

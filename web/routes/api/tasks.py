@@ -19,6 +19,7 @@ from core.models import Event
 from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
+from web.sse import broadcast_task_updated
 
 router = APIRouter()
 
@@ -209,6 +210,9 @@ class UpdateTaskBody(BaseModel):
 async def update_task_title(task_id: UUID, body: UpdateTaskBody, request: Request) -> JSONResponse:
     store = request.app.state.store
 
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
     task_events = await store.get_events(task_id, "task")
     if not task_events:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
@@ -216,13 +220,12 @@ async def update_task_title(task_id: UUID, body: UpdateTaskBody, request: Reques
     await store.append_event(
         aggregate_id=task_id,
         aggregate_type="task",
-        event_type=ev.TASK_TITLE_UPDATED,
+        event_type=ev.TASK_TITLE_CHANGED,
         payload={"title": body.title},
     )
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
-    return JSONResponse({"task": task})
+    broadcast_task_updated(request.app)
+    return JSONResponse({"id": str(task_id), "title": body.title})
 
 
 class AssignSpecBody(BaseModel):

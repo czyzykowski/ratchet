@@ -13,6 +13,7 @@ from core import events as ev
 from core.state_machine import TaskStateMachine
 from core.store import PostgresStore
 from web import queries
+from web.sse import broadcast_task_updated
 from web.templating import templates
 
 router = APIRouter()
@@ -130,6 +131,7 @@ async def assign_spec(
             status_code=400,
         )
 
+    broadcast_task_updated(request.app)
     return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
 
 
@@ -263,6 +265,7 @@ async def deploy_task(
             pass  # non-fatal
 
     await state_machine.transition(task_id, ev.DEPLOYED)
+    broadcast_task_updated(request.app)
     request.session["flash"] = f"Deployed: {task['title']}"
     return RedirectResponse(url="/", status_code=303)
 
@@ -280,4 +283,5 @@ async def reset_task(request: Request, task_id: UUID) -> Response:
         raise HTTPException(status_code=400, detail=f"Task {task_id} is not blocked")
 
     await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    broadcast_task_updated(request.app)
     return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)

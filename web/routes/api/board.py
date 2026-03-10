@@ -41,6 +41,9 @@ async def get_board(request: Request) -> JSONResponse:
             if dep_status != ev.DEPLOYED:
                 unmet.append(dep_id_str)
 
+        updated_at = task.get("updated_at")
+        updated_at_str = updated_at.isoformat() if updated_at is not None else None
+
         groups_dict[status].append(
             {
                 "id": str(task["id"]),
@@ -48,11 +51,14 @@ async def get_board(request: Request) -> JSONResponse:
                 "status": task["status"],
                 "project_id": str(task["project_id"]),
                 "project_name": project_name,
-                "unmet_dependencies": unmet,
+                "updated_at": updated_at_str,
+                "has_spec": task.get("has_spec", False),
+                "refinement_count": task.get("refinement_count", 0),
+                "unmet_deps": unmet,
             }
         )
 
-    groups = [
+    columns = [
         {
             "status": status,
             "label": STATUS_LABELS.get(status, status),
@@ -61,4 +67,4 @@ async def get_board(request: Request) -> JSONResponse:
         for status in STATUS_ORDER
     ]
 
-    return JSONResponse({"groups": groups})
+    return JSONResponse({"columns": columns})

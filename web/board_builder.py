@@ -61,16 +61,27 @@ def build_task(task_id: UUID, project_id: UUID, task_events: list[Event]) -> dic
                 "project_id": project_id,
                 "refinement_count": 0,
                 "depends_on": [],
+                "updated_at": event.occurred_at,
             }
         elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
             task["status"] = event.payload["to_status"]
+            task["updated_at"] = event.occurred_at
         elif event.event_type == ev.TASK_SPEC_ASSIGNED:
             refinement_count += 1
+            if task is not None:
+                task["updated_at"] = event.occurred_at
         elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
             depends_on.extend(event.payload.get("depends_on", []))
+            if task is not None:
+                task["updated_at"] = event.occurred_at
+        elif event.event_type in (ev.TASK_TITLE_CHANGED, ev.TASK_TITLE_UPDATED):
+            if task is not None:
+                task["title"] = event.payload["title"]
+                task["updated_at"] = event.occurred_at
     if task is not None:
         task["refinement_count"] = refinement_count
         task["depends_on"] = depends_on
+        task["has_spec"] = refinement_count > 0
     return task
 
 
