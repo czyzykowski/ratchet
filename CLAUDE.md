@@ -70,7 +70,7 @@ pytest core/tests/ -v
 python db/smoke_test.py
 
 # Apply migrations
-alembic upgrade head
+.venv/bin/alembic -c db/alembic.ini upgrade head
 
 # Execute a spec
 scripts/run-spec.sh specs/10-update-claude-md.md
