@@ -554,6 +554,10 @@ async def notification_loop(
         # Startup catchup
         logger.info("Worker: running startup catchup")
         await _dispatch_one()
+        try:
+            await store.refresh_views()
+        except Exception:
+            logger.warning("View refresh failed after startup catchup", exc_info=True)
 
         while True:
             event_tuple = await queue.get()
@@ -572,6 +576,10 @@ async def notification_loop(
             finally:
                 active = False
                 queue.task_done()
+                try:
+                    await store.refresh_views()
+                except Exception:
+                    logger.warning("View refresh failed after notification", exc_info=True)
 
     async with NotificationListener(dsn, max_workers=max_workers) as listener:
         producer_task = asyncio.create_task(_notification_producer(listener))

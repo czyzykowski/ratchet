@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -17,6 +19,8 @@ from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
 from web.templating import templates  # noqa: F401
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -25,8 +29,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     pool = await get_pool()
     app.state.pool = pool
     app.state.store = PostgresStore(pool)
-    yield
-    await close_pool()
+
+    async def _refresh_loop() -> None:
+        while True:
+            await asyncio.sleep(10)
+            try:
+                await app.state.store.refresh_views()
+            except Exception:
+                logger.warning("Periodic view refresh failed", exc_info=True)
+
+    refresh_task = asyncio.create_task(_refresh_loop())
+    try:
+        yield
+    finally:
+        refresh_task.cancel()
+        try:
+            await refresh_task
+        except asyncio.CancelledError:
+            pass
+        await close_pool()
 
 
 app = FastAPI(title="Ratchet", lifespan=lifespan)
