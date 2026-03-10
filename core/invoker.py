@@ -95,11 +95,14 @@ class ClaudeCodeInvoker:
         """
         cmd = ["claude", "-p", context.prompt, "--allowedTools", _ALLOWED_TOOLS]
 
+        # Strip CLAUDECODE so nested sessions don't fail when worker runs inside Claude Code
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         result = subprocess.run(
             cmd,
             cwd=context.worktree_path,
             capture_output=True,
             text=True,
+            env=env,
         )
 
         output = result.stdout + result.stderr

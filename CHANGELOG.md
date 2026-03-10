@@ -15,5 +15,7 @@
 - worker runs in continuous polling loop by default (30 s idle sleep); add `--once` flag for single-pass exit
 
 ### Fixed
+- QA now runs tool steps (pytest, mypy, ruff) against the execution branch worktree instead of the develop branch, so new/deleted test files are correctly reflected in QA output
+- `ClaudeCodeInvoker` strips `CLAUDECODE` env var before spawning claude subprocess to prevent "nested session" failures when worker runs inside a Claude Code session
 - `current_projects.updated_at` now reflects `MAX(occurred_at)` across all project events instead of being locked to the creation event
 - `current_executions` now includes `branch_name` column extracted from `execution.started` payload, matching the `Execution` Pydantic model
