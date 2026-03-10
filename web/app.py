@@ -103,8 +103,16 @@ app.include_router(api_router)
 app.include_router(api_events_router.router)
 
 
+_SPA_DIST = os.path.join(os.path.dirname(__file__), "spa", "dist")
+if os.path.isdir(os.path.join(_SPA_DIST, "assets")):
+    app.mount(
+        "/assets",
+        StaticFiles(directory=os.path.join(_SPA_DIST, "assets")),
+        name="spa-assets",
+    )
+
 _UI_DIST = os.path.join(os.path.dirname(__file__), "..", "ui", "dist")
-if os.path.isdir(_UI_DIST):
+if os.path.isdir(_UI_DIST) and not os.path.isdir(os.path.join(_SPA_DIST, "assets")):
     app.mount(
         "/assets",
         StaticFiles(directory=os.path.join(_UI_DIST, "assets")),
@@ -114,14 +122,6 @@ if os.path.isdir(_UI_DIST):
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str) -> FileResponse:
         return FileResponse(os.path.join(_UI_DIST, "index.html"))
-
-_SPA_DIST = os.path.join(os.path.dirname(__file__), "spa", "dist")
-if os.path.isdir(os.path.join(_SPA_DIST, "assets")):
-    app.mount(
-        "/assets",
-        StaticFiles(directory=os.path.join(_SPA_DIST, "assets")),
-        name="spa-assets",
-    )
 
 
 def get_store(request: Request) -> Store:
