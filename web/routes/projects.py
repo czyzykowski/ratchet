@@ -112,6 +112,7 @@ async def new_task_form(project_id: UUID, request: Request) -> Response:
                 status_code=404,
             )
         project_tasks = await queries.get_project_tasks(conn, project_id)
+        project_tasks = [t for t in project_tasks if t["status"] not in ("deployed", "abandoned")]
     return templates.TemplateResponse(
         "tasks/new.html",
         {"request": request, "project": project, "project_tasks": project_tasks},

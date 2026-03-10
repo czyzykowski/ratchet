@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI, Request
@@ -77,3 +81,58 @@ def test_create_project_onboarding_error(client: TestClient, store: InMemoryStor
 
     assert response.status_code == 400
     assert "not a git repo" in response.text
+
+
+def _make_task(title: str, status: str) -> dict[str, Any]:
+    return {
+        "id": uuid4(),
+        "project_id": uuid4(),
+        "title": title,
+        "status": status,
+        "current_spec_id": None,
+        "refinement_count": 0,
+        "created_at": None,
+        "updated_at": None,
+    }
+
+
+def test_new_task_form_excludes_terminal_statuses(client: TestClient) -> None:
+    project_id = uuid4()
+    project = MagicMock()
+    project.id = project_id
+    project.name = "Test Project"
+
+    all_tasks = [
+        _make_task("Active Task", "ready_for_spec"),
+        _make_task("In Progress Task", "ready_for_implementation"),
+        _make_task("Deployed Task", "deployed"),
+        _make_task("Abandoned Task", "abandoned"),
+    ]
+
+    mock_conn = MagicMock()
+
+    @asynccontextmanager
+    async def _fake_pool_connection() -> AsyncIterator[Any]:
+        yield mock_conn
+
+    mock_get_project = patch(
+        "web.routes.projects.queries.get_project",
+        new_callable=AsyncMock,
+        return_value=project,
+    )
+    mock_get_tasks = patch(
+        "web.routes.projects.queries.get_project_tasks",
+        new_callable=AsyncMock,
+        return_value=all_tasks,
+    )
+    mock_pool = patch.object(
+        client.app.state, "pool", MagicMock(connection=_fake_pool_connection)
+    )
+    with mock_get_project, mock_get_tasks, mock_pool:
+        response = client.get(f"/projects/{project_id}/tasks/new")
+
+    assert response.status_code == 200
+    assert "Active Task" in response.text
+    assert "In Progress Task" in response.text
+    assert "Deployed Task" not in response.text
+    assert "Abandoned Task" not in response.text

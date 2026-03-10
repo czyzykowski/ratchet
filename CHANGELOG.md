@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- "New Task" link on project detail page pointing to `/projects/{id}/tasks/new`
+- Dependency `<select>` in new-task form now excludes tasks in `deployed` or `abandoned` status
 - Read-only web UI (`python -m web`) with board (`GET /`), projects (`GET /projects`, `GET /projects/{id}`), and task detail (`GET /tasks/{id}`) pages rendered via Jinja2 templates; `web/board_builder.py` extracts replay helpers from `scripts/board.py` and is reused by both CLI and web routes
 - `core/compiler.py` with HLS compilation logic extracted from `scripts/compile-feature.py`: `run_claude`, `build_compile_prompt`, `extract_spec`, `get_task_status`, `is_eligible`, `compile_hls`, `compile_all`
 - `compile_once(store)` in `worker/runner.py` that invokes `compile_all` and returns True if any HLS was compiled
