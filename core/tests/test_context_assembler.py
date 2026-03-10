@@ -8,7 +8,13 @@ from pathlib import Path
 import pytest
 
 from core import events as ev
-from core.context_assembler import ContextAssembler, ContextAssemblyError, build_prompt, read_intent
+from core.context_assembler import (
+    ContextAssembler,
+    ContextAssemblyError,
+    build_conflict_resolution_prompt,
+    build_prompt,
+    read_intent,
+)
 from core.store import InMemoryStore
 
 
@@ -407,3 +413,65 @@ async def test_assemble_excludes_qa_feedback_when_task_never_blocked(tmp_path: P
     ctx = await assembler.assemble(execution_id)
 
     assert "## Previous Attempt Feedback" not in ctx.prompt
+
+
+# ---------------------------------------------------------------------------
+# build_conflict_resolution_prompt tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_conflict_resolution_prompt_contains_all_four_sections() -> None:
+    prompt = build_conflict_resolution_prompt(
+        intent_content="# Intent\nProject intent here.",
+        spec_content="# Spec\nSpec content here.",
+        conflicted_files=["src/foo.py", "src/bar.py"],
+        merge_output="CONFLICT (content): Merge conflict in src/foo.py",
+    )
+    assert "## Project Intent" in prompt
+    assert "## Original Spec" in prompt
+    assert "## Conflict Details" in prompt
+    assert "## Conflict Resolution Instructions" in prompt
+
+
+def test_build_conflict_resolution_prompt_contains_conflicted_filenames() -> None:
+    prompt = build_conflict_resolution_prompt(
+        intent_content="intent",
+        spec_content="spec",
+        conflicted_files=["src/foo.py", "src/bar.py"],
+        merge_output="some merge output",
+    )
+    assert "src/foo.py" in prompt
+    assert "src/bar.py" in prompt
+
+
+def test_build_conflict_resolution_prompt_contains_merge_output() -> None:
+    merge_output = "CONFLICT (content): Merge conflict in src/foo.py"
+    prompt = build_conflict_resolution_prompt(
+        intent_content="intent",
+        spec_content="spec",
+        conflicted_files=["src/foo.py"],
+        merge_output=merge_output,
+    )
+    assert merge_output in prompt
+
+
+def test_build_conflict_resolution_prompt_does_not_contain_commit_instruction() -> None:
+    prompt = build_conflict_resolution_prompt(
+        intent_content="intent",
+        spec_content="spec",
+        conflicted_files=["src/foo.py"],
+        merge_output="merge output",
+    )
+    assert "git add -A && git commit" not in prompt
+    assert "Before declaring COMPLETED you MUST commit" not in prompt
+
+
+def test_build_conflict_resolution_prompt_stage_only_instruction_present() -> None:
+    prompt = build_conflict_resolution_prompt(
+        intent_content="intent",
+        spec_content="spec",
+        conflicted_files=["src/foo.py"],
+        merge_output="merge output",
+    )
+    assert "Do NOT commit" in prompt
+    assert "git add" in prompt

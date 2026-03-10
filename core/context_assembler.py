@@ -113,6 +113,55 @@ def build_prompt(intent_content: str, spec_content: str, qa_feedback: str | None
     return "\n\n".join(parts)
 
 
+_CONFLICT_RESOLUTION_INSTRUCTIONS = """\
+---
+
+## Conflict Resolution Instructions
+
+Resolve all merge conflicts listed above. For each file:
+1. Open the file and resolve all conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`)
+2. Run `git add <file>` to stage the resolved file
+3. Do NOT commit — the deployment script will commit after all conflicts are resolved
+
+When all conflicted files are staged, output:
+```
+COMPLETED: all conflicts resolved and staged
+```
+
+If you cannot resolve a conflict in any file, output:
+```
+BLOCKED: <filename>
+Reason: <explanation of why the conflict cannot be resolved automatically>
+```"""
+
+
+def build_conflict_resolution_prompt(
+    intent_content: str,
+    spec_content: str,
+    conflicted_files: list[str],
+    merge_output: str,
+) -> str:
+    """Assemble conflict resolution prompt for Claude Code.
+
+    Sections: project intent → original spec → conflict details → resolution instructions.
+    Does NOT include standard commit-before-COMPLETED instructions.
+    Returns complete prompt string.
+    """
+    file_list = "\n".join(f"- {f}" for f in conflicted_files)
+    parts = [
+        f"## Project Intent\n{intent_content}",
+        "---",
+        f"## Original Spec\n{spec_content}",
+        "---",
+        (
+            f"## Conflict Details\n\n### Conflicted Files\n{file_list}"
+            f"\n\n### Merge Output\n```\n{merge_output}\n```"
+        ),
+        _CONFLICT_RESOLUTION_INSTRUCTIONS,
+    ]
+    return "\n\n".join(parts)
+
+
 class ContextAssembler:
     def __init__(self, store: Store) -> None:
         self._store = store

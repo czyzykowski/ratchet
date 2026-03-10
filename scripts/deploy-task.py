@@ -87,11 +87,14 @@ async def main() -> None:
         if not args.skip_merge:
             execution_events = await store.get_events(task_id, "task_executions")
             branch_name = None
+            spec_id = None
             for event in reversed(execution_events):
                 if event.event_type == ev.EXECUTION_STARTED:
                     bn = event.payload.get("branch_name")
+                    si = event.payload.get("spec_id")
                     if bn:
                         branch_name = bn
+                        spec_id = UUID(si) if si else None
                         break
 
             if branch_name is None:
@@ -122,12 +125,82 @@ async def main() -> None:
                     check=True,
                     capture_output=True,
                 )
-            except subprocess.CalledProcessError as exc:
+            except subprocess.CalledProcessError as merge_exc:
+                merge_output = merge_exc.stderr.decode()
                 print(
-                    f"Error: git merge --squash failed: {exc.stderr.decode()}",
+                    "Merge conflict detected, attempting Claude-assisted resolution...",
                     file=sys.stderr,
                 )
-                sys.exit(1)
+
+                # Get list of conflicted files
+                conflict_result = subprocess.run(
+                    ["git", "diff", "--name-only", "--diff-filter=U"],
+                    cwd=local_path,
+                    capture_output=True,
+                    text=True,
+                )
+                conflicted_files = [
+                    f for f in conflict_result.stdout.strip().splitlines() if f
+                ]
+
+                # Fetch spec content
+                from uuid import uuid4
+
+                from core.context_assembler import (
+                    ExecutionContext,
+                    build_conflict_resolution_prompt,
+                    read_intent,
+                )
+                from core.invoker import ClaudeCodeInvoker
+
+                spec_content = ""
+                if spec_id is not None:
+                    spec_events = await store.get_events(spec_id, "spec")
+                    for spec_event in spec_events:
+                        if spec_event.event_type == ev.SPEC_CREATED:
+                            spec_content = spec_event.payload.get("content", "")
+                            break
+
+                intent_content = read_intent(local_path)
+                prompt = build_conflict_resolution_prompt(
+                    intent_content=intent_content,
+                    spec_content=spec_content,
+                    conflicted_files=conflicted_files,
+                    merge_output=merge_output,
+                )
+
+                resolution_execution_id = uuid4()
+                context = ExecutionContext(
+                    execution_id=resolution_execution_id,
+                    task_id=task_id,
+                    spec_id=spec_id or task_id,
+                    worktree_path=local_path,
+                    prompt=prompt,
+                )
+                result = ClaudeCodeInvoker().invoke(context)
+
+                if result.status == "completed":
+                    print("Conflict resolution succeeded, continuing deployment.", file=sys.stderr)
+                else:
+                    subprocess.run(
+                        ["git", "merge", "--abort"],
+                        cwd=local_path,
+                        capture_output=True,
+                    )
+                    failure_reason = (
+                        f"Merge conflict: {merge_output}\n"
+                        f"Conflict resolution failed: {result.failure_reason}"
+                    )
+                    print(f"Error: {failure_reason}", file=sys.stderr)
+                    try:
+                        await state_machine.transition(
+                            task_id,
+                            ev.BLOCKED,
+                            extra_payload={"failure_reason": failure_reason},
+                        )
+                    except InvalidTransitionError as exc:
+                        print(f"Error transitioning to blocked: {exc}", file=sys.stderr)
+                    sys.exit(1)
 
             commit_msg = f"feat: {title} (task/{task_id})"
             try:
