@@ -1,8 +1,33 @@
 {% extends "base.html" %}
-
 {% block title %}Features — Ratchet{% endblock %}
-
 {% block content %}
 <h1>Features</h1>
-<p>Coming soon.</p>
+{% set has_any = namespace(value=false) %}
+{% for group in groups %}
+  {% if group.features %}
+    {% set has_any.value = true %}
+    <h2><a href="/projects/{{ group.project.id }}">{{ group.project.name }}</a></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Title</th>
+          <th>Specs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in group.features %}
+        <tr>
+          <td><a href="/features/{{ item.feature.id }}">{{ item.feature.id | string | truncate(8, True, '') }}</a></td>
+          <td><a href="/features/{{ item.feature.id }}">{{ item.feature.title }}</a></td>
+          <td>{{ item.compiled_count }} / {{ item.total_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endfor %}
+{% if not has_any.value %}
+<p class="meta">No features found.</p>
+{% endif %}
 {% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ feature.title }} — Ratchet{% endblock %}
+{% block content %}
+<h1>{{ feature.title }}</h1>
+<p class="meta">Feature: {{ feature.id }}</p>
+{% if project %}
+<p class="meta">Project: <a href="/projects/{{ project.id }}">{{ project.name }}</a></p>
+{% else %}
+<p class="meta">Project: Unknown</p>
+{% endif %}
+<p style="margin-top: 1rem; color: #ccc;">{{ feature.description }}</p>
+
+<h2 style="margin-top: 2rem;">High-Level Specs</h2>
+{% if not specs %}
+<p class="meta">No high-level specs.</p>
+{% endif %}
+{% for spec in specs %}
+<div id="hls-{{ spec.id }}" style="margin-top: 1.5rem; border: 1px solid #333; padding: 1rem; border-radius: 4px;">
+  <h3 style="margin: 0 0 0.5rem 0; color: #eee;">{{ spec.order }}. {{ spec.title }}</h3>
+  {% if spec.compiled %}
+    <span class="status-badge status-compiled">compiled</span>
+    {% if spec.task_id %}
+      &nbsp;<a href="/tasks/{{ spec.task_id }}">task {{ spec.task_id | string | truncate(8, True, '') }}</a>
+    {% endif %}
+  {% else %}
+    <span class="status-badge status-pending">pending</span>
+  {% endif %}
+  {% if spec.dependencies %}
+  <p style="margin: 0.5rem 0 0.25rem; color: #aaa; font-size: 0.85rem;">Depends on:</p>
+  <ul style="margin: 0; padding-left: 1.5rem;">
+    {% for dep in spec.dependencies %}
+      {% if dep in hls_by_id %}
+      <li><a href="#hls-{{ dep }}">{{ hls_by_id[dep].title }}</a></li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <pre style="white-space: pre-wrap; background: #111; padding: 0.75rem; border-radius: 3px; margin-top: 0.75rem; font-size: 0.85rem; color: #ddd;">{{ spec.content }}</pre>
+</div>
+{% endfor %}
+{% endblock %}
