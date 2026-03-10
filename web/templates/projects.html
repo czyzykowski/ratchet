@@ -4,5 +4,26 @@
 
 {% block content %}
 <h1>Projects</h1>
-<p>Coming soon.</p>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Path</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for project in projects %}
+    <tr>
+      <td>{{ project.id | string | truncate(8, True, '') }}</td>
+      <td>{{ project.name }}</td>
+      <td>{{ project.local_path }}</td>
+      <td><a href="/projects/{{ project.id }}">View Tasks</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">No projects found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
 {% endblock %}

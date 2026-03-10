@@ -9,69 +9,15 @@ import sys
 from uuid import UUID
 
 from core import events as ev
+from web.board_builder import (
+    STATUS_LABELS,
+    STATUS_ORDER,
+    build_task,
+    get_task_status,
+    load_board,
+)
 
-STATUS_ORDER = [
-    ev.READY_FOR_SPEC,
-    ev.SPEC_QA,
-    ev.READY_FOR_IMPLEMENTATION,
-    ev.IN_PROGRESS,
-    ev.BLOCKED,
-    ev.READY_FOR_QA,
-    ev.READY_FOR_DEPLOYMENT,
-]
-
-STATUS_LABELS = {
-    ev.READY_FOR_SPEC: "READY FOR SPEC",
-    ev.SPEC_QA: "SPEC QA",
-    ev.READY_FOR_IMPLEMENTATION: "READY FOR IMPLEMENTATION",
-    ev.IN_PROGRESS: "IN PROGRESS",
-    ev.BLOCKED: "BLOCKED",
-    ev.READY_FOR_QA: "READY FOR QA",
-    ev.READY_FOR_DEPLOYMENT: "READY FOR DEPLOYMENT",
-    ev.DEPLOYED: "DEPLOYED",
-    ev.ABANDONED: "ABANDONED",
-}
-
-
-def _get_task_status(task_id: UUID, task_events_cache: dict) -> str | None:
-    """Return the current status of a task from the event cache, or None if unknown."""
-    events = task_events_cache.get(task_id)
-    if not events:
-        return None
-    status = None
-    for event in events:
-        if event.event_type == ev.TASK_CREATED:
-            status = event.payload.get("status", ev.READY_FOR_SPEC)
-        elif event.event_type == ev.TASK_STATUS_CHANGED:
-            status = event.payload["to_status"]
-    return status
-
-
-def _build_task(task_id: UUID, project_id: UUID, task_events: list) -> dict | None:
-    task: dict | None = None
-    refinement_count = 0
-    depends_on: list[str] = []
-    for event in task_events:
-        if event.event_type == ev.TASK_CREATED:
-            p = event.payload
-            task = {
-                "id": task_id,
-                "title": p.get("title", ""),
-                "status": p.get("status", ev.READY_FOR_SPEC),
-                "project_id": project_id,
-                "refinement_count": 0,
-                "depends_on": [],
-            }
-        elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
-            task["status"] = event.payload["to_status"]
-        elif event.event_type == ev.TASK_SPEC_ASSIGNED:
-            refinement_count += 1
-        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
-            depends_on.extend(event.payload.get("depends_on", []))
-    if task is not None:
-        task["refinement_count"] = refinement_count
-        task["depends_on"] = depends_on
-    return task
+__all__ = ["build_task", "get_task_status"]
 
 
 async def main() -> None:
@@ -95,37 +41,11 @@ async def main() -> None:
         sys.exit(1)
 
     from core.db import close_pool
-    from core.project_manager import ProjectManager
     from core.store import PostgresStore
 
     store = PostgresStore()
     try:
-        pm = ProjectManager(store)
-        projects = await pm.list_projects()
-        project_by_id = {p.id: p for p in projects}
-
-        all_tasks: list[dict] = []
-        # Cache task events by task_id for dep status lookups
-        task_events_cache: dict[UUID, list] = {}
-
-        for project in projects:
-            project_task_events = await store.get_events(project.id, "project_tasks")
-            task_ids_seen: set[UUID] = set()
-            task_ids: list[UUID] = []
-            for event in project_task_events:
-                tid_str = event.payload.get("task_id")
-                if tid_str:
-                    tid = UUID(tid_str)
-                    if tid not in task_ids_seen:
-                        task_ids_seen.add(tid)
-                        task_ids.append(tid)
-
-            for task_id in task_ids:
-                task_events = await store.get_events(task_id, "task")
-                task_events_cache[task_id] = task_events
-                task = _build_task(task_id, project.id, task_events)
-                if task is not None:
-                    all_tasks.append(task)
+        all_tasks, project_by_id, task_events_cache = await load_board(store)
 
         print("=== RATCHET BOARD ===")
 
@@ -198,7 +118,7 @@ async def main() -> None:
                     except ValueError:
                         unmet_deps.append(dep_id_str)
                         continue
-                    dep_status = _get_task_status(dep_id, task_events_cache)
+                    dep_status = get_task_status(dep_id, task_events_cache)
                     if dep_status != ev.DEPLOYED:
                         unmet_deps.append(dep_id_str)
                 if unmet_deps:

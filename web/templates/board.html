@@ -3,6 +3,49 @@
 {% block title %}Board — Ratchet{% endblock %}
 
 {% block content %}
-<h1>Board</h1>
-<p>Coming soon.</p>
+<h1>RATCHET BOARD</h1>
+{% for status in STATUS_ORDER %}
+  {% set task_list = tasks_by_status.get(status, []) %}
+  {% if task_list %}
+  <section>
+    <h2>{{ STATUS_LABELS[status] }} <span class="count">({{ task_list | length }})</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Title</th>
+          <th>Project</th>
+          <th>Refinements</th>
+          <th>Deps</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for task in task_list %}
+        <tr>
+          <td><a href="/tasks/{{ task.id }}">{{ task.id | string | truncate(8, True, '') }}</a></td>
+          <td>{{ task.title }}</td>
+          <td>
+            {% set proj = project_by_id.get(task.project_id) %}
+            {% if proj %}
+            <a href="/projects/{{ task.project_id }}">{{ proj.name }}</a>
+            {% else %}
+            unknown
+            {% endif %}
+          </td>
+          <td>{{ task.refinement_count }}</td>
+          <td>
+            {% if task.unmet_deps %}
+            <span class="warn">⚠ {{ task.unmet_deps | join(', ') | truncate(40, True) }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+{% endfor %}
+{% if not tasks_by_status.values() | selectattr('__len__') | list %}
+<p>No tasks found.</p>
+{% endif %}
 {% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ task.title }} — Ratchet{% endblock %}
+
+{% block content %}
+<h1>{{ task.title }}</h1>
+<dl>
+  <dt>ID</dt><dd>{{ task.id }}</dd>
+  <dt>Status</dt><dd><span class="badge badge-{{ task.status }}">{{ task.status | upper | replace('_', ' ') }}</span></dd>
+  <dt>Project</dt>
+  <dd>
+    {% if project %}
+    <a href="/projects/{{ task.project_id }}">{{ project.name }}</a>
+    {% else %}
+    unknown
+    {% endif %}
+  </dd>
+  <dt>Refinements</dt><dd>{{ task.refinement_count }}</dd>
+</dl>
+
+{% if task.depends_on %}
+<h2>Dependencies</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Task ID</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for dep_id_str in task.depends_on %}
+    <tr>
+      <td><a href="/tasks/{{ dep_id_str }}">{{ dep_id_str | truncate(8, True, '') }}</a></td>
+      <td>
+        {% set dep_status = dep_statuses.get(dep_id_str) %}
+        {% if dep_status %}
+        <span class="badge badge-{{ dep_status }}">{{ dep_status | upper | replace('_', ' ') }}</span>
+        {% else %}
+        <span class="badge badge-abandoned">UNKNOWN</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

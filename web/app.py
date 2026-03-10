@@ -1,10 +1,17 @@
+"""FastAPI application for Ratchet web UI."""
+
+from __future__ import annotations
+
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.responses import Response
+
+from core.store import PostgresStore, Store
+from web.routes import board as board_router
+from web.routes import projects as projects_router
+from web.routes import tasks as tasks_router
+from web.templating import templates  # noqa: F401
 
 
 @asynccontextmanager
@@ -12,35 +19,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from core.db import close_pool, get_pool
 
     await get_pool()
+    app.state.store = PostgresStore()
     yield
     await close_pool()
 
 
 app = FastAPI(title="Ratchet", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
-templates = Jinja2Templates(directory="web/templates")
+app.include_router(board_router.router)
+app.include_router(projects_router.router)
+app.include_router(tasks_router.router)
 
 
-@app.get("/")
-async def index(request: Request) -> Response:
-    return templates.TemplateResponse("index.html", {"request": request, "title": "Ratchet"})
-
-
-@app.get("/board")
-async def board(request: Request) -> Response:
-    return templates.TemplateResponse("board.html", {"request": request, "title": "Board"})
-
-
-@app.get("/projects")
-async def projects(request: Request) -> Response:
-    return templates.TemplateResponse("projects.html", {"request": request, "title": "Projects"})
-
-
-@app.get("/blocked")
-async def blocked(request: Request) -> Response:
-    return templates.TemplateResponse("blocked.html", {"request": request, "title": "Blocked"})
-
-
-@app.get("/features")
-async def features(request: Request) -> Response:
-    return templates.TemplateResponse("features.html", {"request": request, "title": "Features"})
+def get_store(request: Request) -> Store:
+    return request.app.state.store  # type: ignore[no-any-return]
