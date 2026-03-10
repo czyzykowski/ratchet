@@ -307,6 +307,56 @@ async def get_next_qa_task(
     return candidates[0]
 
 
+def _create_qa_worktree(
+    project_path: str, execution_branch: str | None
+) -> tuple[str, str | None]:
+    """Create a temporary worktree on the execution branch for QA testing.
+
+    Symlinks .venv from the project root so relative .venv/bin/python commands work.
+    Returns (cwd, worktree_path): cwd is where QA steps should run,
+    worktree_path is the path to remove afterwards (None if no worktree was created).
+    Falls back to (project_path, None) on any error.
+    """
+    if not execution_branch:
+        return project_path, None
+
+    import uuid as _uuid
+
+    qa_id = str(_uuid.uuid4())[:8]
+    qa_path = os.path.join(project_path, ".worktrees", f"qa-{qa_id}")
+    try:
+        _subprocess.run(
+            ["git", "worktree", "add", qa_path, execution_branch],
+            cwd=project_path,
+            check=True,
+            capture_output=True,
+        )
+        venv_src = os.path.join(project_path, ".venv")
+        venv_dst = os.path.join(qa_path, ".venv")
+        if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
+            os.symlink(venv_src, venv_dst)
+        return qa_path, qa_path
+    except Exception:
+        logger.warning(
+            "Failed to create QA worktree for branch %s, falling back to project path",
+            execution_branch,
+        )
+        return project_path, None
+
+
+def _remove_qa_worktree(project_path: str, qa_path: str) -> None:
+    """Remove a temporary QA worktree."""
+    try:
+        _subprocess.run(
+            ["git", "worktree", "remove", "--force", qa_path],
+            cwd=project_path,
+            check=False,
+            capture_output=True,
+        )
+    except Exception:
+        logger.warning("Failed to remove QA worktree at %s", qa_path)
+
+
 def _get_qa_fix_attempts(task_events: list[Any]) -> int:
     """Read qa_fix_attempts from the latest TASK_STATUS_CHANGED event payload (default 0)."""
     attempts = 0
@@ -352,8 +402,23 @@ async def run_qa_once(
         await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
         return True
 
-    # Step 3: run tool steps
-    step_results = run_qa_steps(config, project.local_path)
+    # Step 3: look up execution branch and run tool steps in that branch's worktree
+    execution_events = await store.get_events(task.id, "task_executions")
+    execution_branch: str | None = None
+    for event in reversed(execution_events):
+        if event.event_type == ev.EXECUTION_STARTED:
+            bn = event.payload.get("branch_name")
+            if bn:
+                execution_branch = bn
+            break
+
+    qa_cwd, qa_worktree_path = _create_qa_worktree(project.local_path, execution_branch)
+    try:
+        step_results = run_qa_steps(config, qa_cwd)
+    finally:
+        if qa_worktree_path is not None:
+            _remove_qa_worktree(project.local_path, qa_worktree_path)
+
     failed_steps = [r for r in step_results if r.returncode != 0]
 
     if failed_steps:
@@ -406,15 +471,6 @@ async def run_qa_once(
         return True
 
     # Step 4: all steps pass — run Claude review
-    # Look up the execution branch so QA diffs the right thing.
-    execution_events = await store.get_events(task.id, "task_executions")
-    execution_branch: str | None = None
-    for event in reversed(execution_events):
-        if event.event_type == ev.EXECUTION_STARTED:
-            bn = event.payload.get("branch_name")
-            if bn:
-                execution_branch = bn
-            break
     diff = get_git_diff(project.local_path, execution_branch)
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
