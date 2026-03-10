@@ -602,20 +602,20 @@ async def notification_loop(
                     raise exc
 
 
-def main() -> None:
+def main(watchdog_timeout: int = 300) -> None:
     """Initialize all components with PostgresStore and run once."""
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    asyncio.run(_main_async())
+    asyncio.run(_main_async(watchdog_timeout=watchdog_timeout))
 
 
-async def _main_async() -> None:
+async def _main_async(watchdog_timeout: int = 300) -> None:
     from core.db import close_pool
     from core.store import PostgresStore
 
     store = PostgresStore()
-    invoker = ClaudeCodeInvoker()
+    invoker = ClaudeCodeInvoker(watchdog_timeout=watchdog_timeout)
     try:
         await compile_once(store)
         await run_once(store, invoker)
@@ -624,7 +624,7 @@ async def _main_async() -> None:
         await close_pool()
 
 
-async def _main_loop_async() -> None:
+async def _main_loop_async(watchdog_timeout: int = 300) -> None:
     import os
     import signal
 
@@ -633,7 +633,7 @@ async def _main_loop_async() -> None:
 
     dsn = os.environ["DATABASE_URL"]
     store = PostgresStore()
-    invoker = ClaudeCodeInvoker()
+    invoker = ClaudeCodeInvoker(watchdog_timeout=watchdog_timeout)
 
     loop = asyncio.get_running_loop()
     current_task = asyncio.current_task()
@@ -652,9 +652,9 @@ async def _main_loop_async() -> None:
         await close_pool()
 
 
-def main_loop_entry() -> None:
+def main_loop_entry(watchdog_timeout: int = 300) -> None:
     """Initialize all components with PostgresStore and run the continuous loop."""
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    asyncio.run(_main_loop_async())
+    asyncio.run(_main_loop_async(watchdog_timeout=watchdog_timeout))

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Execution {{ execution.id }} — Ratchet{% endblock %}
+
+{% block content %}
+<h1>Execution <span class="meta">{{ execution.id }}</span></h1>
+
+<dl>
+  <dt>Task</dt>
+  <dd><a href="/tasks/{{ execution.task_id }}">{{ execution.task_id }}</a></dd>
+  <dt>Spec</dt>
+  <dd>{{ execution.spec_id }}</dd>
+  <dt>Status</dt>
+  <dd><span class="badge badge-{{ execution.status }}">{{ execution.status }}</span></dd>
+  <dt>Branch</dt>
+  <dd>{{ execution.branch_name or '—' }}</dd>
+  <dt>Started</dt>
+  <dd>{{ execution.started_at or '—' }}</dd>
+  <dt>Completed</dt>
+  <dd>{{ execution.completed_at or '—' }}</dd>
+  {% if execution.failure_reason %}
+  <dt>Failure Reason</dt>
+  <dd class="warn">{{ execution.failure_reason }}</dd>
+  {% endif %}
+</dl>
+
+<h2>Trace</h2>
+{% if trace_content %}
+<div style="max-height: 60vh; overflow-y: auto; background: #0d0d0d; padding: 1rem; border: 1px solid #30363d;">
+  <pre class="trace">{{ trace_content }}</pre>
+</div>
+{% else %}
+<p class="meta">No trace available.</p>
+{% endif %}
+{% endblock %}

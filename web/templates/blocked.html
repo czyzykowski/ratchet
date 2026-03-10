@@ -3,6 +3,40 @@
 {% block title %}Blocked — Ratchet{% endblock %}
 
 {% block content %}
-<h1>Blocked</h1>
-<p>Coming soon.</p>
+<h1>Blocked Tasks <span class="count">({{ count }})</span></h1>
+
+{% if count == 0 %}
+<p class="meta">No blocked tasks.</p>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Task</th>
+      <th>Project</th>
+      <th>Spec</th>
+      <th>Refinements</th>
+      <th>Last Failure</th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in blocked_tasks %}
+    <tr>
+      <td><a href="/tasks/{{ t.id }}">{{ t.title }}</a></td>
+      <td>{{ t.project_name }}</td>
+      <td>{{ t.spec_id[:8] if t.spec_id else '—' }}</td>
+      <td>{{ t.refinement_count }}</td>
+      <td>
+        {% if t.failure_reason %}
+        <span class="warn" title="{{ t.failure_reason }}">{{ t.failure_reason[:120] }}{% if t.failure_reason | length > 120 %}…{% endif %}</span>
+        {% else %}
+        <span class="meta">—</span>
+        {% endif %}
+      </td>
+      <td><a href="/tasks/{{ t.id }}/spec/new" class="btn">Assign New Spec</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% endblock %}

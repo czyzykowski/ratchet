@@ -8,9 +8,16 @@ parser.add_argument(
     action="store_true",
     help="Run a single pass (process one implementation task and one QA task) then exit",
 )
+parser.add_argument(
+    "--watchdog-timeout",
+    type=int,
+    default=300,
+    metavar="SECONDS",
+    help="Seconds of silence before watchdog warning (default: 300)",
+)
 args = parser.parse_args()
 
 if args.once:
-    main()
+    main(watchdog_timeout=args.watchdog_timeout)
 else:
-    main_loop_entry()
+    main_loop_entry(watchdog_timeout=args.watchdog_timeout)

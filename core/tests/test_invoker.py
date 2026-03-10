@@ -1,15 +1,23 @@
-"""Unit tests for core/invoker.py — subprocess.run is mocked throughout."""
+"""Unit tests for core/invoker.py — subprocess.Popen is mocked throughout."""
 
 from __future__ import annotations
 
 import os
+import subprocess
+import threading
+import time
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from core.context_assembler import ExecutionContext
-from core.invoker import ClaudeCodeInvoker, InvocationResult, get_traces_dir, parse_output
+from core.invoker import (
+    ClaudeCodeInvoker,
+    InvocationResult,
+    _watchdog_loop,
+    get_traces_dir,
+    parse_output,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -25,9 +33,14 @@ def _make_context(worktree_path: str = "/tmp/worktree") -> ExecutionContext:
     )
 
 
-def _fake_run(stdout: str = "", stderr: str = "", returncode: int = 0):
-    """Return a mock subprocess.CompletedProcess-like object."""
-    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+def _fake_popen(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
+    """Return a mock Popen-like object with iterable stdout/stderr."""
+    mock = MagicMock()
+    mock.stdout = iter(stdout.splitlines(keepends=True))
+    mock.stderr = iter(stderr.splitlines(keepends=True))
+    mock.wait.return_value = returncode
+    mock.returncode = returncode
+    return mock
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +146,10 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: all tasks done")):
+        with patch(
+            "subprocess.Popen",
+            return_value=_fake_popen(stdout="COMPLETED: all tasks done"),
+        ):
             result = invoker.invoke(ctx)
 
         assert isinstance(result, InvocationResult)
@@ -146,7 +162,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
         output = "BLOCKED: missing TEST_DATABASE_URL\n\nfurther info"
 
-        with patch("subprocess.run", return_value=_fake_run(stdout=output)):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout=output)):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
@@ -156,7 +172,10 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="fatal error", returncode=1)):
+        with patch(
+            "subprocess.Popen",
+            return_value=_fake_popen(stdout="fatal error", returncode=1),
+        ):
             result = invoker.invoke(ctx)
 
         assert result.status == "crashed"
@@ -166,7 +185,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="I did some stuff")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="I did some stuff")):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
@@ -176,7 +195,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: done")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
             result = invoker.invoke(ctx)
 
         trace = Path(result.trace_path)
@@ -189,7 +208,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: ok")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: ok")):
             result = invoker.invoke(ctx)
 
         expected_path = tmp_path / f"{ctx.execution_id}.md"
@@ -199,7 +218,10 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="boom", returncode=2)):
+        with patch(
+            "subprocess.Popen",
+            return_value=_fake_popen(stdout="boom", returncode=2),
+        ):
             result = invoker.invoke(ctx)
 
         assert Path(result.trace_path).exists()
@@ -208,7 +230,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="BLOCKED: something")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="BLOCKED: something")):
             result = invoker.invoke(ctx)
 
         assert Path(result.trace_path).exists()
@@ -217,7 +239,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: done")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
             result = invoker.invoke(ctx)
 
         content = Path(result.trace_path).read_text()
@@ -231,8 +253,8 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
         with patch(
-            "subprocess.run",
-            return_value=_fake_run(stdout="COMPLETED: ok", stderr="warning: something"),
+            "subprocess.Popen",
+            return_value=_fake_popen(stdout="COMPLETED: ok", stderr="warning: something"),
         ):
             result = invoker.invoke(ctx)
 
@@ -243,7 +265,7 @@ class TestClaudeCodeInvoker:
         ctx = _make_context()
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: done")):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
             result = invoker.invoke(ctx)
 
         assert result.execution_id == ctx.execution_id
@@ -252,17 +274,21 @@ class TestClaudeCodeInvoker:
         ctx = _make_context(worktree_path=str(tmp_path))
         invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
 
-        with patch("subprocess.run", return_value=_fake_run(stdout="COMPLETED: ok")) as mock_run:
+        with patch(
+            "subprocess.Popen",
+            return_value=_fake_popen(stdout="COMPLETED: ok"),
+        ) as mock_popen:
             invoker.invoke(ctx)
 
-        call_args = mock_run.call_args
+        call_args = mock_popen.call_args
         cmd = call_args.args[0]
         assert cmd[0] == "claude"
         assert "-p" in cmd
         assert ctx.prompt in cmd
         assert "--allowedTools" in cmd
         assert call_args.kwargs["cwd"] == ctx.worktree_path
-        assert call_args.kwargs["capture_output"] is True
+        assert call_args.kwargs["stdout"] == subprocess.PIPE
+        assert call_args.kwargs["stderr"] == subprocess.PIPE
         assert call_args.kwargs["text"] is True
 
     def test_traces_dir_created_if_missing(self, tmp_path):
@@ -287,10 +313,86 @@ class TestClaudeCodeInvoker:
             "Set TEST_DATABASE_URL in .env\n"
         )
 
-        with patch("subprocess.run", return_value=_fake_run(stdout=output)):
+        with patch("subprocess.Popen", return_value=_fake_popen(stdout=output)):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
         assert "missing TEST_DATABASE_URL" in result.failure_reason
         # Should not include content after blank line
         assert "User action required" not in result.failure_reason
+
+
+# ---------------------------------------------------------------------------
+# TestWatchdog
+# ---------------------------------------------------------------------------
+
+class TestWatchdog:
+    def test_warning_fires_after_threshold(self, capsys):
+        """Watchdog prints warning when silent_for exceeds threshold."""
+        stop = threading.Event()
+        threshold = 60
+        base = 100.0
+
+        stop.wait = MagicMock(side_effect=[False, True])
+
+        with patch("time.monotonic", return_value=base + threshold + 1):
+            _watchdog_loop(uuid4(), lambda: base, stop, threshold, _interval=0)
+
+        captured = capsys.readouterr()
+        assert "[watchdog]" in captured.err
+        assert f"silent for {threshold + 1}s" in captured.err
+        assert f"(threshold {threshold}s)" in captured.err
+
+    def test_warning_repeats_at_each_threshold_interval(self, capsys):
+        """Watchdog re-warns after another threshold period of silence."""
+        stop = threading.Event()
+        threshold = 60
+        base = 100.0
+        old_activity = base
+
+        stop.wait = MagicMock(side_effect=[False, False, True])
+
+        with patch("time.monotonic") as mock_mono:
+            mock_mono.side_effect = [
+                base + threshold + 1,       # iter 1: warn, last_warned set
+                base + threshold * 2 + 2,   # iter 2: now - last_warned >= threshold → warn
+            ]
+            _watchdog_loop(
+                uuid4(), lambda: old_activity, stop, threshold, _interval=0
+            )
+
+        captured = capsys.readouterr()
+        assert captured.err.count("[watchdog]") == 2
+
+    def test_no_warning_when_output_is_active(self, capsys):
+        """Watchdog does not warn when activity is recent."""
+        stop = threading.Event()
+        threshold = 60
+        base = 100.0
+
+        stop.wait = MagicMock(side_effect=[False, True])
+
+        # now - last_activity = 10s, below threshold
+        with patch("time.monotonic", return_value=base + 10):
+            _watchdog_loop(uuid4(), lambda: base, stop, threshold, _interval=0)
+
+        captured = capsys.readouterr()
+        assert "[watchdog]" not in captured.err
+
+    def test_watchdog_thread_stops_after_process_exits(self):
+        """Watchdog daemon thread exits promptly when stop event is set."""
+        stop = threading.Event()
+
+        def get_activity() -> float:
+            return time.monotonic()
+
+        t = threading.Thread(
+            target=_watchdog_loop,
+            args=(uuid4(), get_activity, stop, 300),
+            kwargs={"_interval": 1},
+            daemon=True,
+        )
+        t.start()
+        stop.set()
+        t.join(timeout=5)
+        assert not t.is_alive()
