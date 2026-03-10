@@ -136,7 +136,7 @@ class ClaudeCodeInvoker:
         4. Call parse_output(output, returncode) to determine status
         5. Return InvocationResult
         """
-        cmd = ["claude", "-p", context.prompt, "--allowedTools", _ALLOWED_TOOLS]
+        cmd = ["claude", "-p", "--allowedTools", _ALLOWED_TOOLS]
 
         # Strip CLAUDECODE so nested sessions don't fail when worker runs inside Claude Code
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
@@ -170,6 +170,7 @@ class ClaudeCodeInvoker:
         proc = subprocess.Popen(
             cmd,
             cwd=context.worktree_path,
+            stdin=PIPE,
             stdout=PIPE,
             stderr=PIPE,
             text=True,
@@ -177,6 +178,10 @@ class ClaudeCodeInvoker:
         )
         with self._proc_lock:
             self._proc = proc
+
+        assert proc.stdin is not None
+        proc.stdin.write(context.prompt)
+        proc.stdin.close()
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []

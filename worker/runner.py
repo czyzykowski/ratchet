@@ -488,7 +488,8 @@ async def run_qa_once(
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
     review_proc = _subprocess.run(
-        ["claude", "-p", review_prompt, "--allowedTools", "Bash,Read,Glob,Grep"],
+        ["claude", "-p", "--allowedTools", "Bash,Read,Glob,Grep"],
+        input=review_prompt,
         cwd=project.local_path,
         capture_output=True,
         text=True,

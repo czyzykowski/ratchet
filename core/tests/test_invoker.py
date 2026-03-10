@@ -284,9 +284,10 @@ class TestClaudeCodeInvoker:
         cmd = call_args.args[0]
         assert cmd[0] == "claude"
         assert "-p" in cmd
-        assert ctx.prompt in cmd
+        assert ctx.prompt not in cmd
         assert "--allowedTools" in cmd
         assert call_args.kwargs["cwd"] == ctx.worktree_path
+        assert call_args.kwargs["stdin"] == subprocess.PIPE
         assert call_args.kwargs["stdout"] == subprocess.PIPE
         assert call_args.kwargs["stderr"] == subprocess.PIPE
         assert call_args.kwargs["text"] is True
