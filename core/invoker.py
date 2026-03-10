@@ -118,6 +118,14 @@ class ClaudeCodeInvoker:
             self.traces_dir = str(path.resolve())
         assert Path(self.traces_dir).is_dir(), f"traces dir not created: {self.traces_dir}"
         self.watchdog_timeout = watchdog_timeout
+        self._proc: subprocess.Popen | None = None  # type: ignore[type-arg]
+        self._proc_lock = threading.Lock()
+
+    def terminate(self) -> None:
+        """Terminate the currently running subprocess, if any."""
+        with self._proc_lock:
+            if self._proc is not None:
+                self._proc.terminate()
 
     def invoke(self, context: ExecutionContext) -> InvocationResult:
         """Invoke Claude Code with assembled context.
@@ -167,6 +175,8 @@ class ClaudeCodeInvoker:
             text=True,
             env=env,
         )
+        with self._proc_lock:
+            self._proc = proc
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -180,6 +190,8 @@ class ClaudeCodeInvoker:
 
         returncode = proc.wait()
 
+        with self._proc_lock:
+            self._proc = None
         stop_event.set()
         watchdog_thread.join()
 

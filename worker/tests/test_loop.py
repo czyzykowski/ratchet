@@ -180,7 +180,7 @@ class _MockNotificationListener:
 
 
 async def test_notification_loop_runs_catchup_on_startup() -> None:
-    """notification_loop calls compile_once, run_once and run_qa_once on startup."""
+    """notification_loop calls run_qa_once, run_once, and compile_once on startup (all return False so all run)."""
     store = InMemoryStore()
     invoker = _make_invoker()
 
@@ -248,8 +248,9 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
 
-    # Startup catchup = 1 compile_once + 1 run_once + 1 run_qa_once
-    # 2 task notifications = 2 more run_once + 2 more run_qa_once
+    # Priority order: run_qa_once → run_once → compile_once (compile skipped when run_once returns True)
+    # Startup catchup: 1 run_qa_once (False) + 1 run_once (True)
+    # 2 task notifications: 2 more run_qa_once + 2 more run_once
     run_once_count = dispatch_calls.count("run_once")
     run_qa_count = dispatch_calls.count("run_qa_once")
     assert run_once_count >= 3  # 1 catchup + 2 notifications

@@ -538,9 +538,12 @@ async def notification_loop(
     active = False
 
     async def _dispatch_one() -> None:
-        """Run one pass of run_once + run_qa_once."""
-        await run_once(store, invoker)
-        await run_qa_once(store, invoker)
+        """Run one pass: QA first, then implementation, then compilation."""
+        did_qa = await run_qa_once(store, invoker)
+        if not did_qa:
+            did_impl = await run_once(store, invoker)
+            if not did_impl:
+                await compile_once(store)
 
     async def _notification_producer(listener: NotificationListener) -> None:
         async for event_tuple in listener.listen():
@@ -550,7 +553,6 @@ async def notification_loop(
         nonlocal active
         # Startup catchup
         logger.info("Worker: running startup catchup")
-        await compile_once(store)
         await _dispatch_one()
 
         while True:
@@ -566,10 +568,7 @@ async def notification_loop(
                 )
             active = True
             try:
-                if kind == "compile":
-                    await compile_once(store)
-                else:
-                    await _dispatch_one()
+                await _dispatch_one()
             finally:
                 active = False
                 queue.task_done()
@@ -617,9 +616,11 @@ async def _main_async(watchdog_timeout: int = 300) -> None:
     store = PostgresStore()
     invoker = ClaudeCodeInvoker(watchdog_timeout=watchdog_timeout)
     try:
-        await compile_once(store)
-        await run_once(store, invoker)
-        await run_qa_once(store, invoker)
+        did_qa = await run_qa_once(store, invoker)
+        if not did_qa:
+            did_impl = await run_once(store, invoker)
+            if not did_impl:
+                await compile_once(store)
     finally:
         await close_pool()
 
@@ -639,6 +640,7 @@ async def _main_loop_async(watchdog_timeout: int = 300) -> None:
     current_task = asyncio.current_task()
 
     def _handle_sigint() -> None:
+        invoker.terminate()
         if current_task:
             current_task.cancel()
 
