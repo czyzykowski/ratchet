@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -148,8 +148,8 @@ class ClaudeCodeInvoker:
             with lock:
                 return last_activity[0]
 
-        def read_stream(stream: object, lines: list[str]) -> None:
-            for line in stream:  # type: ignore[union-attr]
+        def read_stream(stream: Iterable[str], lines: list[str]) -> None:
+            for line in stream:
                 lines.append(line)
                 with lock:
                     last_activity[0] = time.monotonic()
