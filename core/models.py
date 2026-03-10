@@ -48,6 +48,26 @@ class Spec(BaseModel):
     created_at: datetime
 
 
+class Feature(BaseModel):
+    id: UUID
+    project_id: UUID
+    title: str
+    description: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class HighLevelSpec(BaseModel):
+    id: UUID
+    feature_id: UUID
+    task_id: UUID | None
+    title: str
+    order: int
+    content: str
+    compiled: bool
+    dependencies: list[UUID]
+
+
 class Execution(BaseModel):
     id: UUID
     task_id: UUID

@@ -30,6 +30,17 @@ DEPLOYED = "deployed"
 
 ABANDONED = "abandoned"
 
+# Feature events
+FEATURE_CREATED = "feature.created"
+HIGH_LEVEL_SPEC_ADDED = "high_level_spec.added"
+HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
+
+# Feature status constants (derived, not stored)
+FEATURE_DRAFT = "draft"
+FEATURE_GENERATED = "generated"
+FEATURE_IN_PROGRESS = "in_progress"
+FEATURE_DONE = "done"
+
 TASK_STATUSES = (
     READY_FOR_SPEC,
     SPEC_QA,
