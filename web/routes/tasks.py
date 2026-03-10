@@ -16,7 +16,7 @@ router = APIRouter()
 
 @router.get("/tasks/{task_id}", response_class=HTMLResponse)
 async def task_detail(task_id: UUID, request: Request) -> Response:
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     async with pool.connection() as conn:
         task = await queries.get_task(conn, task_id)
         if task is None:
@@ -54,7 +54,7 @@ async def task_detail(task_id: UUID, request: Request) -> Response:
 
 @router.get("/tasks/{task_id}/spec/new", response_class=HTMLResponse)
 async def spec_new_form(task_id: UUID, request: Request) -> Response:
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     async with pool.connection() as conn:
         task = await queries.get_task(conn, task_id)
     if task is None:
@@ -76,7 +76,7 @@ async def assign_spec(
     from core.state_machine import InvalidTransitionError, TaskStateMachine
     from core.store import PostgresStore
 
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     store = PostgresStore(pool)
     state_machine = TaskStateMachine(store)
     spec_manager = SpecManager(store)

@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/specs/{spec_id}", response_class=HTMLResponse)
 async def spec_detail(spec_id: UUID, request: Request) -> Response:
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     async with pool.connection() as conn:
         spec = await queries.get_spec(conn, spec_id)
         if spec is None:

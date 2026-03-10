@@ -74,7 +74,7 @@ async def project_detail(project_id: UUID, request: Request) -> HTMLResponse:
 
 @router.get("/projects/{project_id}/tasks/new", response_class=HTMLResponse)
 async def new_task_form(project_id: UUID, request: Request) -> Response:
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     async with pool.connection() as conn:
         project = await queries.get_project(conn, project_id)
         if project is None:
@@ -99,7 +99,7 @@ async def create_task(
 ) -> Response:
     from core.store import PostgresStore
 
-    pool = request.app.state.pool  # type: ignore[attr-defined]
+    pool = request.app.state.pool
     store = PostgresStore(pool)
 
     task_id = uuid4()
