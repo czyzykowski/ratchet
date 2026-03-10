@@ -4,5 +4,4 @@ qa:
     test: ".venv/bin/python -m pytest core/tests/ web/tests/ -v"
     lint: "ruff check ."
     typecheck: "mypy core/ worker/ web/"
-    build-ui: "npm ci --prefix ui && npm --prefix ui run build"
-    typecheck-ui: "npm --prefix ui run typecheck"
+    build-spa: "npm ci --prefix web/spa && npm --prefix web/spa run build"
