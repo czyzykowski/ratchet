@@ -20,6 +20,7 @@ from web.routes import projects as projects_router
 from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
 from web.routes import worker as worker_router
+from web.routes.api.router import api_router
 from web.templating import templates  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ app.include_router(projects_router.router)
 app.include_router(specs_router.router)
 app.include_router(tasks_router.router)
 app.include_router(worker_router.router)
+app.include_router(api_router)
 
 
 def get_store(request: Request) -> Store:

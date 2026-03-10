@@ -9,6 +9,7 @@ TASK_CREATED = "task.created"
 TASK_STATUS_CHANGED = "task.status_changed"
 TASK_SPEC_ASSIGNED = "task.spec_assigned"
 TASK_DEPENDENCY_ADDED = "task.dependency_added"
+TASK_TITLE_UPDATED = "task.title_updated"
 
 # Spec events
 SPEC_CREATED = "spec.created"
