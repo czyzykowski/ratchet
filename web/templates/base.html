@@ -28,6 +28,10 @@
         .badge-ready_for_deployment { background: #4a3a1a; color: #e3c87e; }
         .badge-deployed { background: #2d4a3a; color: #7ee3b4; }
         .badge-abandoned { background: #2a2a2a; color: #888; }
+        .status-badge { display: inline-block; padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.78rem; font-weight: bold; }
+        .status-compiled { background: #1b3a2d; color: #3fb950; }
+        .status-pending  { background: #21262d; color: #8b949e; }
+        .meta { color: #888; font-size: 0.85rem; }
         .warn { color: #e37e7e; font-size: 0.8rem; }
         .count { color: #888; font-size: 0.85rem; }
         section { margin-bottom: 2rem; }
@@ -39,6 +43,7 @@
     <nav>
         <a href="/">Board</a>
         <a href="/projects">Projects</a>
+        <a href="/features">Features</a>
     </nav>
     <main>
         {% block content %}{% endblock %}
