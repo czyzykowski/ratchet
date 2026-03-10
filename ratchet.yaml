@@ -5,3 +5,4 @@ qa:
     lint: "ruff check ."
     typecheck: "mypy core/ worker/ web/"
     build-spa: "npm ci --prefix web/spa && npm --prefix web/spa run build"
+    typecheck-spa: "npm --prefix web/spa run typecheck"
