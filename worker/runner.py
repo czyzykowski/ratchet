@@ -200,7 +200,7 @@ async def run_once(
         spec.id,
     )
 
-    await state_machine.transition(task.id, ev.IN_PROGRESS)
+    await state_machine.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
 
     try:
         execution = await execution_manager.start_execution(task.id, spec.id)
