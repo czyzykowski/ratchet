@@ -25,6 +25,14 @@
 </p>
 {% endif %}
 
+{% if task.status == "blocked" %}
+<p>
+  <form method="post" action="/tasks/{{ task.id }}/reset">
+    <button type="submit" class="btn">Reset to Ready</button>
+  </form>
+</p>
+{% endif %}
+
 {% if deps %}
 <h2>Dependencies</h2>
 <ul>

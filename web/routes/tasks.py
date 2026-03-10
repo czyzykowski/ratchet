@@ -265,3 +265,19 @@ async def deploy_task(
     await state_machine.transition(task_id, ev.DEPLOYED)
     request.session["flash"] = f"Deployed: {task['title']}"
     return RedirectResponse(url="/", status_code=303)
+
+
+@router.post("/tasks/{task_id}/reset")
+async def reset_task(request: Request, task_id: UUID) -> Response:
+    pool = request.app.state.pool
+    store = PostgresStore(pool)
+    state_machine = TaskStateMachine(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    if current_status != ev.BLOCKED:
+        raise HTTPException(status_code=400, detail=f"Task {task_id} is not blocked")
+
+    await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    return RedirectResponse(url=f"/tasks/{task_id}", status_code=303)
