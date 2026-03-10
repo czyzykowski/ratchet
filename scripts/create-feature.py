@@ -213,18 +213,33 @@ async def persist_feature(
     print(f"\nCreated feature: {feature.title}")
     print(f"Feature ID: {feature.id}")
 
-    # First pass: create all HLS objects to get their IDs
-    hls_by_order: dict[int, object] = {}
+    from core.models import HighLevelSpec
+
+    # Create specs in order so that dependencies (always lower-order) are available inline.
+    hls_by_order: dict[int, HighLevelSpec] = {}
     for spec_def in sorted(specs, key=lambda s: s["order"]):
+        dep_indices = spec_def.get("dep_indices", [])
+        dep_uuids = []
+        for idx in dep_indices:
+            dep_hls = hls_by_order.get(idx)
+            if dep_hls is not None:
+                dep_uuids.append(dep_hls.id)
+            else:
+                print(
+                    f"  Warning: dep index {idx} not found for spec [{spec_def['order']}]",
+                    file=sys.stderr,
+                )
+
         hls = await fm.add_high_level_spec(
             feature_id=feature.id,
             title=spec_def["title"],
             order=spec_def["order"],
             content=spec_def["content"],
-            dependencies=[],  # resolve after creation
+            dependencies=dep_uuids,
         )
         hls_by_order[spec_def["order"]] = hls
-        print(f"  Added spec [{spec_def['order']}]: {spec_def['title']}")
+        dep_note = f" (deps: {dep_indices})" if dep_indices else ""
+        print(f"  Added spec [{spec_def['order']}]: {spec_def['title']}{dep_note}")
 
     print(f"\nFeature created with {len(specs)} high-level spec(s).")
     print(f"Feature ID: {feature.id}")
