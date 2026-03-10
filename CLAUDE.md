@@ -83,6 +83,12 @@ scripts/run-spec.sh specs/10-update-claude-md.md
 .venv/bin/python scripts/add-task.py --project-id <uuid> --title "My task"
 ```
 
+## QA Pipeline
+
+Any new top-level module directory must have its `tests/` subdirectory added to both the `test` and `typecheck` steps in `ratchet.yaml`. For example, adding a `newmodule/` package requires:
+- `test` step: append `newmodule/tests/` to the pytest command
+- `typecheck` step: append `newmodule/` to the mypy command
+
 ## Operational Scripts
 
 ```

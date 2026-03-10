@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from core import events as ev
 
@@ -24,7 +25,7 @@ class NotificationListener:
     def __init__(self, dsn: str, max_workers: int = 1) -> None:
         self._dsn = dsn
         self.max_workers = max_workers
-        self._conn = None
+        self._conn: Any = None
 
     async def __aenter__(self) -> NotificationListener:
         return self

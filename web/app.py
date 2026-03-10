@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.responses import Response
 
 
 @asynccontextmanager
@@ -21,25 +22,25 @@ templates = Jinja2Templates(directory="web/templates")
 
 
 @app.get("/")
-async def index(request: Request):
+async def index(request: Request) -> Response:
     return templates.TemplateResponse("index.html", {"request": request, "title": "Ratchet"})
 
 
 @app.get("/board")
-async def board(request: Request):
+async def board(request: Request) -> Response:
     return templates.TemplateResponse("board.html", {"request": request, "title": "Board"})
 
 
 @app.get("/projects")
-async def projects(request: Request):
+async def projects(request: Request) -> Response:
     return templates.TemplateResponse("projects.html", {"request": request, "title": "Projects"})
 
 
 @app.get("/blocked")
-async def blocked(request: Request):
+async def blocked(request: Request) -> Response:
     return templates.TemplateResponse("blocked.html", {"request": request, "title": "Blocked"})
 
 
 @app.get("/features")
-async def features(request: Request):
+async def features(request: Request) -> Response:
     return templates.TemplateResponse("features.html", {"request": request, "title": "Features"})

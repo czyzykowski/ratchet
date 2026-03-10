@@ -44,7 +44,7 @@ asyncio_mode = "auto"
 [tool.mypy]
 strict = true
 python_version = "3.12"
-exclude = ["core/tests/", "worker/tests/", "web/"]
+exclude = ["core/tests/", "worker/tests/"]
 python_executable = ".venv/bin/python"
 
 [[tool.mypy.overrides]]

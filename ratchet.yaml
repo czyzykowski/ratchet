@@ -1,6 +1,6 @@
 qa:
   max_fix_attempts: 3
   steps:
-    test: ".venv/bin/python -m pytest core/tests/ -v"
+    test: ".venv/bin/python -m pytest core/tests/ web/tests/ -v"
     lint: "ruff check ."
-    typecheck: "mypy core/ worker/"
+    typecheck: "mypy core/ worker/ web/"
