@@ -11,17 +11,18 @@ from core import events as ev
 from worker.listener import _ACTIONABLE_STATUSES, NotificationListener
 
 
-def _make_notify(payload: str | None) -> MagicMock:
+def _make_notify(payload: str | None, channel: str = "ratchet_task_status") -> MagicMock:
     n = MagicMock()
     n.payload = payload
+    n.channel = channel
     return n
 
 
 async def _collect_from_mock_conn(
     notifications: list[MagicMock],
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, str]]:
     """Helper: run NotificationListener as async context manager against a mock connection."""
-    collected: list[tuple[str, str]] = []
+    collected: list[tuple[str, str, str]] = []
 
     async def _fake_notifies() -> AsyncGenerator[MagicMock, None]:
         for n in notifications:
@@ -54,7 +55,7 @@ async def test_ready_for_implementation_passes_through() -> None:
 
     result = await _collect_from_mock_conn(notifications)
 
-    assert result == [(task_id, ev.READY_FOR_IMPLEMENTATION)]
+    assert result == [("task", task_id, ev.READY_FOR_IMPLEMENTATION)]
 
 
 async def test_ready_for_qa_passes_through() -> None:
@@ -64,7 +65,7 @@ async def test_ready_for_qa_passes_through() -> None:
 
     result = await _collect_from_mock_conn(notifications)
 
-    assert result == [(task_id, ev.READY_FOR_QA)]
+    assert result == [("task", task_id, ev.READY_FOR_QA)]
 
 
 # ---------------------------------------------------------------------------
@@ -151,21 +152,21 @@ async def test_missing_status_is_skipped() -> None:
 async def test_queue_holds_notifications_during_execution_and_drains_after() -> None:
     """Notifications queued during active execution are all processed."""
     task_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    queue: asyncio.Queue[tuple[str, str, str]] = asyncio.Queue()
 
     # Simulate: producer puts 3 notifications into the queue
     for status in [ev.READY_FOR_IMPLEMENTATION, ev.READY_FOR_QA, ev.READY_FOR_IMPLEMENTATION]:
-        await queue.put((task_id, status))
+        await queue.put(("task", task_id, status))
 
     # Drain the queue and verify order
-    drained: list[tuple[str, str]] = []
+    drained: list[tuple[str, str, str]] = []
     while not queue.empty():
         drained.append(await queue.get())
 
     assert len(drained) == 3
-    assert drained[0] == (task_id, ev.READY_FOR_IMPLEMENTATION)
-    assert drained[1] == (task_id, ev.READY_FOR_QA)
-    assert drained[2] == (task_id, ev.READY_FOR_IMPLEMENTATION)
+    assert drained[0] == ("task", task_id, ev.READY_FOR_IMPLEMENTATION)
+    assert drained[1] == ("task", task_id, ev.READY_FOR_QA)
+    assert drained[2] == ("task", task_id, ev.READY_FOR_IMPLEMENTATION)
 
 
 async def test_actionable_statuses_set_contains_expected_values() -> None:

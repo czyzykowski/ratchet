@@ -443,23 +443,42 @@ async def run_qa_once(
     return True
 
 
+async def compile_once(store: Store) -> bool:
+    """Single-pass HLS compilation.
+
+    Calls core.compiler.compile_all(store) to iterate all active projects and
+    features and compile eligible HLS entries.
+    Returns True if any HLS was compiled, False otherwise.
+    """
+    from core.compiler import compile_all
+
+    count = await compile_all(store)
+    if count > 0:
+        logger.info("compile_once: compiled %d HLS entries", count)
+        return True
+    logger.info("compile_once: no eligible HLS entries found")
+    return False
+
+
 async def notification_loop(
     store: Store,
     invoker: ClaudeCodeInvoker,
     dsn: str,
     max_workers: int = 1,
 ) -> None:
-    """React to Postgres LISTEN/NOTIFY events for task status changes.
+    """React to Postgres LISTEN/NOTIFY events for task status changes and compilation triggers.
 
-    1. Runs startup catchup by calling run_once and run_qa_once before listening.
+    1. Runs startup catchup by calling compile_once, run_once, and run_qa_once before listening.
     2. Enters the notification-driven loop.
     3. Queues notifications received during execution using asyncio.Queue.
     4. Processes queued items after each task completes.
+    5. Compilation trigger events route to compile_once only.
+    6. Task status events route to run_once + run_qa_once.
 
     With max_workers=1, only one task runs at a time; additional notifications
     are queued and processed sequentially after each task completes.
     """
-    queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+    queue: asyncio.Queue[tuple[str, ...]] = asyncio.Queue()
     active = False
 
     async def _dispatch_one() -> None:
@@ -468,23 +487,33 @@ async def notification_loop(
         await run_qa_once(store, invoker)
 
     async def _notification_producer(listener: NotificationListener) -> None:
-        async for task_id, status in listener.listen():
-            await queue.put((task_id, status))
+        async for event_tuple in listener.listen():
+            await queue.put(event_tuple)
 
     async def _run_loop() -> None:
         nonlocal active
         # Startup catchup
         logger.info("Worker: running startup catchup")
+        await compile_once(store)
         await _dispatch_one()
 
         while True:
-            task_id, status = await queue.get()
-            logger.info(
-                "Worker: dequeued notification task=%s status=%s", task_id, status
-            )
+            event_tuple = await queue.get()
+            kind = event_tuple[0]
+            if kind == "compile":
+                reason = event_tuple[1]
+                logger.info("Worker: dequeued compilation trigger reason=%s", reason)
+            else:
+                task_id, status = event_tuple[1], event_tuple[2]
+                logger.info(
+                    "Worker: dequeued notification task=%s status=%s", task_id, status
+                )
             active = True
             try:
-                await _dispatch_one()
+                if kind == "compile":
+                    await compile_once(store)
+                else:
+                    await _dispatch_one()
             finally:
                 active = False
                 queue.task_done()
@@ -532,6 +561,7 @@ async def _main_async() -> None:
     store = PostgresStore()
     invoker = ClaudeCodeInvoker()
     try:
+        await compile_once(store)
         await run_once(store, invoker)
         await run_qa_once(store, invoker)
     finally:

@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- `core/compiler.py` with HLS compilation logic extracted from `scripts/compile-feature.py`: `run_claude`, `build_compile_prompt`, `extract_spec`, `get_task_status`, `is_eligible`, `compile_hls`, `compile_all`
+- `compile_once(store)` in `worker/runner.py` that invokes `compile_all` and returns True if any HLS was compiled
+- DB migration `d2e4f6a8b1c3` adds `notify_compilation_trigger` PL/pgSQL function and `trg_notify_compilation` trigger firing on `high_level_spec.added` and `task.status_changed` (deployed) events via `ratchet_compilation_trigger` channel
+- `worker/listener.py` now LISTENs on both `ratchet_task_status` and `ratchet_compilation_trigger`; yields typed 3-tuples distinguishing compilation triggers from task status events
+- Worker startup catchup calls `compile_once` before `run_once`/`run_qa_once`; single-pass mode does the same
+- Unit tests in `core/tests/test_compiler.py` covering `extract_spec`, `is_eligible`, and `compile_all`
 - `--verbose` / `-v` flag to `scripts/board.py` to display full 36-char task UUIDs instead of truncated 8-char IDs
 
 ### Changed

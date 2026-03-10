@@ -165,7 +165,7 @@ async def test_run_qa_once_returns_true_when_qa_task_found() -> None:
 class _MockNotificationListener:
     """Mock NotificationListener that yields controlled notifications then stops."""
 
-    def __init__(self, notifications: list[tuple[str, str]]) -> None:
+    def __init__(self, notifications: list[tuple[str, str, str]]) -> None:
         self._notifications = notifications
 
     async def __aenter__(self) -> _MockNotificationListener:
@@ -174,17 +174,21 @@ class _MockNotificationListener:
     async def __aexit__(self, *args: object) -> None:
         pass
 
-    async def listen(self) -> AsyncGenerator[tuple[str, str], None]:
+    async def listen(self) -> AsyncGenerator[tuple[str, str, str], None]:
         for item in self._notifications:
             yield item
 
 
 async def test_notification_loop_runs_catchup_on_startup() -> None:
-    """notification_loop calls run_once and run_qa_once on startup before listening."""
+    """notification_loop calls compile_once, run_once and run_qa_once on startup."""
     store = InMemoryStore()
     invoker = _make_invoker()
 
     catchup_calls: list[str] = []
+
+    async def fake_compile_once(*args, **kwargs) -> bool:
+        catchup_calls.append("compile_once")
+        return False
 
     async def fake_run_once(*args, **kwargs) -> bool:
         catchup_calls.append("run_once")
@@ -197,23 +201,29 @@ async def test_notification_loop_runs_catchup_on_startup() -> None:
     mock_listener = _MockNotificationListener([])  # no notifications → loop ends quickly
 
     with (
+        patch("worker.runner.compile_once", side_effect=fake_compile_once),
         patch("worker.runner.run_once", side_effect=fake_run_once),
         patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
 
+    assert "compile_once" in catchup_calls
     assert "run_once" in catchup_calls
     assert "run_qa_once" in catchup_calls
 
 
 async def test_notification_loop_dispatches_queued_notifications() -> None:
-    """notification_loop calls run_once + run_qa_once for each queued notification."""
+    """notification_loop calls run_once + run_qa_once for each queued task notification."""
     store = InMemoryStore()
     invoker = _make_invoker()
 
     task_id = str(uuid.uuid4())
     dispatch_calls: list[str] = []
+
+    async def fake_compile_once(*args, **kwargs) -> bool:
+        dispatch_calls.append("compile_once")
+        return False
 
     async def fake_run_once(*args, **kwargs) -> bool:
         dispatch_calls.append("run_once")
@@ -223,22 +233,23 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
         dispatch_calls.append("run_qa_once")
         return False
 
-    # Two notifications: one impl, one QA
+    # Two task notifications: one impl, one QA (3-tuples)
     notifications = [
-        (task_id, ev.READY_FOR_IMPLEMENTATION),
-        (task_id, ev.READY_FOR_QA),
+        ("task", task_id, ev.READY_FOR_IMPLEMENTATION),
+        ("task", task_id, ev.READY_FOR_QA),
     ]
     mock_listener = _MockNotificationListener(notifications)
 
     with (
+        patch("worker.runner.compile_once", side_effect=fake_compile_once),
         patch("worker.runner.run_once", side_effect=fake_run_once),
         patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
 
-    # Startup catchup = 1 run_once + 1 run_qa_once
-    # 2 notifications = 2 more run_once + 2 more run_qa_once
+    # Startup catchup = 1 compile_once + 1 run_once + 1 run_qa_once
+    # 2 task notifications = 2 more run_once + 2 more run_qa_once
     run_once_count = dispatch_calls.count("run_once")
     run_qa_count = dispatch_calls.count("run_qa_once")
     assert run_once_count >= 3  # 1 catchup + 2 notifications
@@ -250,6 +261,9 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
     store = InMemoryStore()
     invoker = _make_invoker()
 
+    async def fake_compile_once(*args, **kwargs) -> bool:
+        return False
+
     async def fake_run_once(*args, **kwargs) -> bool:
         return False
 
@@ -260,6 +274,7 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
     mock_listener = _MockNotificationListener([])
 
     with (
+        patch("worker.runner.compile_once", side_effect=fake_compile_once),
         patch("worker.runner.run_once", side_effect=fake_run_once),
         patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
