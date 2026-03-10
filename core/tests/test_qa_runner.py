@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from core.qa_runner import (
     QaConfig,
     QaStep,
+    check_baseline_qa,
     load_qa_config,
     parse_review_output,
     run_qa_steps,
@@ -192,6 +193,75 @@ def test_run_qa_steps_last_step_fails() -> None:
     assert results[1].returncode == 0
     assert results[2].returncode == 1
     assert "type error in foo.py:10" in results[2].output
+
+
+# ---------------------------------------------------------------------------
+# check_baseline_qa
+# ---------------------------------------------------------------------------
+
+
+def test_check_baseline_qa_no_ratchet_yaml_returns_empty(tmp_path: Path) -> None:
+    result = check_baseline_qa(str(tmp_path))
+    assert result == []
+
+
+def test_check_baseline_qa_all_steps_pass_returns_empty(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        qa:
+          steps:
+            test: "pytest"
+            lint: "ruff check ."
+        """)
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            _make_proc(0, stdout="passed"),
+            _make_proc(0, stdout="no issues"),
+        ]
+        result = check_baseline_qa(str(tmp_path))
+
+    assert result == []
+
+
+def test_check_baseline_qa_first_step_fails_returns_failed_steps(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        qa:
+          steps:
+            lint: "ruff check ."
+            test: "pytest"
+        """)
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = _make_proc(1, stdout="E501 line too long")
+        result = check_baseline_qa(str(tmp_path))
+
+    assert len(result) == 1
+    assert result[0].step_name == "lint"
+    assert result[0].returncode == 1
+    assert "E501" in result[0].output
+
+
+def test_check_baseline_qa_second_step_fails_returns_that_step(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        qa:
+          steps:
+            test: "pytest"
+            lint: "ruff check ."
+        """)
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            _make_proc(0, stdout="passed"),
+            _make_proc(1, stderr="E501 line too long"),
+        ]
+        result = check_baseline_qa(str(tmp_path))
+
+    assert len(result) == 1
+    assert result[0].step_name == "lint"
+    assert result[0].returncode == 1
 
 
 def test_run_qa_steps_combines_stdout_and_stderr() -> None:

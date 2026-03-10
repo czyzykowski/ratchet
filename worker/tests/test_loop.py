@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from core import events as ev
 from core.invoker import InvocationResult
 from core.project_manager import ProjectManager
+from core.qa_runner import QaStepResult
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
@@ -129,6 +130,40 @@ async def test_run_once_returns_true_when_task_found() -> None:
         result = await run_once(store, invoker)
 
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# baseline QA guard in run_once
+# ---------------------------------------------------------------------------
+
+
+async def test_run_once_skips_when_baseline_qa_fails() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _setup_spec(store, task_id)
+    await _advance_to_ready_for_impl(store, task_id)
+
+    invoker = _make_invoker("completed")
+    fake_failure = QaStepResult(
+        step_name="lint",
+        command="ruff check .",
+        returncode=1,
+        output="E501 line too long",
+    )
+
+    with patch("worker.runner.check_baseline_qa", return_value=[fake_failure]):
+        result = await run_once(store, invoker)
+
+    assert result is False
+    invoker.invoke.assert_not_called()
+
+    # Task status must still be ready_for_implementation
+    task_events = await store.get_events(task_id, "task")
+    from worker.runner import _build_task_from_events
+    task = _build_task_from_events(task_id, project.id, task_events)
+    assert task is not None
+    assert task.status == ev.READY_FOR_IMPLEMENTATION
 
 
 # ---------------------------------------------------------------------------

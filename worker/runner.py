@@ -18,6 +18,7 @@ from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
 from core.qa_runner import (
     build_review_prompt,
+    check_baseline_qa,
     get_git_diff,
     load_qa_config,
     parse_review_output,
@@ -177,6 +178,18 @@ async def run_once(
         return False
 
     task, project, spec = result
+    baseline_failures = check_baseline_qa(project.local_path)
+    if baseline_failures:
+        combined = "\n\n".join(
+            f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
+        )
+        logger.warning(
+            "Baseline QA failed for project=%s — skipping task=%s until develop is clean.\n%s",
+            project.name,
+            task.id,
+            combined,
+        )
+        return False
     execution_manager = ExecutionManager(store, project.local_path)
     context_assembler = ContextAssembler(store)
 

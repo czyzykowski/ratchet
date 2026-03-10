@@ -105,6 +105,19 @@ def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     return results
 
 
+def check_baseline_qa(project_path: str) -> list[QaStepResult]:
+    """Run QA steps on the base branch to detect pre-existing failures.
+
+    Runs steps in project_path directly (no worktree). Returns list of
+    failed QaStepResult objects; empty list means all passed or no QA config.
+    """
+    config = load_qa_config(project_path)
+    if config is None:
+        return []
+    results = run_qa_steps(config, project_path)
+    return [r for r in results if r.returncode != 0]
+
+
 def get_git_diff(cwd: str, execution_branch: str | None = None, base_ref: str = "develop") -> str:
     """Get git diff showing changes made by an execution.
 
