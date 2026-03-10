@@ -172,6 +172,31 @@ async def get_task_dependencies(conn: Any, task_id: UUID) -> list[dict[str, Any]
     return deps
 
 
+async def get_task_qa_failure_reason(conn: Any, task_id: UUID) -> str | None:
+    """Return failure_reason from the latest task.status_changed event with to_status='blocked'.
+
+    Returns None if no such event exists or if the event has no failure_reason.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT payload->>'failure_reason'
+            FROM events
+            WHERE aggregate_type = 'task'
+              AND aggregate_id = %s
+              AND event_type = 'task.status_changed'
+              AND payload->>'to_status' = 'blocked'
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (str(task_id),),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        return row[0] or None
+
+
 async def get_project_tasks(conn: Any, project_id: UUID) -> list[dict[str, Any]]:
     async with conn.cursor() as cur:
         await cur.execute(

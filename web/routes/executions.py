@@ -49,11 +49,11 @@ async def execution_detail(execution_id: UUID, request: Request) -> Response:
             }
         elif event.event_type == ev.EXECUTION_COMPLETED:
             execution["status"] = "completed"
-            execution["completed_at"] = event.payload.get("completed_at")
+            execution["completed_at"] = event.occurred_at
         elif event.event_type == ev.EXECUTION_FAILED:
             execution["status"] = "failed"
             execution["failure_reason"] = event.payload.get("failure_reason")
-            execution["completed_at"] = event.payload.get("completed_at")
+            execution["completed_at"] = event.occurred_at
 
     trace_path = Path(get_traces_dir()) / f"{execution_id}.md"
     trace_content: str | None = None

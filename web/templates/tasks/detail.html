@@ -69,6 +69,11 @@
 <p class="count">No specs yet.</p>
 {% endif %}
 
+{% if task.status == "blocked" and qa_failure_reason %}
+<h2>QA Failure</h2>
+<pre class="warn">{{ qa_failure_reason }}</pre>
+{% endif %}
+
 <h2>Execution History</h2>
 {% if executions %}
 <table>

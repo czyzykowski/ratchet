@@ -33,6 +33,7 @@ async def task_detail(task_id: UUID, request: Request) -> Response:
         specs = await queries.get_task_specs(conn, task_id)
         executions = await queries.get_task_executions(conn, task_id)
         deps = await queries.get_task_dependencies(conn, task_id)
+        qa_failure_reason = await queries.get_task_qa_failure_reason(conn, task_id)
 
     current_spec_id = task.get("current_spec_id")
     current_spec = None
@@ -52,6 +53,7 @@ async def task_detail(task_id: UUID, request: Request) -> Response:
             "executions": executions,
             "deps": deps,
             "current_spec": current_spec,
+            "qa_failure_reason": qa_failure_reason,
         },
     )
 
