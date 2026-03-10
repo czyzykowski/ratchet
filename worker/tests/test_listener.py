@@ -20,26 +20,24 @@ def _make_notify(payload: str | None) -> MagicMock:
 async def _collect_from_mock_conn(
     notifications: list[MagicMock],
 ) -> list[tuple[str, str]]:
-    """Helper: run NotificationListener.listen() against a mock psycopg connection."""
+    """Helper: run NotificationListener as async context manager against a mock connection."""
     collected: list[tuple[str, str]] = []
 
     async def _fake_notifies() -> AsyncGenerator[MagicMock, None]:
         for n in notifications:
             yield n
 
-    mock_conn = AsyncMock()
+    mock_conn = MagicMock()
     mock_conn.notifies = _fake_notifies
     mock_conn.execute = AsyncMock()
-    mock_conn.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_conn.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.close = AsyncMock()
 
     mock_connect = AsyncMock(return_value=mock_conn)
 
-    listener = NotificationListener(dsn="postgresql://fake/test")
-
     with patch("psycopg.AsyncConnection.connect", mock_connect):
-        async for item in listener.listen():
-            collected.append(item)
+        async with NotificationListener(dsn="postgresql://fake/test") as listener:
+            async for item in listener.listen():
+                collected.append(item)
 
     return collected
 
