@@ -30,7 +30,8 @@ class NotificationListener:
     async def __aenter__(self) -> NotificationListener:
         import psycopg
 
-        self._conn = await psycopg.AsyncConnection.connect(self._dsn, autocommit=True)
+        dsn = self._dsn.replace("postgresql+psycopg://", "postgresql://", 1)
+        self._conn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
         await self._conn.execute("LISTEN ratchet_task_status")
         logger.info("Listening on ratchet_task_status channel")
         return self
