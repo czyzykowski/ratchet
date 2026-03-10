@@ -26,6 +26,7 @@
             pkgs.mypy
             pkgs.postgresql_16
             pkgs.git
+            pkgs.nodejs_22
           ];
 
           shellHook = ''
@@ -39,6 +40,10 @@
             fi
             export LD_LIBRARY_PATH="${pkgs.postgresql_16.lib}/lib:$LD_LIBRARY_PATH"
             export PYTHONPATH=$(pwd)
+            if [ -f ui/package-lock.json ] && [ ! -d ui/node_modules ]; then
+              echo "Installing UI dependencies..."
+              npm ci --prefix ui
+            fi
           '';
         };
       }
