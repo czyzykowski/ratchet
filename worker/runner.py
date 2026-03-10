@@ -489,30 +489,32 @@ async def notification_loop(
                 active = False
                 queue.task_done()
 
-    try:
-        async with NotificationListener(dsn, max_workers=max_workers) as listener:
-            producer_task = asyncio.create_task(_notification_producer(listener))
-            consumer_task = asyncio.create_task(_run_loop())
+    async with NotificationListener(dsn, max_workers=max_workers) as listener:
+        producer_task = asyncio.create_task(_notification_producer(listener))
+        consumer_task = asyncio.create_task(_run_loop())
+        try:
             done, pending = await asyncio.wait(
                 [producer_task, consumer_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
+        except asyncio.CancelledError:
+            pending = {producer_task, consumer_task}
+            done = set()
+        finally:
             for task in pending:
                 task.cancel()
                 try:
                     await task
-                except (asyncio.CancelledError, KeyboardInterrupt):
+                except (asyncio.CancelledError, Exception):
                     pass
-            for task in done:
-                if not task.cancelled():
-                    try:
-                        exc = task.exception()
-                    except BaseException:
-                        exc = None
-                    if exc is not None and not isinstance(exc, KeyboardInterrupt):
-                        raise exc
-    except KeyboardInterrupt:
-        logger.info("Worker stopped.")
+        for task in done:
+            if not task.cancelled():
+                try:
+                    exc = task.exception()
+                except BaseException:
+                    exc = None
+                if exc is not None:
+                    raise exc
 
 
 def main() -> None:
@@ -538,6 +540,7 @@ async def _main_async() -> None:
 
 async def _main_loop_async() -> None:
     import os
+    import signal
 
     from core.db import close_pool
     from core.store import PostgresStore
@@ -545,9 +548,21 @@ async def _main_loop_async() -> None:
     dsn = os.environ["DATABASE_URL"]
     store = PostgresStore()
     invoker = ClaudeCodeInvoker()
+
+    loop = asyncio.get_running_loop()
+    current_task = asyncio.current_task()
+
+    def _handle_sigint() -> None:
+        if current_task:
+            current_task.cancel()
+
+    loop.add_signal_handler(signal.SIGINT, _handle_sigint)
     try:
         await notification_loop(store, invoker, dsn)
+    except asyncio.CancelledError:
+        logger.info("Worker stopped.")
     finally:
+        loop.remove_signal_handler(signal.SIGINT)
         await close_pool()
 
 
@@ -556,7 +571,4 @@ def main_loop_entry() -> None:
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    try:
-        asyncio.run(_main_loop_async())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(_main_loop_async())
