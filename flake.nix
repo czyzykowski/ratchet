@@ -44,6 +44,7 @@
               echo "Installing UI dependencies..."
               npm ci --prefix ui
             fi
+            export PATH="$(pwd)/ui/node_modules/.bin:$PATH"
           '';
         };
       }
