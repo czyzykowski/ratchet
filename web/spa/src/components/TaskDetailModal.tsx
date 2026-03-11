@@ -68,6 +68,8 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [specContent, setSpecContent] = useState('')
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [deploying, setDeploying] = useState(false)
+  const [deployError, setDeployError] = useState<string | null>(null)
 
   if (!taskId) return null
 
@@ -121,10 +123,31 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     }
   }
 
+  async function confirmDeploy() {
+    if (!taskId) return
+    setDeploying(true)
+    setDeployError(null)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/deploy`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? 'Deploy failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+      onClose()
+    } catch (err) {
+      setDeployError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setDeploying(false)
+    }
+  }
+
   const latestSpec = data?.specs[data.specs.length - 1] ?? null
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
   const isBlocked = data?.task.status === 'blocked'
   const isReadyForSpec = data?.task.status === 'ready_for_spec'
+  const isReadyForDeployment = data?.task.status === 'ready_for_deployment'
 
   if (showChat && data) {
     return (
@@ -247,7 +270,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               </div>
             )}
 
-            {(isBlocked || isReadyForSpec) && (
+            {(isBlocked || isReadyForSpec || isReadyForDeployment) && (
               <div className="modal-actions">
                 {isReadyForSpec && (
                   <button className="btn btn-primary" onClick={() => setShowChat(true)}>
@@ -258,6 +281,16 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                   <button className="btn btn-danger" onClick={openResetForm}>
                     Reset Task
                   </button>
+                )}
+                {isReadyForDeployment && (
+                  <>
+                    {deployError && (
+                      <div className="error-state" style={{ padding: '0.5rem 0' }}>{deployError}</div>
+                    )}
+                    <button className="btn btn-primary" onClick={confirmDeploy} disabled={deploying}>
+                      {deploying ? 'Deploying...' : 'Deploy'}
+                    </button>
+                  </>
                 )}
               </div>
             )}
