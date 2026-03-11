@@ -24,6 +24,7 @@ from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
 from web.routes import worker as worker_router
 from web.routes.api import events as api_events_router
+from web.routes.api import spec_sessions as spec_sessions_router
 from web.routes.api.router import api_router
 from web.templating import templates  # noqa: F401
 
@@ -56,6 +57,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sse_queues: set[asyncio.Queue[str]] = set()
     app.state.sse_queues = sse_queues
     app.state.sse_clients = []
+    app.state.spec_sessions = {}
 
     async def _refresh_loop() -> None:
         while True:
@@ -77,6 +79,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await task
             except asyncio.CancelledError:
                 pass
+        for session in list(app.state.spec_sessions.values()):
+            await session.close()
+        app.state.spec_sessions.clear()
         await close_pool()
 
 
@@ -99,6 +104,7 @@ app.include_router(tasks_router.router)
 app.include_router(worker_router.router)
 app.include_router(api_router)
 app.include_router(api_events_router.router)
+app.include_router(spec_sessions_router.router, prefix="/api")
 
 
 _SPA_DIST = os.path.join(os.path.dirname(__file__), "spa", "dist")

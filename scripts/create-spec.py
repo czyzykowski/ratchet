@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,125 +31,6 @@ def slugify(text: str) -> str:
     return text.strip("-")
 
 
-def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
-    """Run claude -p with the given prompt, stream output to terminal, and return full output."""
-    if debug:
-        print("\n--- DEBUG: PROMPT SENT TO CLAUDE ---", file=sys.stderr)
-        print(prompt, file=sys.stderr)
-        print("--- END PROMPT ---\n", file=sys.stderr)
-
-    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob,WebSearch,Bash"]
-    proc = subprocess.Popen(
-        cmd,
-        cwd=local_path,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-        text=True,
-    )
-
-    output_lines: list[str] = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="", flush=True)
-        output_lines.append(line)
-
-    proc.wait()
-    return "".join(output_lines)
-
-
-def build_initial_prompt(intent_md: str, task_title: str, user_description: str) -> str:
-    return f"""You are helping design a software task for the Ratchet project.
-
-## Project Intent
-{intent_md}
-
-## Task
-Title: {task_title}
-
-## Your Role
-Help the user think through this task by asking clarifying questions one at a time.
-Questions should be specific and concrete — multiple choice where possible,
-open-ended when necessary. Only one question per message. No preamble before the question.
-
-After sufficient clarification, describe your understanding of the task in chunks of 200-300 words,
-asking after each chunk whether it looks right.
-Keep to chunked format even when the picture is clear.
-
-When you have gathered enough information and confirmed your understanding with the user,
-produce the spec in this exact format:
-
-## SPEC READY
-# Spec N: <title>
-
-## Objective
-...
-
-## Success Criteria
-- [ ] ...
-
-## Out of Scope
-...
-
-## Technical Context
-...
-
-## Tasks
-- [ ] ...
-
-## Assumptions
-...
-
-## Verification Commands
-```bash
-...
-```
-
-## What Exists After This Spec
-
-...
-
-Use the standard Ratchet spec format exactly as shown. Be specific about file paths,
-function names, and test requirements. Read the codebase to understand current patterns
-before generating the spec.
-
-## User's Opening Description
-
-{user_description}"""
-
-
-def build_continuation_prompt(
-    initial_prompt: str, history: list[dict[str, str]], user_input: str
-) -> str:
-    return f"""{initial_prompt}
-
-## Conversation History
-
-{json.dumps(history, indent=2)}
-
-## Latest User Message
-
-{user_input}"""
-
-
-def build_generation_prompt(
-    initial_prompt: str, history: list[dict[str, str]], user_input: str
-) -> str:
-    gen_instruction = (
-        "The user has indicated they are ready to generate the spec. "
-        "Produce the spec now in the exact format specified, "
-        "preceded by '## SPEC READY' on its own line."
-    )
-    return f"""{initial_prompt}
-
-## Conversation History
-
-{json.dumps(history, indent=2)}
-
-## Latest User Message
-
-{user_input}
-
-{gen_instruction}"""
 
 
 def extract_spec(output: str) -> str:
@@ -254,7 +133,6 @@ async def main() -> None:
         sys.exit(1)
 
     args = parse_args()
-    debug = bool(os.environ.get("RATCHET_DEBUG"))
 
     try:
         task_id = UUID(args.task_id)
@@ -308,49 +186,50 @@ async def main() -> None:
         print(f"Task: {task_title}")
         print(f"Project: {project.name} ({local_path})")
 
-        initial_prompt = build_initial_prompt(
+        from core.claude_repl import SpecReplSession
+        from web.routes.api.tasks import _build_initial_spec_prompt
+
+        system_prompt = _build_initial_spec_prompt(
             intent_md, task_title or "", task_title or ""
         )
-        history: list[dict[str, str]] = []
+        session = SpecReplSession(
+            task_id=str(task_id),
+            system_prompt=system_prompt,
+            cwd=str(local_path),
+        )
 
-        print("\n--- Claude ---")
-        output = run_claude(initial_prompt, local_path, debug)
-        history.append({"role": "user", "content": task_title or ""})
-        history.append({"role": "assistant", "content": output})
-
-        if await _handle_spec_ready(output, task_id, task_title, store):
-            return
-
-        while True:
-            try:
-                user_input = input("\n> ").strip()
-            except KeyboardInterrupt:
-                print("\nSession ended, spec not saved.")
-                sys.exit(0)
-
-            if not user_input:
-                continue
-
-            is_trigger = user_input.lower() in ("done", "generate", "go")
-
-            if is_trigger:
-                prompt = build_generation_prompt(initial_prompt, history, user_input)
-            else:
-                prompt = build_continuation_prompt(initial_prompt, history, user_input)
-
+        try:
             print("\n--- Claude ---")
-            output = run_claude(prompt, local_path, debug)
+            output = ""
+            async for chunk in session.ask(task_title or ""):
+                print(chunk, end="", flush=True)
+                output += chunk
+            print()
 
             if await _handle_spec_ready(output, task_id, task_title, store):
-                break
+                return
 
-            if is_trigger:
-                print(
-                    "\nWarning: ## SPEC READY marker not found. Continuing conversation."
-                )
+            while True:
+                try:
+                    user_input = input("\n> ").strip()
+                except KeyboardInterrupt:
+                    print("\nSession ended, spec not saved.")
+                    sys.exit(0)
 
-            history.append({"role": "user", "content": user_input})
-            history.append({"role": "assistant", "content": output})
+                if not user_input:
+                    continue
+
+                print("\n--- Claude ---")
+                output = ""
+                async for chunk in session.ask(user_input):
+                    print(chunk, end="", flush=True)
+                    output += chunk
+                print()
+
+                if await _handle_spec_ready(output, task_id, task_title, store):
+                    break
+        finally:
+            await session.close()
 
     except KeyboardInterrupt:
         print("\nSession ended, spec not saved.")

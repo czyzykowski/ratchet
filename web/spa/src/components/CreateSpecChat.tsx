@@ -22,6 +22,8 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initialized = useRef(false)
@@ -33,20 +35,44 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
   useEffect(() => {
     if (!initialized.current) {
       initialized.current = true
-      sendMessage(taskTitle, [], true)
+      createSession().then(sid => sendMessage(taskTitle, sid))
     }
   }, [])
 
-  async function sendMessage(userInput: string, history: Message[], isInitial = false) {
+  useEffect(() => {
+    return () => {
+      if (sessionIdRef.current) {
+        fetch(`/api/spec-sessions/${sessionIdRef.current}`, { method: 'DELETE' })
+      }
+    }
+  }, [])
+
+  async function createSession(): Promise<string> {
+    const res = await fetch('/api/spec-sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId }),
+    })
+    const data = await res.json()
+    const sid: string = data.session_id
+    setSessionId(sid)
+    sessionIdRef.current = sid
+    return sid
+  }
+
+  async function sendMessage(userInput: string, sid?: string) {
+    const activeSessionId = sid ?? sessionId
+    if (!activeSessionId) return
+
     setStreaming(true)
     setChatError(null)
     setCurrentStream('')
 
     try {
-      const res = await fetch(`/api/tasks/${taskId}/spec/chat`, {
+      const res = await fetch(`/api/spec-sessions/${activeSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_input: userInput, history, is_initial: isInitial }),
+        body: JSON.stringify({ user_input: userInput }),
       })
 
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -79,18 +105,11 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
         }
       }
 
-      const newHistory: Message[] = isInitial
-        ? [
-            { role: 'user', content: userInput },
-            { role: 'assistant', content: assistantText },
-          ]
-        : [
-            ...history,
-            { role: 'user', content: userInput },
-            { role: 'assistant', content: assistantText },
-          ]
-
-      setMessages(newHistory)
+      setMessages(prev => [
+        ...prev,
+        { role: 'user', content: userInput },
+        { role: 'assistant', content: assistantText },
+      ])
       setCurrentStream('')
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Unknown error')
@@ -104,7 +123,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
     const text = input.trim()
     if (!text || streaming) return
     setInput('')
-    sendMessage(text, messages)
+    sendMessage(text)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
