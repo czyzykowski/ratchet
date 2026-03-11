@@ -14,6 +14,41 @@ from web.board_builder import STATUS_LABELS, STATUS_ORDER, get_task_status, load
 router = APIRouter()
 
 
+@router.get("/activity")
+async def get_activity(request: Request) -> JSONResponse:
+    store = request.app.state.store
+    all_tasks, project_by_id, task_events_cache = await load_board(store)
+
+    task_by_id = {task["id"]: task for task in all_tasks}
+
+    activity = []
+    for task_id, task_events in task_events_cache.items():
+        task = task_by_id.get(task_id)
+        if task is None:
+            continue
+        project = project_by_id.get(task["project_id"])
+        project_name = project.name if project is not None else str(task["project_id"])
+
+        prev_status: str | None = None
+        for event in task_events:
+            if event.event_type == ev.TASK_CREATED:
+                prev_status = event.payload.get("status", ev.READY_FOR_SPEC)
+            elif event.event_type == ev.TASK_STATUS_CHANGED:
+                to_status = event.payload["to_status"]
+                activity.append({
+                    "task_id": str(task_id),
+                    "task_title": task["title"],
+                    "project_name": project_name,
+                    "from_status": prev_status,
+                    "to_status": to_status,
+                    "occurred_at": event.occurred_at.isoformat(),
+                })
+                prev_status = to_status
+
+    activity.sort(key=lambda x: x["occurred_at"], reverse=True)
+    return JSONResponse({"events": activity[:40]})
+
+
 @router.get("/board")
 async def get_board(request: Request) -> JSONResponse:
     store = request.app.state.store
