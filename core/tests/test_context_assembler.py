@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,24 @@ from core.context_assembler import (
     build_prompt,
     read_intent,
 )
+from core.models import QAExchange
 from core.store import InMemoryStore
+
+
+def _make_exchange(
+    question: str,
+    answer: str | None,
+    question_index: int = 0,
+) -> QAExchange:
+    return QAExchange(
+        question_index=question_index,
+        question=question,
+        answer=answer,
+        execution_id=uuid.uuid4(),
+        asked_at=datetime(2026, 1, 1, tzinfo=UTC),
+        answered_at=datetime(2026, 1, 2, tzinfo=UTC) if answer is not None else None,
+        answered_by="user" if answer is not None else None,
+    )
 
 
 def make_worktree(tmp_path: Path, intent_content: str = "# Test Intent") -> str:
@@ -475,3 +493,123 @@ def test_build_conflict_resolution_prompt_stage_only_instruction_present() -> No
     )
     assert "Do NOT commit" in prompt
     assert "git add" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Q&A history — build_prompt unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_includes_qa_history_section_when_answered_exchanges_present() -> None:
+    exchange = _make_exchange("What color?", "Blue")
+    prompt = build_prompt("intent", "spec", qa_history=[exchange])
+    assert "## Human Input History" in prompt
+    assert "What color?" in prompt
+    assert "Blue" in prompt
+
+
+def test_build_prompt_excludes_qa_history_section_when_qa_history_is_none() -> None:
+    prompt = build_prompt("intent", "spec", qa_history=None)
+    assert "## Human Input History" not in prompt
+
+
+def test_build_prompt_excludes_qa_history_section_when_qa_history_is_empty() -> None:
+    prompt = build_prompt("intent", "spec", qa_history=[])
+    assert "## Human Input History" not in prompt
+
+
+def test_build_prompt_excludes_qa_history_section_when_all_unanswered() -> None:
+    exchange = _make_exchange("What color?", None)
+    prompt = build_prompt("intent", "spec", qa_history=[exchange])
+    assert "## Human Input History" not in prompt
+
+
+def test_build_prompt_qa_history_section_order() -> None:
+    exchange = _make_exchange("What color?", "Blue")
+    prompt = build_prompt(
+        "INTENT", "SPEC_TEXT", qa_feedback="FEEDBACK", qa_history=[exchange]
+    )
+    spec_pos = prompt.index("## Spec")
+    history_pos = prompt.index("## Human Input History")
+    feedback_pos = prompt.index("## Previous Attempt Feedback")
+    completion_pos = prompt.index("## Completion Instructions")
+    assert spec_pos < history_pos < feedback_pos < completion_pos
+
+
+def test_build_prompt_qa_history_numbers_questions_from_one() -> None:
+    exchange = _make_exchange("What color?", "Blue", question_index=0)
+    prompt = build_prompt("intent", "spec", qa_history=[exchange])
+    assert "### Question 1" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Q&A history — ContextAssembler integration tests
+# ---------------------------------------------------------------------------
+
+
+async def test_assemble_includes_qa_history_when_task_has_answered_exchanges(
+    tmp_path: Path,
+) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, task_id, _ = await _seed_store(store, worktree)
+
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_INPUT_REQUESTED,
+        payload={
+            "question": "Which approach should I use?",
+            "execution_id": str(execution_id),
+            "question_index": 0,
+        },
+    )
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_INPUT_PROVIDED,
+        payload={
+            "answer": "Use approach A",
+            "question_index": 0,
+            "answered_by": "user",
+        },
+    )
+
+    ctx = await ContextAssembler(store).assemble(execution_id)
+
+    assert "## Human Input History" in ctx.prompt
+    assert "Which approach should I use?" in ctx.prompt
+    assert "Use approach A" in ctx.prompt
+
+
+async def test_assemble_excludes_qa_history_when_no_qa_events(tmp_path: Path) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, _, _ = await _seed_store(store, worktree)
+
+    ctx = await ContextAssembler(store).assemble(execution_id)
+
+    assert "## Human Input History" not in ctx.prompt
+
+
+async def test_assemble_excludes_unanswered_exchanges_from_qa_history(
+    tmp_path: Path,
+) -> None:
+    store = InMemoryStore()
+    worktree = make_worktree(tmp_path)
+    execution_id, task_id, _ = await _seed_store(store, worktree)
+
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_INPUT_REQUESTED,
+        payload={
+            "question": "Which approach should I use?",
+            "execution_id": str(execution_id),
+            "question_index": 0,
+        },
+    )
+
+    ctx = await ContextAssembler(store).assemble(execution_id)
+
+    assert "## Human Input History" not in ctx.prompt

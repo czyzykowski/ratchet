@@ -7,7 +7,8 @@ from pathlib import Path
 from uuid import UUID
 
 from core import events as ev
-from core.models import Project
+from core import qa_manager
+from core.models import Project, QAExchange
 from core.store import Store
 
 _PREAMBLE = """\
@@ -26,6 +27,13 @@ _KNOWLEDGE_PLACEHOLDER = """\
 (no relevant knowledge entries for this execution)
 
 ---"""
+
+_QA_HISTORY_HEADER = """\
+## Human Input History
+
+The following questions were asked during previous execution attempts,
+along with the human's answers. Use these answers to guide your
+implementation decisions."""
 
 _COMPLETION_INSTRUCTIONS = """\
 ---
@@ -97,11 +105,35 @@ def read_intent(worktree_path: str, intent_md: str | None = None) -> str:
     return intent_path.read_text()
 
 
-def build_prompt(intent_content: str, spec_content: str, qa_feedback: str | None = None) -> str:
+def build_qa_history_section(qa_history: list[QAExchange]) -> str | None:
+    """Build the ## Human Input History markdown section from answered exchanges.
+
+    Returns None if qa_history is empty or all answers are None.
+    Returns formatted markdown section string otherwise.
+    """
+    answered = [x for x in qa_history if x.answer is not None]
+    if not answered:
+        return None
+    parts = [_QA_HISTORY_HEADER]
+    for exchange in answered:
+        n = exchange.question_index + 1
+        parts.append(
+            f"### Question {n}\n\n{exchange.question}\n\n**Answer:** {exchange.answer}"
+        )
+    return "\n\n".join(parts)
+
+
+def build_prompt(
+    intent_content: str,
+    spec_content: str,
+    qa_feedback: str | None = None,
+    qa_history: list[QAExchange] | None = None,
+) -> str:
     """Assemble final prompt string from components.
 
     Follows section order: preamble → intent → knowledge placeholder → spec
-    → (optional) previous attempt feedback → completion instructions.
+    → (optional) human input history → (optional) previous attempt feedback
+    → completion instructions.
     Returns complete prompt string.
     """
     parts = [
@@ -111,6 +143,10 @@ def build_prompt(intent_content: str, spec_content: str, qa_feedback: str | None
         _KNOWLEDGE_PLACEHOLDER,
         f"## Spec\n{spec_content}",
     ]
+    if qa_history is not None:
+        section = build_qa_history_section(qa_history)
+        if section is not None:
+            parts.append(section)
     if qa_feedback is not None:
         parts.append(f"## Previous Attempt Feedback\n{qa_feedback}")
     parts.append(_COMPLETION_INSTRUCTIONS)
@@ -241,8 +277,16 @@ class ContextAssembler:
             ):
                 qa_feedback = event.payload["failure_reason"]
 
+        # Step 3c: get Q&A history for this task
+        qa_history = await qa_manager.get_qa_history(self._store, task_id)
+
         # Step 4: build prompt
-        prompt = build_prompt(intent_content, spec_content, qa_feedback=qa_feedback)
+        prompt = build_prompt(
+            intent_content,
+            spec_content,
+            qa_feedback=qa_feedback,
+            qa_history=qa_history,
+        )
 
         # Step 5: return context
         return ExecutionContext(
