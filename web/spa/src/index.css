@@ -162,6 +162,96 @@ body, #root {
 .badge-ready_for_deployment { background: #1a3a5a; color: #00bfff; }
 .badge-deployed { background: #2a2a2a; color: #808080; }
 
+.page {
+  padding: 1.5rem 2rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #0f3460;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #e94560;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.data-table th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #0f3460;
+}
+
+.data-table td {
+  padding: 0.625rem 0.75rem;
+  color: #e0e0e0;
+  border-bottom: 1px solid #16213e;
+}
+
+.data-table a {
+  color: #87ceeb;
+  text-decoration: none;
+}
+
+.data-table a:hover {
+  color: #e94560;
+}
+
+.data-table tbody tr:hover td {
+  background: #16213e;
+}
+
+.task-row td {
+  cursor: pointer;
+}
+
+.status-section {
+  margin-bottom: 2rem;
+}
+
+.status-heading {
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #0f3460;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #fff;
+}
+
 .rename-input {
   background: #1a4a7a;
   border: 1px solid #e94560;

@@ -20,7 +20,6 @@ from web.routes import blocked as blocked_router
 from web.routes import board as board_router
 from web.routes import executions as executions_router
 from web.routes import features as features_router
-from web.routes import projects as projects_router
 from web.routes import specs as specs_router
 from web.routes import tasks as tasks_router
 from web.routes import worker as worker_router
@@ -95,7 +94,6 @@ app.include_router(blocked_router.router)
 app.include_router(board_router.router)
 app.include_router(executions_router.router)
 app.include_router(features_router.router)
-app.include_router(projects_router.router)
 app.include_router(specs_router.router)
 app.include_router(tasks_router.router)
 app.include_router(worker_router.router)
@@ -111,6 +109,10 @@ if os.path.isdir(os.path.join(_SPA_DIST, "assets")):
         name="spa-assets",
     )
 
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str) -> FileResponse:
+        return FileResponse(os.path.join(_SPA_DIST, "index.html"))
+
 _UI_DIST = os.path.join(os.path.dirname(__file__), "..", "ui", "dist")
 if os.path.isdir(_UI_DIST) and not os.path.isdir(os.path.join(_SPA_DIST, "assets")):
     app.mount(
@@ -120,7 +122,7 @@ if os.path.isdir(_UI_DIST) and not os.path.isdir(os.path.join(_SPA_DIST, "assets
     )
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str) -> FileResponse:
+    async def ui_fallback(full_path: str) -> FileResponse:
         return FileResponse(os.path.join(_UI_DIST, "index.html"))
 
 
