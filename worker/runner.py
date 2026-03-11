@@ -27,51 +27,11 @@ from core.qa_runner import (
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
+from core.task_manager import TaskManager
 from worker.listener import NotificationListener
 
 logger = logging.getLogger(__name__)
 
-
-def _build_task_from_events(task_id: UUID, project_id: UUID, events: list[Any]) -> Task | None:
-    """Replay task events to build a Task model. Returns None if no TASK_CREATED event found."""
-    task: Task | None = None
-    current_spec_id: UUID | None = None
-    depends_on: list[str] = []
-
-    for event in events:
-        if event.event_type == ev.TASK_CREATED:
-            p = event.payload
-            task = Task(
-                id=task_id,
-                project_id=project_id,
-                title=p.get("title", ""),
-                status=p.get("status", ev.READY_FOR_SPEC),
-                current_spec_id=None,
-                refinement_count=p.get("refinement_count", 0),
-                created_at=event.occurred_at,
-                updated_at=event.occurred_at,
-            )
-        elif event.event_type == ev.TASK_STATUS_CHANGED:
-            if task is not None:
-                task = task.model_copy(
-                    update={
-                        "status": event.payload["to_status"],
-                        "updated_at": event.occurred_at,
-                    }
-                )
-        elif event.event_type == ev.TASK_SPEC_ASSIGNED:
-            spec_id_str = event.payload.get("spec_id")
-            current_spec_id = UUID(spec_id_str) if spec_id_str else None
-            if task is not None:
-                task = task.model_copy(update={"current_spec_id": current_spec_id})
-        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
-            deps = event.payload.get("depends_on", [])
-            depends_on.extend(deps)
-
-    if task is not None:
-        task = task.model_copy(update={"depends_on": depends_on})
-
-    return task
 
 
 async def get_next_task(
@@ -93,6 +53,7 @@ async def get_next_task(
     6. Return candidate with oldest task.created_at, or None if empty
     """
     active_projects = await project_manager.list_projects()
+    task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
     for project in active_projects:
@@ -111,11 +72,7 @@ async def get_next_task(
                     task_ids_ordered.append(tid)
 
         for task_id in task_ids_ordered:
-            task_events = await store.get_events(task_id, "task")
-            if not task_events:
-                continue
-
-            task = _build_task_from_events(task_id, project.id, task_events)
+            task = await task_manager.get_task(task_id)
             if task is None or task.status != ev.READY_FOR_IMPLEMENTATION:
                 continue
 
@@ -133,8 +90,7 @@ async def get_next_task(
                         )
                         unmet = True
                         break
-                    dep_events = await store.get_events(dep_id, "task")
-                    dep_task = _build_task_from_events(dep_id, project.id, dep_events)
+                    dep_task = await task_manager.get_task(dep_id)
                     if dep_task is None or dep_task.status != ev.DEPLOYED:
                         logger.debug("Task %s skipped: dep %s not deployed", task_id, dep_id_str)
                         unmet = True
@@ -282,6 +238,7 @@ async def get_next_qa_task(
     Returns (task, project, spec) tuple or None if nothing ready.
     """
     active_projects = await project_manager.list_projects()
+    task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
     for project in active_projects:
@@ -298,11 +255,7 @@ async def get_next_qa_task(
                     task_ids_ordered.append(tid)
 
         for task_id in task_ids_ordered:
-            task_events = await store.get_events(task_id, "task")
-            if not task_events:
-                continue
-
-            task = _build_task_from_events(task_id, project.id, task_events)
+            task = await task_manager.get_task(task_id)
             if task is None or task.status != ev.READY_FOR_QA:
                 continue
 

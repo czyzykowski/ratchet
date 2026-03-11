@@ -10,7 +10,8 @@ from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
-from worker.runner import _build_task_from_events, get_next_task
+from core.task_manager import TaskManager
+from worker.runner import get_next_task
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -98,7 +99,7 @@ async def test_depends_on_populated_from_event_replay() -> None:
         aggregate_id=task_id,
         aggregate_type="task",
         event_type=ev.TASK_CREATED,
-        payload={"title": "Downstream", "status": ev.READY_FOR_SPEC},
+        payload={"title": "Downstream", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
     )
     await store.append_event(
         aggregate_id=task_id,
@@ -107,8 +108,7 @@ async def test_depends_on_populated_from_event_replay() -> None:
         payload={"depends_on": [dep1, dep2]},
     )
 
-    events = await store.get_events(task_id, "task")
-    task = _build_task_from_events(task_id, project_id, events)
+    task = await TaskManager(store).get_task(task_id)
 
     assert task is not None
     assert dep1 in task.depends_on
@@ -127,7 +127,7 @@ async def test_depends_on_accumulates_across_multiple_events() -> None:
         aggregate_id=task_id,
         aggregate_type="task",
         event_type=ev.TASK_CREATED,
-        payload={"title": "Downstream", "status": ev.READY_FOR_SPEC},
+        payload={"title": "Downstream", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
     )
     await store.append_event(
         aggregate_id=task_id,
@@ -142,8 +142,7 @@ async def test_depends_on_accumulates_across_multiple_events() -> None:
         payload={"depends_on": [dep2]},
     )
 
-    events = await store.get_events(task_id, "task")
-    task = _build_task_from_events(task_id, project_id, events)
+    task = await TaskManager(store).get_task(task_id)
 
     assert task is not None
     assert dep1 in task.depends_on
@@ -160,11 +159,10 @@ async def test_depends_on_empty_when_no_dependency_events() -> None:
         aggregate_id=task_id,
         aggregate_type="task",
         event_type=ev.TASK_CREATED,
-        payload={"title": "Standalone", "status": ev.READY_FOR_SPEC},
+        payload={"title": "Standalone", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
     )
 
-    events = await store.get_events(task_id, "task")
-    task = _build_task_from_events(task_id, project_id, events)
+    task = await TaskManager(store).get_task(task_id)
 
     assert task is not None
     assert task.depends_on == []

@@ -8,111 +8,12 @@ import pytest
 
 from core import events as ev
 from core.store import InMemoryStore
-from web.board_builder import build_task, get_task_status, load_board
+from web.board_builder import get_task_status, load_board
 
 
 @pytest.fixture()
 def store() -> InMemoryStore:
     return InMemoryStore()
-
-
-def test_should_return_none_when_no_task_events_exist() -> None:
-    task_id = uuid4()
-    project_id = uuid4()
-    result = build_task(task_id, project_id, [])
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_should_build_task_with_correct_status_after_status_changed_event(
-    store: InMemoryStore,
-) -> None:
-    task_id = uuid4()
-    project_id = uuid4()
-
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={"title": "My task", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
-    )
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_STATUS_CHANGED,
-        payload={"from_status": ev.READY_FOR_SPEC, "to_status": ev.IN_PROGRESS},
-    )
-
-    task_events = await store.get_events(task_id, "task")
-    task = build_task(task_id, project_id, task_events)
-
-    assert task is not None
-    assert task["status"] == ev.IN_PROGRESS
-    assert task["title"] == "My task"
-
-
-@pytest.mark.asyncio
-async def test_should_count_refinements_from_spec_assigned_events(
-    store: InMemoryStore,
-) -> None:
-    task_id = uuid4()
-    project_id = uuid4()
-
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={"title": "T", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
-    )
-    for _ in range(3):
-        await store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_SPEC_ASSIGNED,
-            payload={"spec_id": str(uuid4())},
-        )
-
-    task_events = await store.get_events(task_id, "task")
-    task = build_task(task_id, project_id, task_events)
-
-    assert task is not None
-    assert task["refinement_count"] == 3
-
-
-@pytest.mark.asyncio
-async def test_should_accumulate_depends_on_from_dependency_added_events(
-    store: InMemoryStore,
-) -> None:
-    task_id = uuid4()
-    project_id = uuid4()
-    dep1 = str(uuid4())
-    dep2 = str(uuid4())
-
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={"title": "T", "status": ev.READY_FOR_SPEC, "project_id": str(project_id)},
-    )
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_DEPENDENCY_ADDED,
-        payload={"depends_on": [dep1]},
-    )
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_DEPENDENCY_ADDED,
-        payload={"depends_on": [dep2]},
-    )
-
-    task_events = await store.get_events(task_id, "task")
-    task = build_task(task_id, project_id, task_events)
-
-    assert task is not None
-    assert dep1 in task["depends_on"]
-    assert dep2 in task["depends_on"]
 
 
 @pytest.mark.asyncio

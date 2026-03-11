@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -16,64 +16,25 @@ from pydantic import BaseModel
 
 from core import events as ev
 from core.execution_manager import ExecutionManager
-from core.models import Event
 from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
+from core.task_manager import TaskManager
 from web.sse import broadcast_task_updated
 
 router = APIRouter()
 
 
-def _build_task_dict(task_id: UUID, task_events: list[Event]) -> dict[str, Any] | None:
-    """Replay task events to build a task dict. Returns None if no TASK_CREATED event found."""
-    task: dict[str, Any] | None = None
-    depends_on: list[str] = []
-    current_spec_id: str | None = None
-    refinement_count = 0
-
-    for event in task_events:
-        if event.event_type == ev.TASK_CREATED:
-            p = event.payload
-            task = {
-                "id": str(task_id),
-                "project_id": str(p["project_id"]),
-                "title": p.get("title", ""),
-                "status": p.get("status", ev.READY_FOR_SPEC),
-                "current_spec_id": None,
-                "refinement_count": 0,
-                "depends_on": [],
-                "created_at": event.occurred_at.isoformat(),
-                "updated_at": event.occurred_at.isoformat(),
-            }
-        elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
-            task["status"] = event.payload["to_status"]
-            task["updated_at"] = event.occurred_at.isoformat()
-        elif event.event_type == ev.TASK_SPEC_ASSIGNED:
-            current_spec_id = event.payload.get("spec_id")
-            refinement_count += 1
-        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
-            depends_on.extend(event.payload.get("depends_on", []))
-        elif event.event_type == ev.TASK_TITLE_UPDATED and task is not None:
-            task["title"] = event.payload["title"]
-            task["updated_at"] = event.occurred_at.isoformat()
-
-    if task is not None:
-        task["depends_on"] = depends_on
-        task["current_spec_id"] = current_spec_id
-        task["refinement_count"] = refinement_count
-
-    return task
-
-
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: UUID, request: Request) -> JSONResponse:
     store = request.app.state.store
+    task_manager = TaskManager(store)
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
+    task = await task_manager.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    task_dict = task.model_dump(mode="json")
 
     # Specs
     spec_manager = SpecManager(store)
@@ -107,6 +68,7 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
     ]
 
     # QA failure reason from latest BLOCKED transition
+    task_events = await store.get_events(task_id, "task")
     qa_failure: str | None = None
     for event in reversed(task_events):
         if (
@@ -117,18 +79,17 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
             break
 
     # Project name
-    project_id = UUID(task["project_id"])
     pm = ProjectManager(store)
-    project = await pm.get_project(project_id)
+    project = await pm.get_project(task.project_id)
     project_name = project.name if project is not None else None
 
     return JSONResponse(
         {
-            "task": task,
+            "task": task_dict,
             "project_name": project_name,
             "specs": specs_data,
             "executions": executions_data,
-            "dependencies": task.get("depends_on", []),
+            "dependencies": task_dict.get("depends_on", []),
             "qa_failure": qa_failure,
         }
     )
@@ -139,14 +100,14 @@ async def _task_status_generator(
 ) -> AsyncGenerator[str, None]:
     """Async generator that emits SSE events when task status changes."""
     last_status: str | None = None
+    task_manager = TaskManager(store)
     try:
         while True:
             if await request.is_disconnected():
                 break
-            task_events = await store.get_events(task_id, "task")
-            task = _build_task_dict(task_id, task_events)
+            task = await task_manager.get_task(task_id)
             if task is not None:
-                current_status = task["status"]
+                current_status = task.status
                 if current_status != last_status:
                     last_status = current_status
                     data = json.dumps({"status": current_status})
@@ -173,34 +134,11 @@ class CreateTaskBody(BaseModel):
 @router.post("/tasks", status_code=201)
 async def create_task(body: CreateTaskBody, request: Request) -> JSONResponse:
     store = request.app.state.store
-    task_id = uuid4()
     project_id = UUID(body.project_id)
+    task_manager = TaskManager(store)
 
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={
-            "task_id": str(task_id),
-            "project_id": str(project_id),
-            "title": body.title,
-            "status": ev.READY_FOR_SPEC,
-        },
-    )
-    await store.append_event(
-        aggregate_id=project_id,
-        aggregate_type="project_tasks",
-        event_type=ev.TASK_CREATED,
-        payload={
-            "task_id": str(task_id),
-            "project_id": str(project_id),
-            "title": body.title,
-        },
-    )
-
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
-    return JSONResponse({"task": task}, status_code=201)
+    task = await task_manager.create_task(project_id, body.title)
+    return JSONResponse({"task": task.model_dump(mode="json")}, status_code=201)
 
 
 class UpdateTaskBody(BaseModel):
@@ -238,6 +176,7 @@ async def assign_spec(task_id: UUID, body: AssignSpecBody, request: Request) -> 
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
     spec_manager = SpecManager(store)
+    task_manager = TaskManager(store)
 
     current_status = await state_machine.get_current_status(task_id)
     if current_status is None:
@@ -265,8 +204,7 @@ async def assign_spec(task_id: UUID, body: AssignSpecBody, request: Request) -> 
     except InvalidTransitionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
+    task = await task_manager.get_task(task_id)
     spec_data = {
         "id": str(spec.id),
         "task_id": str(spec.task_id),
@@ -274,13 +212,14 @@ async def assign_spec(task_id: UUID, body: AssignSpecBody, request: Request) -> 
         "content": spec.content,
         "created_at": spec.created_at.isoformat(),
     }
-    return JSONResponse({"task": task, "spec": spec_data})
+    return JSONResponse({"task": task.model_dump(mode="json") if task else None, "spec": spec_data})
 
 
 @router.post("/tasks/{task_id}/reset")
 async def reset_task(task_id: UUID, request: Request) -> JSONResponse:
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
+    task_manager = TaskManager(store)
 
     current_status = await state_machine.get_current_status(task_id)
     if current_status is None:
@@ -290,9 +229,8 @@ async def reset_task(task_id: UUID, request: Request) -> JSONResponse:
 
     await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
-    return JSONResponse({"task": task})
+    task = await task_manager.get_task(task_id)
+    return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
 
 @router.post("/tasks/{task_id}/deploy")
@@ -300,6 +238,7 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
     pm = ProjectManager(store)
+    task_manager = TaskManager(store)
 
     current_status = await state_machine.get_current_status(task_id)
     if current_status is None:
@@ -310,15 +249,13 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
             detail=f"Task {task_id} is not ready for deployment",
         )
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
+    task = await task_manager.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    project_id = UUID(task["project_id"])
-    project = await pm.get_project(project_id)
+    project = await pm.get_project(task.project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+        raise HTTPException(status_code=404, detail=f"Project {task.project_id} not found")
 
     execution_events = await store.get_events(task_id, "task_executions")
     branch_name: str | None = None
@@ -333,7 +270,7 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
         raise HTTPException(status_code=400, detail="No execution branch found for this task")
 
     local_path = str(project.local_path)
-    title = task["title"]
+    title = task.title
     target_branch = "develop"
 
     try:
@@ -370,9 +307,8 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
 
     await state_machine.transition(task_id, ev.DEPLOYED)
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
-    return JSONResponse({"task": task})
+    task = await task_manager.get_task(task_id)
+    return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
 
 # ── Spec Chat ─────────────────────────────────────────────────────────────────
@@ -489,14 +425,14 @@ class SpecChatBody(BaseModel):
 @router.post("/tasks/{task_id}/spec/chat")
 async def spec_chat(task_id: UUID, body: SpecChatBody, request: Request) -> StreamingResponse:
     store = request.app.state.store
+    task_manager = TaskManager(store)
 
-    task_events = await store.get_events(task_id, "task")
-    task = _build_task_dict(task_id, task_events)
+    task = await task_manager.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
     pm = ProjectManager(store)
-    project = await pm.get_project(UUID(task["project_id"]))
+    project = await pm.get_project(task.project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -506,7 +442,7 @@ async def spec_chat(task_id: UUID, body: SpecChatBody, request: Request) -> Stre
         raise HTTPException(status_code=400, detail="INTENT.md not found in project")
 
     intent_md = intent_md_path.read_text()
-    task_title: str = task["title"]
+    task_title: str = task.title
 
     initial_prompt = _build_initial_spec_prompt(intent_md, task_title, task_title)
 

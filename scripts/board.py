@@ -12,12 +12,11 @@ from core import events as ev
 from web.board_builder import (
     STATUS_LABELS,
     STATUS_ORDER,
-    build_task,
     get_task_status,
     load_board,
 )
 
-__all__ = ["build_task", "get_task_status"]
+__all__ = ["get_task_status"]
 
 
 async def main() -> None:

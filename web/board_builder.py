@@ -8,6 +8,7 @@ from uuid import UUID
 from core import events as ev
 from core.models import Event
 from core.store import Store
+from core.task_manager import TaskManager
 
 STATUS_ORDER = [
     ev.READY_FOR_SPEC,
@@ -46,45 +47,6 @@ def get_task_status(task_id: UUID, task_events_cache: dict[UUID, list[Event]]) -
     return status
 
 
-def build_task(task_id: UUID, project_id: UUID, task_events: list[Event]) -> dict[str, Any] | None:
-    """Build a task dict from its events, or None if no TASK_CREATED event found."""
-    task: dict[str, Any] | None = None
-    refinement_count = 0
-    depends_on: list[str] = []
-    for event in task_events:
-        if event.event_type == ev.TASK_CREATED:
-            p = event.payload
-            task = {
-                "id": task_id,
-                "title": p.get("title", ""),
-                "status": p.get("status", ev.READY_FOR_SPEC),
-                "project_id": project_id,
-                "refinement_count": 0,
-                "depends_on": [],
-                "updated_at": event.occurred_at,
-            }
-        elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
-            task["status"] = event.payload["to_status"]
-            task["updated_at"] = event.occurred_at
-        elif event.event_type == ev.TASK_SPEC_ASSIGNED:
-            refinement_count += 1
-            if task is not None:
-                task["updated_at"] = event.occurred_at
-        elif event.event_type == ev.TASK_DEPENDENCY_ADDED:
-            depends_on.extend(event.payload.get("depends_on", []))
-            if task is not None:
-                task["updated_at"] = event.occurred_at
-        elif event.event_type in (ev.TASK_TITLE_CHANGED, ev.TASK_TITLE_UPDATED):
-            if task is not None:
-                task["title"] = event.payload["title"]
-                task["updated_at"] = event.occurred_at
-    if task is not None:
-        task["refinement_count"] = refinement_count
-        task["depends_on"] = depends_on
-        task["has_spec"] = refinement_count > 0
-    return task
-
-
 async def load_board(
     store: Store,
 ) -> tuple[list[dict[str, Any]], dict[UUID, Any], dict[UUID, list[Event]]]:
@@ -96,6 +58,7 @@ async def load_board(
     from core.project_manager import ProjectManager
 
     pm = ProjectManager(store)
+    task_manager = TaskManager(store)
     projects = await pm.list_projects()
     project_by_id: dict[UUID, Any] = {p.id: p for p in projects}
 
@@ -117,8 +80,11 @@ async def load_board(
         for task_id in task_ids:
             task_events = await store.get_events(task_id, "task")
             task_events_cache[task_id] = task_events
-            task = build_task(task_id, project.id, task_events)
+            task = await task_manager.get_task(task_id)
             if task is not None:
-                all_tasks.append(task)
+                all_tasks.append({
+                    **task.model_dump(),
+                    "has_spec": task.refinement_count > 0,
+                })
 
     return all_tasks, project_by_id, task_events_cache
