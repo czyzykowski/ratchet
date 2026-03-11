@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 import re
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -63,7 +64,7 @@ Read the codebase to understand current patterns before generating specs.
 When the user says "done", "generate", or "go", produce the feature definition immediately."""
 
 
-def _extract_feature_preview(text: str) -> dict | None:
+def _extract_feature_preview(text: str) -> dict[str, Any] | None:
     """Extract a preview dict from a ## FEATURE READY block."""
     marker = "## FEATURE READY"
     idx = text.find(marker)

@@ -9,7 +9,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from typing import Any
+
 from core.feature_manager import FeatureManager
+from core.models import HighLevelSpec
 from core.project_manager import ProjectManager
 
 router = APIRouter()
@@ -20,7 +23,7 @@ class CreateFeatureBody(BaseModel):
     feature_block: str  # raw text from ## FEATURE READY block
 
 
-def _parse_feature_block(block: str) -> tuple[str, str, list[dict]]:
+def _parse_feature_block(block: str) -> tuple[str, str, list[dict[str, Any]]]:
     title_m = re.search(r"^#\s+Feature:\s+(.+)$", block, re.MULTILINE)
     title = title_m.group(1).strip() if title_m else "Untitled Feature"
 
@@ -30,7 +33,7 @@ def _parse_feature_block(block: str) -> tuple[str, str, list[dict]]:
     specs_m = re.search(r"##\s+High-Level Specs\s*\n(.*?)$", block, re.DOTALL)
     specs_block = specs_m.group(1).strip() if specs_m else ""
 
-    specs: list[dict] = []
+    specs: list[dict[str, Any]] = []
     spec_pattern = re.compile(r"###\s+(\d+)\.\s+(.+?)(?=###\s+\d+\.|$)", re.DOTALL)
     for m in spec_pattern.finditer(specs_block):
         order = int(m.group(1))
@@ -73,10 +76,10 @@ async def create_feature(body: CreateFeatureBody, request: Request) -> JSONRespo
     title, description, specs = _parse_feature_block(body.feature_block)
     feature = await fm.create_feature(body.project_id, title, description)
 
-    hls_by_order: dict[int, object] = {}
+    hls_by_order: dict[int, HighLevelSpec] = {}
     for spec_def in sorted(specs, key=lambda s: s["order"]):
         dep_uuids = [
-            hls_by_order[idx].id  # type: ignore[union-attr]
+            hls_by_order[idx].id
             for idx in spec_def["dep_indices"]
             if idx in hls_by_order
         ]
