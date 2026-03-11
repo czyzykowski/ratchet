@@ -46,6 +46,7 @@ class SpecReplSession:
         self._proc: asyncio.subprocess.Process | None = None
 
     async def _spawn(self) -> None:
+        limit = 10 * 1024 * 1024  # 10 MB — Claude can output large JSON lines
         self._proc = await asyncio.create_subprocess_exec(
             "claude",
             "-p",
@@ -63,6 +64,7 @@ class SpecReplSession:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            limit=limit,
         )
 
     def _is_alive(self) -> bool:
