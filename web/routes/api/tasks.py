@@ -6,6 +6,7 @@ import asyncio
 import json
 import subprocess
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -372,3 +373,181 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
     task_events = await store.get_events(task_id, "task")
     task = _build_task_dict(task_id, task_events)
     return JSONResponse({"task": task})
+
+
+# ── Spec Chat ─────────────────────────────────────────────────────────────────
+
+_SPEC_ROLE_PROMPT = """\
+You are helping design a software task for the Ratchet project.
+
+## Project Intent
+{intent_md}
+
+## Task
+Title: {task_title}
+
+## Your Role
+Help the user think through this task by asking clarifying questions one at a time.
+Questions should be specific and concrete — multiple choice where possible,
+open-ended when necessary. Only one question per message. No preamble before the question.
+
+After sufficient clarification, describe your understanding of the task in chunks of 200-300 words,
+asking after each chunk whether it looks right.
+Keep to chunked format even when the picture is clear.
+
+When you have gathered enough information and confirmed your understanding with the user,
+produce the spec in this exact format:
+
+## SPEC READY
+# Spec N: <title>
+
+## Objective
+...
+
+## Success Criteria
+- [ ] ...
+
+## Out of Scope
+...
+
+## Technical Context
+...
+
+## Tasks
+- [ ] ...
+
+## Assumptions
+...
+
+## Verification Commands
+```bash
+...
+```
+
+## What Exists After This Spec
+
+...
+
+Use the standard Ratchet spec format exactly as shown. Be specific about file paths,
+function names, and test requirements. Read the codebase to understand current patterns
+before generating the spec.
+
+## User's Opening Description
+
+{user_description}"""
+
+
+def _build_initial_spec_prompt(intent_md: str, task_title: str, user_description: str) -> str:
+    return _SPEC_ROLE_PROMPT.format(
+        intent_md=intent_md,
+        task_title=task_title,
+        user_description=user_description,
+    )
+
+
+def _build_continuation_spec_prompt(
+    initial_prompt: str, history: list[dict[str, str]], user_input: str
+) -> str:
+    return f"""{initial_prompt}
+
+## Conversation History
+
+{json.dumps(history, indent=2)}
+
+## Latest User Message
+
+{user_input}"""
+
+
+def _build_generation_spec_prompt(
+    initial_prompt: str, history: list[dict[str, str]], user_input: str
+) -> str:
+    gen_instruction = (
+        "The user has indicated they are ready to generate the spec. "
+        "Produce the spec now in the exact format specified, "
+        "preceded by '## SPEC READY' on its own line."
+    )
+    return f"""{initial_prompt}
+
+## Conversation History
+
+{json.dumps(history, indent=2)}
+
+## Latest User Message
+
+{user_input}
+
+{gen_instruction}"""
+
+
+class SpecChatBody(BaseModel):
+    user_input: str
+    history: list[dict[str, str]] = []
+    is_initial: bool = False
+
+
+@router.post("/tasks/{task_id}/spec/chat")
+async def spec_chat(task_id: UUID, body: SpecChatBody, request: Request) -> StreamingResponse:
+    store = request.app.state.store
+
+    task_events = await store.get_events(task_id, "task")
+    task = _build_task_dict(task_id, task_events)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    pm = ProjectManager(store)
+    project = await pm.get_project(UUID(task["project_id"]))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    local_path = str(project.local_path)
+    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+    if not intent_md_path.exists():
+        raise HTTPException(status_code=400, detail="INTENT.md not found in project")
+
+    intent_md = intent_md_path.read_text()
+    task_title: str = task["title"]
+
+    initial_prompt = _build_initial_spec_prompt(intent_md, task_title, task_title)
+
+    if body.is_initial:
+        prompt = _build_initial_spec_prompt(intent_md, task_title, body.user_input)
+    elif body.user_input.strip().lower() in ("done", "generate", "go"):
+        prompt = _build_generation_spec_prompt(initial_prompt, body.history, body.user_input)
+    else:
+        prompt = _build_continuation_spec_prompt(initial_prompt, body.history, body.user_input)
+
+    async def _stream() -> AsyncGenerator[str, None]:
+        proc = await asyncio.create_subprocess_exec(
+            "claude", "-p", "--allowedTools", "Read,Glob,WebSearch,Bash",
+            cwd=local_path,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        proc.stdin.write(prompt.encode())
+        await proc.stdin.drain()
+        proc.stdin.close()
+
+        collected: list[str] = []
+        while True:
+            chunk = await proc.stdout.read(512)
+            if not chunk:
+                break
+            text = chunk.decode(errors="replace")
+            collected.append(text)
+            yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
+
+        await proc.wait()
+
+        full_output = "".join(collected)
+        spec_content: str | None = None
+        if "## SPEC READY" in full_output:
+            idx = full_output.find("## SPEC READY")
+            spec_content = full_output[idx + len("## SPEC READY"):].strip()
+
+        yield f"data: {json.dumps({'type': 'done', 'spec': spec_content})}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")

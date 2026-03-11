@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { CreateSpecChat } from './CreateSpecChat'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -61,6 +62,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     enabled: taskId !== null,
   })
 
+  const [showChat, setShowChat] = useState(false)
   const [showReset, setShowReset] = useState(false)
   const [reuseSpec, setReuseSpec] = useState(true)
   const [specContent, setSpecContent] = useState('')
@@ -122,6 +124,21 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const latestSpec = data?.specs[data.specs.length - 1] ?? null
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
   const isBlocked = data?.task.status === 'blocked'
+  const isReadyForSpec = data?.task.status === 'ready_for_spec'
+
+  if (showChat && data) {
+    return (
+      <div className="modal-overlay" onClick={handleOverlayClick}>
+        <div className="modal-content modal-content-chat">
+          <CreateSpecChat
+            taskId={taskId}
+            taskTitle={data.task.title}
+            onClose={() => { setShowChat(false); onClose() }}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
@@ -230,11 +247,18 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               </div>
             )}
 
-            {isBlocked && (
+            {(isBlocked || isReadyForSpec) && (
               <div className="modal-actions">
-                <button className="btn btn-danger" onClick={openResetForm}>
-                  Reset Task
-                </button>
+                {isReadyForSpec && (
+                  <button className="btn btn-primary" onClick={() => setShowChat(true)}>
+                    Create Spec
+                  </button>
+                )}
+                {isBlocked && (
+                  <button className="btn btn-danger" onClick={openResetForm}>
+                    Reset Task
+                  </button>
+                )}
               </div>
             )}
           </>
