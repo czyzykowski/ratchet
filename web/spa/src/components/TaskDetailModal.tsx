@@ -68,6 +68,8 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [specContent, setSpecContent] = useState('')
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
+  const [showDeploy, setShowDeploy] = useState(false)
+  const [skipMerge, setSkipMerge] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState<string | null>(null)
 
@@ -123,12 +125,27 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     }
   }
 
+  function openDeployForm() {
+    setSkipMerge(false)
+    setDeployError(null)
+    setShowDeploy(true)
+  }
+
+  function cancelDeploy() {
+    setShowDeploy(false)
+    setDeployError(null)
+  }
+
   async function confirmDeploy() {
     if (!taskId) return
     setDeploying(true)
     setDeployError(null)
     try {
-      const res = await fetch(`/api/tasks/${taskId}/deploy`, { method: 'POST' })
+      const res = await fetch(`/api/tasks/${taskId}/deploy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skip_merge: skipMerge }),
+      })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail ?? 'Deploy failed')
@@ -283,18 +300,41 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                   </button>
                 )}
                 {isReadyForDeployment && (
-                  <>
-                    {deployError && (
-                      <div className="error-state" style={{ padding: '0.5rem 0' }}>{deployError}</div>
-                    )}
-                    <button className="btn btn-primary" onClick={confirmDeploy} disabled={deploying}>
-                      {deploying ? 'Deploying...' : 'Deploy'}
-                    </button>
-                  </>
+                  <button className="btn btn-primary" onClick={openDeployForm}>
+                    Deploy
+                  </button>
                 )}
               </div>
             )}
           </>
+        )}
+
+        {data && showDeploy && (
+          <div className="reset-form">
+            <div className="reset-form-header">Deploy Task</div>
+
+            <label className="reset-checkbox-label">
+              <input
+                type="checkbox"
+                checked={skipMerge}
+                onChange={e => setSkipMerge(e.target.checked)}
+              />
+              Skip merge (mark as deployed without running git merge)
+            </label>
+
+            {deployError && (
+              <pre className="modal-pre modal-pre-error">{deployError}</pre>
+            )}
+
+            <div className="reset-form-actions">
+              <button className="btn btn-secondary" onClick={cancelDeploy} disabled={deploying}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={confirmDeploy} disabled={deploying}>
+                {deploying ? 'Deploying...' : 'Confirm Deploy'}
+              </button>
+            </div>
+          </div>
         )}
 
         {data && showReset && (

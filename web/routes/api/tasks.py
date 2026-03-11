@@ -232,8 +232,12 @@ async def reset_task(task_id: UUID, request: Request) -> JSONResponse:
     return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
 
+class DeployRequest(BaseModel):
+    skip_merge: bool = False
+
+
 @router.post("/tasks/{task_id}/deploy")
-async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
+async def deploy_task(task_id: UUID, request: Request, body: DeployRequest = DeployRequest()) -> JSONResponse:
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
     pm = ProjectManager(store)
@@ -268,44 +272,45 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
     if branch_name is None:
         raise HTTPException(status_code=400, detail="No execution branch found for this task")
 
-    local_path = str(project.local_path)
-    title = task.title
-    target_branch = "develop"
+    if not body.skip_merge:
+        local_path = str(project.local_path)
+        title = task.title
+        target_branch = "develop"
 
-    try:
-        subprocess.run(
-            ["git", "checkout", target_branch],
-            cwd=local_path,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "merge", "--squash", branch_name],
-            cwd=local_path,
-            check=True,
-            capture_output=True,
-        )
-        commit_msg = f"feat: {title} (task/{task_id})"
-        subprocess.run(
-            ["git", "commit", "-m", commit_msg],
-            cwd=local_path,
-            check=True,
-            capture_output=True,
-        )
         try:
             subprocess.run(
-                ["git", "branch", "-D", branch_name],
+                ["git", "checkout", target_branch],
                 cwd=local_path,
                 check=True,
                 capture_output=True,
             )
-        except subprocess.CalledProcessError:
-            pass
-    except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode().strip()
-        stdout = exc.stdout.decode().strip()
-        detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
-        raise HTTPException(status_code=400, detail=detail)
+            subprocess.run(
+                ["git", "merge", "--squash", branch_name],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+            commit_msg = f"feat: {title} (task/{task_id})"
+            subprocess.run(
+                ["git", "commit", "-m", commit_msg],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+            try:
+                subprocess.run(
+                    ["git", "branch", "-D", branch_name],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError:
+                pass
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode().strip()
+            stdout = exc.stdout.decode().strip()
+            detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
+            raise HTTPException(status_code=400, detail=detail)
 
     await state_machine.transition(task_id, ev.DEPLOYED)
 
