@@ -280,8 +280,55 @@ body, #root {
   padding: 1.5rem;
   width: 500px;
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 85vh;
   overflow-y: auto;
+}
+
+.modal-content-wide {
+  width: min(960px, 92vw);
+  max-height: 92vh;
+}
+
+.modal-meta-row {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.modal-value-sm {
+  font-size: 0.8rem;
+}
+
+.modal-pre {
+  background: #0a1628;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-family: monospace;
+  font-size: 0.75rem;
+  color: #c0c0c0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 500px;
+  overflow-y: auto;
+  margin-top: 0.25rem;
+}
+
+.modal-pre-error {
+  color: #ff6b6b;
+  border-color: #5a1a1a;
+}
+
+.modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.25rem;
+}
+
+.modal-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #0f3460;
 }
 
 .modal-header {
