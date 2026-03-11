@@ -18,10 +18,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from core.store import PostgresStore, Store
 from web.routes import blocked as blocked_router
 from web.routes import board as board_router
-from web.routes import executions as executions_router
-from web.routes import features as features_router
-from web.routes import specs as specs_router
-from web.routes import tasks as tasks_router
 from web.routes import worker as worker_router
 from web.routes.api import events as api_events_router
 from web.routes.api import spec_sessions as spec_sessions_router
@@ -101,10 +97,6 @@ app.mount(
 )
 app.include_router(blocked_router.router)
 app.include_router(board_router.router)
-app.include_router(executions_router.router)
-app.include_router(features_router.router)
-app.include_router(specs_router.router)
-app.include_router(tasks_router.router)
 app.include_router(worker_router.router)
 app.include_router(api_router)
 app.include_router(api_events_router.router)

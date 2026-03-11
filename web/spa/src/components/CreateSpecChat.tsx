@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { Markdown } from './Markdown'
 
 interface CreateSpecChatProps {
   taskId: string
@@ -169,7 +170,9 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
         {messages.map((msg, i) => (
           <div key={i} className={`chat-message chat-message-${msg.role}`}>
             <div className="chat-role">{msg.role === 'user' ? 'You' : 'Claude'}</div>
-            <div className="chat-content">{msg.content}</div>
+            <div className="chat-content">
+              {msg.role === 'assistant' ? <Markdown content={msg.content} /> : msg.content}
+            </div>
           </div>
         ))}
 

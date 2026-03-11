@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreateSpecChat } from './CreateSpecChat'
+import { Markdown } from './Markdown'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -332,7 +333,9 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                     </span>
                   )}
                 </div>
-                <pre className="modal-pre">{latestSpec.content}</pre>
+                <div style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}>
+                  <Markdown content={latestSpec.content} />
+                </div>
               </div>
             )}
 

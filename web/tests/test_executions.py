@@ -1,8 +1,9 @@
-"""Unit tests for GET /executions/{execution_id} using InMemoryStore (no DB required)."""
+"""Unit tests for GET /api/executions/{execution_id} using InMemoryStore (no DB required)."""
 
 from __future__ import annotations
 
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from core import events as ev
 from core.store import InMemoryStore
-from web.routes.executions import router
+from web.routes.api.executions import router
 
 
 @pytest.fixture
@@ -32,7 +33,7 @@ def test_should_return_404_when_execution_does_not_exist(
     client: TestClient,
 ) -> None:
     missing_id = uuid4()
-    with patch("web.routes.executions.get_traces_dir", return_value="/tmp/no-such-dir"):
+    with patch("web.routes.api.executions.get_traces_dir", return_value="/tmp/no-such-dir"):
         response = client.get(f"/executions/{missing_id}")
     assert response.status_code == 404
 
@@ -58,14 +59,15 @@ async def test_should_return_200_with_execution_fields_when_started_event_exists
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.executions.get_traces_dir", return_value=tmpdir):
+        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
             response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
-    assert str(task_id) in response.text
-    assert str(spec_id) in response.text
-    assert "in_progress" in response.text
-    assert "feat/my-task" in response.text
+    data = response.json()
+    assert data["execution"]["task_id"] == str(task_id)
+    assert data["execution"]["spec_id"] == str(spec_id)
+    assert data["execution"]["status"] == "in_progress"
+    assert data["execution"]["branch_name"] == "feat/my-task"
 
 
 @pytest.mark.asyncio
@@ -98,15 +100,16 @@ async def test_should_show_failure_reason_when_execution_failed_event_exists(
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.executions.get_traces_dir", return_value=tmpdir):
+        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
             response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
-    assert "Tests failed: 3 assertions" in response.text
+    data = response.json()
+    assert data["execution"]["failure_reason"] == "Tests failed: 3 assertions"
 
 
 @pytest.mark.asyncio
-async def test_should_show_no_trace_available_when_trace_file_does_not_exist(
+async def test_should_return_null_trace_when_trace_file_does_not_exist(
     store: InMemoryStore, client: TestClient
 ) -> None:
     execution_id = uuid4()
@@ -126,8 +129,40 @@ async def test_should_show_no_trace_available_when_trace_file_does_not_exist(
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.executions.get_traces_dir", return_value=tmpdir):
+        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
             response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
-    assert "No trace available" in response.text
+    data = response.json()
+    assert data["trace"] is None
+
+
+@pytest.mark.asyncio
+async def test_should_return_trace_content_when_trace_file_exists(
+    store: InMemoryStore, client: TestClient
+) -> None:
+    execution_id = uuid4()
+    task_id = uuid4()
+    spec_id = uuid4()
+
+    await store.append_event(
+        aggregate_id=execution_id,
+        aggregate_type="execution",
+        event_type=ev.EXECUTION_STARTED,
+        payload={
+            "task_id": str(task_id),
+            "spec_id": str(spec_id),
+            "branch_name": "feat/my-task",
+            "started_at": "2024-01-01T00:00:00",
+        },
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trace_file = Path(tmpdir) / f"{execution_id}.md"
+        trace_file.write_text("# Execution Trace\n\nAll good.")
+        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
+            response = client.get(f"/executions/{execution_id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["trace"] == "# Execution Trace\n\nAll good."

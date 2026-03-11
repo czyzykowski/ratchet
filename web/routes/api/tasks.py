@@ -327,8 +327,8 @@ async def deploy_task(
             except subprocess.CalledProcessError:
                 pass
         except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.decode().strip()
-            stdout = exc.stdout.decode().strip()
+            stderr = (exc.stderr or b"").decode().strip()
+            stdout = (exc.stdout or b"").decode().strip()
             detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
             raise HTTPException(status_code=400, detail=detail)
 
