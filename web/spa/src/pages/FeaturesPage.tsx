@@ -53,11 +53,11 @@ export function FeaturesPage() {
               {group.features.map(f => (
                 <tr key={f.id} className="task-row">
                   <td>
-                    <Link to={`/features/${f.id}`} style={{ color: '#e0e0e0', textDecoration: 'none' }}>
+                    <Link to={`/features/${f.id}`} style={{ color: '#1a1a1a', textDecoration: 'none' }}>
                       {f.title}
                     </Link>
                   </td>
-                  <td style={{ color: '#a0a0a0', fontSize: '0.8rem' }}>
+                  <td style={{ color: '#555', fontSize: '0.8rem' }}>
                     {f.description.slice(0, 80)}{f.description.length > 80 ? '…' : ''}
                   </td>
                   <td>
