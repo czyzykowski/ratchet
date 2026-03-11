@@ -6,3 +6,9 @@ qa:
     typecheck: "mypy core/ worker/ web/"
     build-spa: "npm ci --prefix web/spa && npm --prefix web/spa run build"
     typecheck-spa: "npm --prefix web/spa run typecheck"
+
+deploy:
+  steps:
+    migrate: ".venv/bin/alembic -c db/alembic.ini upgrade head"
+    install-spa: "npm ci --prefix web/spa"
+    build-spa: "npm --prefix web/spa run build"
