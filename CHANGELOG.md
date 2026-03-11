@@ -18,6 +18,7 @@
 - worker runs in continuous polling loop by default (30 s idle sleep); add `--once` flag for single-pass exit
 
 ### Fixed
+- SPA no longer requires a page reload to show baseline QA failures; DB migration `d4e5f6a7b8c9` extends the `notify_task_events` trigger to also fire on `task.baseline_qa_failed` and `task.baseline_qa_retry` events
 - QA now runs tool steps (pytest, mypy, ruff) against the execution branch worktree instead of the develop branch, so new/deleted test files are correctly reflected in QA output
 - `ClaudeCodeInvoker` strips `CLAUDECODE` env var before spawning claude subprocess to prevent "nested session" failures when worker runs inside a Claude Code session
 - `current_projects.updated_at` now reflects `MAX(occurred_at)` across all project events instead of being locked to the creation event
