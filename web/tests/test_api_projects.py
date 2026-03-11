@@ -143,3 +143,22 @@ def test_should_create_project_and_return_201(
     assert response.status_code == 201
     data = response.json()
     assert data["project"]["name"] == "New Project"
+
+
+def test_should_return_400_when_project_creation_fails(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    from core.project_manager import OnboardingError
+
+    with patch(
+        "web.routes.api.projects.ProjectManager.register_project",
+        new_callable=AsyncMock,
+    ) as mock_register:
+        mock_register.side_effect = OnboardingError("Invalid path")
+        response = client.post(
+            "/api/projects", json={"name": "Bad Project", "path": "/nonexistent/path"}
+        )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
