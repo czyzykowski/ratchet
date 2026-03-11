@@ -13,18 +13,10 @@ export function BoardPage() {
   })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
-  async function runNextTask() {
-    await fetch('/api/worker/run-next', { method: 'POST' })
-    queryClient.invalidateQueries({ queryKey: ['board'] })
-  }
-
   return (
     <div>
       <header className="board-header">
         <div className="board-title">RATCHET BOARD</div>
-        <button className="btn btn-primary" onClick={runNextTask}>
-          Run Next Task
-        </button>
       </header>
       {isLoading && <div className="loading-state">Loading board...</div>}
       {error && <div className="error-state">Failed to load board</div>}
