@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -53,11 +54,18 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
+  const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => fetchTaskDetail(taskId!),
     enabled: taskId !== null,
   })
+
+  const [showReset, setShowReset] = useState(false)
+  const [reuseSpec, setReuseSpec] = useState(true)
+  const [specContent, setSpecContent] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
 
   if (!taskId) return null
 
@@ -65,8 +73,55 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     if (e.target === e.currentTarget) onClose()
   }
 
+  function openResetForm() {
+    const latestSpec = data?.specs[data.specs.length - 1]
+    setSpecContent(latestSpec?.content ?? '')
+    setReuseSpec(true)
+    setResetError(null)
+    setShowReset(true)
+  }
+
+  function cancelReset() {
+    setShowReset(false)
+    setResetError(null)
+  }
+
+  async function confirmReset() {
+    if (!taskId) return
+    setResetting(true)
+    setResetError(null)
+    try {
+      if (reuseSpec) {
+        const res = await fetch(`/api/tasks/${taskId}/reset`, { method: 'POST' })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.detail ?? 'Reset failed')
+        }
+      } else {
+        const res = await fetch(`/api/tasks/${taskId}/spec`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: specContent }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.detail ?? 'Spec update failed')
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+      setShowReset(false)
+      onClose()
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setResetting(false)
+    }
+  }
+
   const latestSpec = data?.specs[data.specs.length - 1] ?? null
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
+  const isBlocked = data?.task.status === 'blocked'
 
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
@@ -79,7 +134,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
         </div>
         {isLoading && <div className="loading-state">Loading task details...</div>}
         {error && <div className="error-state">Failed to load task</div>}
-        {data && (
+        {data && !showReset && (
           <>
             <div className="modal-meta-row">
               <div className="modal-field">
@@ -174,7 +229,51 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 </table>
               </div>
             )}
+
+            {isBlocked && (
+              <div className="modal-actions">
+                <button className="btn btn-danger" onClick={openResetForm}>
+                  Reset Task
+                </button>
+              </div>
+            )}
           </>
+        )}
+
+        {data && showReset && (
+          <div className="reset-form">
+            <div className="reset-form-header">Reset Blocked Task</div>
+
+            <label className="reset-checkbox-label">
+              <input
+                type="checkbox"
+                checked={reuseSpec}
+                onChange={e => setReuseSpec(e.target.checked)}
+              />
+              Reuse current spec
+            </label>
+
+            <textarea
+              className="reset-spec-textarea"
+              value={specContent}
+              onChange={e => setSpecContent(e.target.value)}
+              readOnly={reuseSpec}
+              rows={20}
+            />
+
+            {resetError && (
+              <div className="error-state" style={{ padding: '0.5rem 0' }}>{resetError}</div>
+            )}
+
+            <div className="reset-form-actions">
+              <button className="btn btn-secondary" onClick={cancelReset} disabled={resetting}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={confirmReset} disabled={resetting}>
+                {resetting ? 'Resetting...' : 'Confirm Reset'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
