@@ -67,6 +67,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
     setStreaming(true)
     setChatError(null)
     setCurrentStream('')
+    setMessages(prev => [...prev, { role: 'user', content: userInput }])
 
     try {
       const res = await fetch(`/api/spec-sessions/${activeSessionId}/message`, {
@@ -105,11 +106,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
         }
       }
 
-      setMessages(prev => [
-        ...prev,
-        { role: 'user', content: userInput },
-        { role: 'assistant', content: assistantText },
-      ])
+      setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
       setCurrentStream('')
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Unknown error')

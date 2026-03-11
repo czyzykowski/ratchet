@@ -64,6 +64,7 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
     setStreaming(true)
     setChatError(null)
     setCurrentStream('')
+    setMessages(prev => [...prev, { role: 'user', content: userInput }])
 
     try {
       const res = await fetch(`/api/feature-sessions/${sessionId}/message`, {
@@ -100,11 +101,7 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
         }
       }
 
-      setMessages(prev => [
-        ...prev,
-        { role: 'user', content: userInput },
-        { role: 'assistant', content: assistantText },
-      ])
+      setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
       setCurrentStream('')
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Unknown error')
