@@ -237,7 +237,9 @@ class DeployRequest(BaseModel):
 
 
 @router.post("/tasks/{task_id}/deploy")
-async def deploy_task(task_id: UUID, request: Request, body: DeployRequest = DeployRequest()) -> JSONResponse:
+async def deploy_task(
+    task_id: UUID, request: Request, body: DeployRequest = DeployRequest()
+) -> JSONResponse:
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
     pm = ProjectManager(store)
