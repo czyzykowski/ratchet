@@ -515,7 +515,6 @@ body, #root {
 
 .chat-content {
   background: #f6f6f6;
-  border: 1px solid #e0e0e0;
   border-radius: 8px;
   padding: 0.75rem 1rem;
   font-size: 0.875rem;
@@ -527,7 +526,6 @@ body, #root {
 
 .chat-message-user .chat-content {
   background: #f0eeff;
-  border-color: #c5bef5;
 }
 
 .chat-thinking {
