@@ -105,6 +105,74 @@ def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     return results
 
 
+def load_deploy_config(local_path: str) -> QaConfig | None:
+    """Read <local_path>/ratchet.yaml and return QaConfig for deploy section, or None if absent.
+
+    Normalizes both plain string and {command: ...} step forms.
+    Ignores max_fix_attempts if present (not applicable to deploy hooks).
+    """
+    config_path = Path(local_path) / "ratchet.yaml"
+    if not config_path.exists():
+        return None
+
+    with config_path.open() as f:
+        data: Any = yaml.safe_load(f)
+
+    if not isinstance(data, dict) or "deploy" not in data:
+        return None
+
+    deploy_section = data["deploy"]
+    if not isinstance(deploy_section, dict):
+        return None
+
+    raw_steps = deploy_section.get("steps", {})
+
+    steps: list[QaStep] = []
+    if isinstance(raw_steps, dict):
+        for name, value in raw_steps.items():
+            if isinstance(value, str):
+                command = value
+            elif isinstance(value, dict):
+                command = value["command"]
+            else:
+                continue
+            steps.append(QaStep(name=name, command=command))
+    elif isinstance(raw_steps, list):
+        for item in raw_steps:
+            if isinstance(item, dict):
+                name = item.get("name", "")
+                command = item.get("command", "")
+                steps.append(QaStep(name=name, command=command))
+
+    return QaConfig(steps=steps)
+
+
+def run_deploy_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
+    """Run all deploy steps via subprocess, never stopping early on failure.
+
+    Returns list of QaStepResult for every step regardless of return code.
+    """
+    results: list[QaStepResult] = []
+    for step in config.steps:
+        proc = subprocess.run(
+            step.command,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        output = proc.stdout + proc.stderr
+        results.append(
+            QaStepResult(
+                step_name=step.name,
+                command=step.command,
+                returncode=proc.returncode,
+                output=output,
+            )
+        )
+    return results
+
+
 def check_baseline_qa(project_path: str) -> list[QaStepResult]:
     """Run QA steps on the base branch to detect pre-existing failures.
 

@@ -14,6 +14,7 @@ TASK_TITLE_CHANGED = "task.title_changed"
 TASK_BASELINE_QA_FAILED = "task.baseline_qa_failed"
 TASK_BASELINE_QA_RETRY = "task.baseline_qa_retry"
 TASK_FORCE_EXECUTE = "task.force_execute"
+TASK_DEPLOY_HOOKS_RUN = "task.deploy_hooks_run"
 
 # Spec events
 SPEC_CREATED = "spec.created"

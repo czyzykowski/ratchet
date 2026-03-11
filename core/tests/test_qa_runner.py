@@ -10,8 +10,10 @@ from core.qa_runner import (
     QaConfig,
     QaStep,
     check_baseline_qa,
+    load_deploy_config,
     load_qa_config,
     parse_review_output,
+    run_deploy_steps,
     run_qa_steps,
 )
 
@@ -262,6 +264,140 @@ def test_check_baseline_qa_second_step_fails_returns_that_step(tmp_path: Path) -
     assert len(result) == 1
     assert result[0].step_name == "lint"
     assert result[0].returncode == 1
+
+
+# ---------------------------------------------------------------------------
+# load_deploy_config
+# ---------------------------------------------------------------------------
+
+
+def test_load_deploy_config_with_valid_yaml_plain_string_steps(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        deploy:
+          steps:
+            notify: "echo deployed"
+            restart: "systemctl restart app"
+        """)
+    )
+    config = load_deploy_config(str(tmp_path))
+    assert config is not None
+    assert len(config.steps) == 2
+    assert config.steps[0] == QaStep(name="notify", command="echo deployed")
+    assert config.steps[1] == QaStep(name="restart", command="systemctl restart app")
+
+
+def test_load_deploy_config_with_object_form_step(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        deploy:
+          steps:
+            notify:
+              command: "echo done"
+        """)
+    )
+    config = load_deploy_config(str(tmp_path))
+    assert config is not None
+    assert config.steps[0] == QaStep(name="notify", command="echo done")
+
+
+def test_load_deploy_config_missing_file_returns_none(tmp_path: Path) -> None:
+    config = load_deploy_config(str(tmp_path))
+    assert config is None
+
+
+def test_load_deploy_config_missing_deploy_section_returns_none(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text("qa:\n  steps:\n    test: pytest\n")
+    config = load_deploy_config(str(tmp_path))
+    assert config is None
+
+
+def test_load_deploy_config_empty_file_returns_none(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text("")
+    config = load_deploy_config(str(tmp_path))
+    assert config is None
+
+
+def test_load_deploy_config_ignores_max_fix_attempts(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        deploy:
+          max_fix_attempts: 5
+          steps:
+            notify: "echo done"
+        """)
+    )
+    config = load_deploy_config(str(tmp_path))
+    assert config is not None
+    assert len(config.steps) == 1
+
+
+# ---------------------------------------------------------------------------
+# run_deploy_steps
+# ---------------------------------------------------------------------------
+
+
+def test_run_deploy_steps_all_pass() -> None:
+    config = QaConfig(
+        steps=[
+            QaStep(name="notify", command="echo deployed"),
+            QaStep(name="restart", command="systemctl restart app"),
+        ]
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            _make_proc(0, stdout="deployed"),
+            _make_proc(0, stdout="restarted"),
+        ]
+        results = run_deploy_steps(config, "/fake/path")
+
+    assert len(results) == 2
+    assert results[0].returncode == 0
+    assert results[1].returncode == 0
+    assert mock_run.call_count == 2
+
+
+def test_run_deploy_steps_continues_after_failure() -> None:
+    config = QaConfig(
+        steps=[
+            QaStep(name="step1", command="cmd1"),
+            QaStep(name="step2", command="cmd2"),
+            QaStep(name="step3", command="cmd3"),
+        ]
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = [
+            _make_proc(0, stdout="ok"),
+            _make_proc(1, stderr="error"),
+            _make_proc(0, stdout="ok"),
+        ]
+        results = run_deploy_steps(config, "/fake/path")
+
+    assert len(results) == 3
+    assert results[0].returncode == 0
+    assert results[1].returncode == 1
+    assert results[2].returncode == 0
+    assert mock_run.call_count == 3
+
+
+def test_run_deploy_steps_combines_stdout_and_stderr() -> None:
+    config = QaConfig(steps=[QaStep(name="notify", command="echo done")])
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = _make_proc(0, stdout="out", stderr="err")
+        results = run_deploy_steps(config, "/fake/path")
+
+    assert "out" in results[0].output
+    assert "err" in results[0].output
+
+
+def test_run_deploy_steps_returns_step_metadata() -> None:
+    config = QaConfig(steps=[QaStep(name="deploy", command="deploy.sh")])
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = _make_proc(0, stdout="done")
+        results = run_deploy_steps(config, "/fake/path")
+
+    assert results[0].step_name == "deploy"
+    assert results[0].command == "deploy.sh"
 
 
 def test_run_qa_steps_combines_stdout_and_stderr() -> None:

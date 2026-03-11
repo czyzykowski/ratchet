@@ -10,6 +10,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from core import events as ev
+from core.qa_runner import load_deploy_config, run_deploy_steps
 from core.state_machine import TaskStateMachine
 from core.store import PostgresStore
 from web import queries
@@ -176,6 +177,7 @@ async def deploy_task(
     task_id: UUID,
     target_branch: Annotated[str, Form()] = "develop",
     skip_merge: Annotated[str | None, Form()] = None,
+    skip_deploy_hooks: Annotated[str | None, Form()] = None,
 ) -> Response:
     pool = request.app.state.pool
     store = PostgresStore(pool)
@@ -263,6 +265,28 @@ async def deploy_task(
             )
         except subprocess.CalledProcessError:
             pass  # non-fatal
+
+    if not skip_deploy_hooks:
+        local_path_for_deploy = str(project["local_path"])
+        deploy_config = load_deploy_config(local_path_for_deploy)
+        if deploy_config is not None and deploy_config.steps:
+            hook_results = run_deploy_steps(deploy_config, local_path_for_deploy)
+            await store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+                payload={
+                    "steps": [
+                        {
+                            "name": r.step_name,
+                            "command": r.command,
+                            "returncode": r.returncode,
+                            "output": r.output,
+                        }
+                        for r in hook_results
+                    ]
+                },
+            )
 
     await state_machine.transition(task_id, ev.DEPLOYED)
     broadcast_task_updated(request.app)

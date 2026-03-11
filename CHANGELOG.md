@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Post-deploy hooks via `deploy:` section in `ratchet.yaml`; `deploy-task.py` and web deploy route run all steps unconditionally, record `task.deploy_hooks_run` event with full results, and always transition to `deployed`; `--skip-deploy-hooks` CLI flag and matching web checkbox bypass hook execution entirely
 - "New Task" link on project detail page pointing to `/projects/{id}/tasks/new`
 - Dependency `<select>` in new-task form now excludes tasks in `deployed` or `abandoned` status
 - Read-only web UI (`python -m web`) with board (`GET /`), projects (`GET /projects`, `GET /projects/{id}`), and task detail (`GET /tasks/{id}`) pages rendered via Jinja2 templates; `web/board_builder.py` extracts replay helpers from `scripts/board.py` and is reused by both CLI and web routes

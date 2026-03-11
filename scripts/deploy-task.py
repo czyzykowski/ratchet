@@ -25,6 +25,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip all git operations and advance task directly to deployed status",
     )
+    parser.add_argument(
+        "--skip-deploy-hooks",
+        action="store_true",
+        help="Skip deploy hook execution entirely",
+    )
     return parser.parse_args()
 
 
@@ -226,6 +231,36 @@ async def main() -> None:
                     f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr
                 )
 
+        from core.qa_runner import load_deploy_config, run_deploy_steps
+
+        hook_summary: str
+        if args.skip_deploy_hooks:
+            hook_summary = "(deploy hooks skipped)"
+        else:
+            deploy_config = load_deploy_config(project.local_path)
+            if deploy_config is None or not deploy_config.steps:
+                hook_summary = "(no deploy hooks)"
+            else:
+                hook_results = run_deploy_steps(deploy_config, project.local_path)
+                failed_count = sum(1 for r in hook_results if r.returncode != 0)
+                await store.append_event(
+                    aggregate_id=task_id,
+                    aggregate_type="task",
+                    event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+                    payload={
+                        "steps": [
+                            {
+                                "name": r.step_name,
+                                "command": r.command,
+                                "returncode": r.returncode,
+                                "output": r.output,
+                            }
+                            for r in hook_results
+                        ]
+                    },
+                )
+                hook_summary = f"({len(hook_results)} deploy hooks run, {failed_count} failed)"
+
         try:
             await state_machine.transition(task_id, ev.DEPLOYED)
         except InvalidTransitionError as exc:
@@ -233,9 +268,9 @@ async def main() -> None:
             sys.exit(1)
 
         if args.skip_merge:
-            print(f"Deployed task {title!r} — skipped merge")
+            print(f"Deployed task {title!r} — skipped merge {hook_summary}")
         else:
-            print(f"Deployed task {title!r} — merged to {args.branch}")
+            print(f"Deployed task {title!r} — merged to {args.branch} {hook_summary}")
     finally:
         await close_pool()
 
