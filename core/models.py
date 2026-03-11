@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -81,3 +82,14 @@ class Execution(BaseModel):
     branch_name: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+@dataclass
+class QAExchange:
+    question_index: int
+    question: str
+    answer: str | None        # None if not yet answered
+    execution_id: UUID        # which execution asked this
+    asked_at: datetime
+    answered_at: datetime | None
+    answered_by: str | None   # "cli" | "spa"
