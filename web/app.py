@@ -58,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sse_queues = sse_queues
     app.state.sse_clients = []
     app.state.spec_sessions = {}
+    app.state.feature_sessions = {}
 
     async def _refresh_loop() -> None:
         while True:
@@ -82,6 +83,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         for session in list(app.state.spec_sessions.values()):
             await session.close()
         app.state.spec_sessions.clear()
+        for session in list(app.state.feature_sessions.values()):
+            await session.close()
+        app.state.feature_sessions.clear()
         await close_pool()
 
 

@@ -5,6 +5,7 @@ import { fetchProject, type Task } from '../api/projects'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 import { NewTaskModal } from '../components/NewTaskModal'
+import { CreateFeatureChat } from '../components/CreateFeatureChat'
 import { STATUS_COLORS } from '../utils/statusColors'
 
 const STATUS_ORDER = [
@@ -65,6 +66,7 @@ export function ProjectPage() {
   })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
+  const [featureChatOpen, setFeatureChatOpen] = useState(false)
 
   useSSE((event) => {
     if (
@@ -86,9 +88,14 @@ export function ProjectPage() {
     <div className="page">
       <header className="page-header">
         <h1>{data.project.name}</h1>
-        <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
-          Add Task
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-secondary" onClick={() => setFeatureChatOpen(true)}>
+            Add Feature
+          </button>
+          <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
+            Add Task
+          </button>
+        </div>
       </header>
       {STATUS_ORDER.map(status => {
         const tasks = groups[status]
@@ -132,6 +139,16 @@ export function ProjectPage() {
           projectId={project_id}
           onClose={() => setTaskModalOpen(false)}
         />
+      )}
+      {project_id && featureChatOpen && (
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setFeatureChatOpen(false) }}>
+          <div className="modal-content modal-content-chat">
+            <CreateFeatureChat
+              projectId={project_id}
+              onClose={() => setFeatureChatOpen(false)}
+            />
+          </div>
+        </div>
       )}
     </div>
   )
