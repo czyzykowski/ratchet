@@ -25,6 +25,12 @@ EXECUTION_STARTED = "execution.started"
 EXECUTION_COMPLETED = "execution.completed"
 EXECUTION_FAILED = "execution.failed"
 
+# Q&A events
+TASK_INPUT_REQUESTED = "task_input_requested"
+TASK_INPUT_PROVIDED = "task_input_provided"
+# TASK_INPUT_REQUESTED payload: {"question": str, "execution_id": str, "question_index": int}
+# TASK_INPUT_PROVIDED payload:  {"answer": str, "question_index": int, "answered_by": str}
+
 # Task status constants
 READY_FOR_SPEC = "ready_for_spec"
 SPEC_QA = "spec_qa"
@@ -36,6 +42,7 @@ READY_FOR_DEPLOYMENT = "ready_for_deployment"
 DEPLOYED = "deployed"
 
 ABANDONED = "abandoned"
+WAITING_FOR_INPUT = "waiting_for_input"
 
 # Feature events
 FEATURE_CREATED = "feature.created"
@@ -53,6 +60,7 @@ TASK_STATUSES = (
     SPEC_QA,
     READY_FOR_IMPLEMENTATION,
     IN_PROGRESS,
+    WAITING_FOR_INPUT,
     BLOCKED,
     READY_FOR_QA,
     READY_FOR_DEPLOYMENT,
