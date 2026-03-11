@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -354,3 +354,180 @@ async def test_env_prep_failure_does_not_invoke_claude() -> None:
         await run_once(store, invoker)
 
     invoker.invoke.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for waiting_for_input tests
+# ---------------------------------------------------------------------------
+
+
+async def _emit_qa_events(
+    store: InMemoryStore,
+    task_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    answered: bool,
+) -> None:
+    """Emit TASK_INPUT_REQUESTED and optionally TASK_INPUT_PROVIDED events."""
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_INPUT_REQUESTED,
+        payload={"question": "What color?", "execution_id": str(execution_id), "question_index": 0},
+    )
+    if answered:
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_INPUT_PROVIDED,
+            payload={"answer": "Blue", "question_index": 0, "answered_by": "cli"},
+        )
+
+
+async def _setup_waiting_for_input_task(
+    store: InMemoryStore,
+    project_id: uuid.UUID,
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Set up a task in waiting_for_input state. Returns (task_id, execution_id)."""
+    task_id = await _setup_task(store, project_id)
+    await _setup_spec(store, task_id)
+    await _advance_task_to_ready(store, task_id)
+    state_machine = TaskStateMachine(store)
+    execution_id = uuid.uuid4()
+    await state_machine.transition(task_id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+    await state_machine.transition(
+        task_id, ev.WAITING_FOR_INPUT, extra_payload={"execution_id": str(execution_id)}
+    )
+    return task_id, execution_id
+
+
+def _make_mock_execution(execution_id: uuid.UUID, task_id: uuid.UUID) -> MagicMock:
+    """Create a mock Execution with status='running'."""
+    mock_exec = MagicMock()
+    mock_exec.id = execution_id
+    mock_exec.task_id = task_id
+    mock_exec.spec_id = uuid.uuid4()
+    mock_exec.branch_name = f"execution/{execution_id}"
+    mock_exec.status = "running"
+    return mock_exec
+
+
+# ---------------------------------------------------------------------------
+# waiting_for_input: get_next_task filtering
+# ---------------------------------------------------------------------------
+
+
+async def test_waiting_for_input_task_skipped_when_pending_question_exists() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id, execution_id = await _setup_waiting_for_input_task(store, project.id)
+
+    # Unanswered question — task should be skipped.
+    await _emit_qa_events(store, task_id, execution_id, answered=False)
+
+    project_manager = ProjectManager(store)
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(store, project_manager, spec_manager, state_machine)
+    assert result is None
+
+
+async def test_waiting_for_input_task_returned_when_question_answered() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id, execution_id = await _setup_waiting_for_input_task(store, project.id)
+
+    # Answered question — task should be returned.
+    await _emit_qa_events(store, task_id, execution_id, answered=True)
+
+    project_manager = ProjectManager(store)
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(store, project_manager, spec_manager, state_machine)
+    assert result is not None
+    assert result[0].id == task_id
+
+
+# ---------------------------------------------------------------------------
+# waiting_for_input: run_once resume path
+# ---------------------------------------------------------------------------
+
+PATCH_GET_CURRENT_EXECUTION = "core.execution_manager.ExecutionManager.get_current_execution"
+PATCH_CONTEXT_ASSEMBLE = "core.context_assembler.ContextAssembler.assemble"
+
+
+def _make_fake_context(execution_id: uuid.UUID, task_id: uuid.UUID) -> MagicMock:
+    from core.context_assembler import ExecutionContext
+    return ExecutionContext(
+        execution_id=execution_id,
+        task_id=task_id,
+        spec_id=uuid.uuid4(),
+        worktree_path="/fake/repo/.worktrees/exec",
+        prompt="# Spec\nDo the thing.",
+    )
+
+
+async def test_resume_path_transitions_to_in_progress_then_ready_for_qa() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id, execution_id = await _setup_waiting_for_input_task(store, project.id)
+    await _emit_qa_events(store, task_id, execution_id, answered=True)
+
+    mock_exec = _make_mock_execution(execution_id, task_id)
+    fake_context = _make_fake_context(execution_id, task_id)
+    invoker = _make_invoker("completed")
+
+    with (
+        patch(PATCH_GET_CURRENT_EXECUTION, new=AsyncMock(return_value=mock_exec)),
+        patch(PATCH_CONTEXT_ASSEMBLE, new=AsyncMock(return_value=fake_context)),
+        patch(PATCH_CLEANUP),
+    ):
+        await run_once(store, invoker)
+
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.READY_FOR_QA
+
+
+async def test_resume_path_transitions_to_blocked_on_failed_invocation() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id, execution_id = await _setup_waiting_for_input_task(store, project.id)
+    await _emit_qa_events(store, task_id, execution_id, answered=True)
+
+    mock_exec = _make_mock_execution(execution_id, task_id)
+    fake_context = _make_fake_context(execution_id, task_id)
+    invoker = _make_invoker("failed", failure_reason="tests failed")
+
+    with (
+        patch(PATCH_GET_CURRENT_EXECUTION, new=AsyncMock(return_value=mock_exec)),
+        patch(PATCH_CONTEXT_ASSEMBLE, new=AsyncMock(return_value=fake_context)),
+        patch(PATCH_CLEANUP),
+    ):
+        await run_once(store, invoker)
+
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.BLOCKED
+
+
+async def test_resume_path_blocks_task_when_no_running_execution() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id, execution_id = await _setup_waiting_for_input_task(store, project.id)
+    await _emit_qa_events(store, task_id, execution_id, answered=True)
+
+    invoker = _make_invoker("completed")
+
+    with (
+        patch(PATCH_GET_CURRENT_EXECUTION, new=AsyncMock(return_value=None)),
+    ):
+        result = await run_once(store, invoker)
+
+    assert result is True
+    invoker.invoke.assert_not_called()
+
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.BLOCKED

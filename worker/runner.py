@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from core import events as ev
+from core import qa_manager
 from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
@@ -73,8 +74,14 @@ async def get_next_task(
 
         for task_id in task_ids_ordered:
             task = await task_manager.get_task(task_id)
-            if task is None or task.status != ev.READY_FOR_IMPLEMENTATION:
+            actionable = (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT)
+            if task is None or task.status not in actionable:
                 continue
+
+            if task.status == ev.WAITING_FOR_INPUT:
+                pending = await qa_manager.get_pending_question(store, task_id)
+                if pending is not None:
+                    continue
 
             # Skip if any dependency is not yet deployed
             if task.depends_on:
@@ -162,6 +169,61 @@ async def run_once(
         return False
 
     task, project, spec = result
+
+    # Resume path for waiting_for_input tasks
+    if task.status == ev.WAITING_FOR_INPUT:
+        execution_manager = ExecutionManager(store, project.local_path)
+        context_assembler = ContextAssembler(store)
+        execution = await execution_manager.get_current_execution(task.id)
+        if execution is None:
+            logger.error(
+                "No running execution for waiting_for_input task=%s, blocking", task.id
+            )
+            await state_machine.transition(
+                task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
+            )
+            await state_machine.transition(task.id, ev.BLOCKED)
+            return True
+        execution_id = execution.id
+        await state_machine.transition(
+            task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
+        )
+        logger.info("Resuming execution after input: task=%s execution=%s", task.id, execution_id)
+        try:
+            context = await context_assembler.assemble(execution_id, project)
+        except ContextAssemblyError as exc:
+            failure_reason = str(exc)
+            logger.error(
+                "Context assembly failed: task=%s execution=%s reason=%s",
+                task.id,
+                execution_id,
+                failure_reason,
+            )
+            await execution_manager.fail_execution(execution_id, failure_reason)
+            await state_machine.transition(task.id, ev.BLOCKED)
+            return True
+        try:
+            invocation_result = await asyncio.to_thread(invoker.invoke, context)
+        except Exception as exc:
+            failure_reason = f"unexpected error: {exc}"
+            logger.error("Unexpected error: task=%s error=%s", task.id, str(exc))
+            await execution_manager.fail_execution(execution_id, failure_reason)
+            await state_machine.transition(task.id, ev.BLOCKED)
+            raise
+        if invocation_result.status == "completed":
+            await execution_manager.complete_execution(execution_id)
+            await state_machine.transition(task.id, ev.READY_FOR_QA)
+            logger.info(
+                "Execution completed: task=%s trace=%s",
+                task.id,
+                invocation_result.trace_path,
+            )
+        elif invocation_result.status in ("failed", "crashed"):
+            failure_reason = invocation_result.failure_reason or invocation_result.status
+            await execution_manager.fail_execution(execution_id, failure_reason)
+            await state_machine.transition(task.id, ev.BLOCKED)
+            logger.info("Execution failed: task=%s reason=%s", task.id, failure_reason)
+        return True
 
     # Check if force-execute was requested after last baseline failure
     task_events = await store.get_events(task.id, "task")
