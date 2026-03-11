@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- `GET /api/tasks/{task_id}/qa` endpoint returns full Q&A history and pending question for a task
+- `POST /api/tasks/{task_id}/answer` endpoint records a human answer to a pending question, validated against `WAITING_FOR_INPUT` status; `answered_by` is always `"spa"`
 - Post-deploy hooks via `deploy:` section in `ratchet.yaml`; `deploy-task.py` and web deploy route run all steps unconditionally, record `task.deploy_hooks_run` event with full results, and always transition to `deployed`; `--skip-deploy-hooks` CLI flag and matching web checkbox bypass hook execution entirely
 - "New Task" link on project detail page pointing to `/projects/{id}/tasks/new`
 - Dependency `<select>` in new-task form now excludes tasks in `deployed` or `abandoned` status

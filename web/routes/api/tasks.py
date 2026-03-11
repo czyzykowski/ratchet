@@ -15,7 +15,9 @@ from pydantic import BaseModel
 
 from core import events as ev
 from core.execution_manager import ExecutionManager
+from core.models import QAExchange
 from core.project_manager import ProjectManager
+from core.qa_manager import get_pending_question, get_qa_history
 from core.spec_manager import SpecManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
 from core.task_manager import TaskManager
@@ -388,6 +390,90 @@ async def force_execute_task(task_id: UUID, request: Request) -> JSONResponse:
 
     task = await task_manager.get_task(task_id)
     return JSONResponse({"task": task.model_dump(mode="json") if task else None})
+
+
+# ── Q&A Endpoints ─────────────────────────────────────────────────────────────
+
+
+def _serialize_qa_exchange(exchange: QAExchange) -> dict[str, Any]:
+    return {
+        "question_index": exchange.question_index,
+        "question": exchange.question,
+        "answer": exchange.answer,
+        "execution_id": str(exchange.execution_id),
+        "asked_at": exchange.asked_at.isoformat(),
+        "answered_at": exchange.answered_at.isoformat() if exchange.answered_at else None,
+        "answered_by": exchange.answered_by,
+    }
+
+
+@router.get("/tasks/{task_id}/qa")
+async def get_task_qa(task_id: UUID, request: Request) -> JSONResponse:
+    store = request.app.state.store
+    task_manager = TaskManager(store)
+
+    task = await task_manager.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    history = await get_qa_history(store, task_id)
+    pending = await get_pending_question(store, task_id)
+
+    return JSONResponse({
+        "history": [_serialize_qa_exchange(x) for x in history],
+        "pending": _serialize_qa_exchange(pending) if pending is not None else None,
+    })
+
+
+class AnswerBody(BaseModel):
+    answer: str
+    question_index: int
+
+
+@router.post("/tasks/{task_id}/answer")
+async def answer_pending_question(
+    task_id: UUID, body: AnswerBody, request: Request
+) -> JSONResponse:
+    store = request.app.state.store
+    state_machine = TaskStateMachine(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    if current_status != ev.WAITING_FOR_INPUT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task {task_id} is not in waiting_for_input status",
+        )
+
+    pending = await get_pending_question(store, task_id)
+    if pending is None or pending.question_index != body.question_index:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No pending question at index {body.question_index}",
+        )
+
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_INPUT_PROVIDED,
+        payload={
+            "answer": body.answer,
+            "question_index": body.question_index,
+            "answered_by": "spa",
+        },
+    )
+
+    answered = QAExchange(
+        question_index=pending.question_index,
+        question=pending.question,
+        answer=body.answer,
+        execution_id=pending.execution_id,
+        asked_at=pending.asked_at,
+        answered_at=None,
+        answered_by="spa",
+    )
+    return JSONResponse({"exchange": _serialize_qa_exchange(answered)})
 
 
 # ── Spec Chat ─────────────────────────────────────────────────────────────────
