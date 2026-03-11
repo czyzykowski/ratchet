@@ -84,17 +84,17 @@ async def get_board(request: Request) -> JSONResponse:
         if status == ev.READY_FOR_IMPLEMENTATION:
             task_events = task_events_cache.get(task["id"], [])
             last_failed_seq: int | None = None
-            last_force_seq: int | None = None
+            last_cleared_seq: int | None = None
             failure_output: str | None = None
             for e in task_events:
                 if e.event_type == ev.TASK_BASELINE_QA_FAILED:
                     last_failed_seq = e.sequence
                     failure_output = e.payload.get("failure_output")
-                elif e.event_type == ev.TASK_FORCE_EXECUTE:
-                    last_force_seq = e.sequence
+                elif e.event_type in (ev.TASK_BASELINE_QA_RETRY, ev.TASK_FORCE_EXECUTE):
+                    last_cleared_seq = max(last_cleared_seq or 0, e.sequence)
             if (
                 last_failed_seq is not None
-                and (last_force_seq is None or last_failed_seq > last_force_seq)
+                and (last_cleared_seq is None or last_failed_seq > last_cleared_seq)
             ):
                 baseline_qa_failure = failure_output
 

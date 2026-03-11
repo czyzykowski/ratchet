@@ -80,17 +80,17 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
     # Baseline QA failure (pending, not overridden by force-execute)
     baseline_qa_failure: str | None = None
     last_failed_seq: int | None = None
-    last_force_seq: int | None = None
+    last_cleared_seq: int | None = None
     failure_output: str | None = None
     for event in task_events:
         if event.event_type == ev.TASK_BASELINE_QA_FAILED:
             last_failed_seq = event.sequence
             failure_output = event.payload.get("failure_output")
-        elif event.event_type == ev.TASK_FORCE_EXECUTE:
-            last_force_seq = event.sequence
+        elif event.event_type in (ev.TASK_BASELINE_QA_RETRY, ev.TASK_FORCE_EXECUTE):
+            last_cleared_seq = max(last_cleared_seq or 0, event.sequence)
     if (
         last_failed_seq is not None
-        and (last_force_seq is None or last_failed_seq > last_force_seq)
+        and (last_cleared_seq is None or last_failed_seq > last_cleared_seq)
     ):
         baseline_qa_failure = failure_output
 
@@ -333,6 +333,32 @@ async def deploy_task(
             raise HTTPException(status_code=400, detail=detail)
 
     await state_machine.transition(task_id, ev.DEPLOYED)
+
+    task = await task_manager.get_task(task_id)
+    return JSONResponse({"task": task.model_dump(mode="json") if task else None})
+
+
+@router.post("/tasks/{task_id}/retry-baseline-qa")
+async def retry_baseline_qa(task_id: UUID, request: Request) -> JSONResponse:
+    store = request.app.state.store
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    if current_status != ev.READY_FOR_IMPLEMENTATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Task {task_id} is not in ready_for_implementation status",
+        )
+
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_BASELINE_QA_RETRY,
+        payload={},
+    )
 
     task = await task_manager.get_task(task_id)
     return JSONResponse({"task": task.model_dump(mode="json") if task else None})

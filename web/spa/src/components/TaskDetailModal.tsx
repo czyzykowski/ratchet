@@ -73,6 +73,8 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [skipMerge, setSkipMerge] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
+  const [retryError, setRetryError] = useState<string | null>(null)
   const [forceExecuting, setForceExecuting] = useState(false)
   const [forceExecuteError, setForceExecuteError] = useState<string | null>(null)
 
@@ -160,6 +162,25 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
       setDeployError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setDeploying(false)
+    }
+  }
+
+  async function retryBaselineQa() {
+    if (!taskId) return
+    setRetrying(true)
+    setRetryError(null)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/retry-baseline-qa`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? 'Retry failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -262,17 +283,28 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               <div className="modal-field">
                 <div className="modal-label">Baseline QA Failure</div>
                 <pre className="modal-pre modal-pre-error">{data.baseline_qa_failure}</pre>
+                {retryError && (
+                  <div className="error-state" style={{ padding: '0.5rem 0' }}>{retryError}</div>
+                )}
                 {forceExecuteError && (
                   <div className="error-state" style={{ padding: '0.5rem 0' }}>{forceExecuteError}</div>
                 )}
-                <button
-                  className="btn btn-danger"
-                  onClick={forceExecute}
-                  disabled={forceExecuting}
-                  style={{ marginTop: '0.5rem' }}
-                >
-                  {forceExecuting ? 'Requesting...' : 'Force Execute (skip baseline QA)'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={retryBaselineQa}
+                    disabled={retrying || forceExecuting}
+                  >
+                    {retrying ? 'Retrying...' : 'Retry'}
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={forceExecute}
+                    disabled={retrying || forceExecuting}
+                  >
+                    {forceExecuting ? 'Requesting...' : 'Force Execute (skip baseline QA)'}
+                  </button>
+                </div>
               </div>
             )}
 
