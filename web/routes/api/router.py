@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from web.routes.api import board, executions, feature_sessions, features, projects, tasks, worker
+from web.routes.api import (
+    board,
+    executions,
+    feature_sessions,
+    features,
+    projects,
+    specs,
+    tasks,
+    worker,
+)
 
 api_router = APIRouter(prefix="/api", tags=["api"])
 api_router.include_router(board.router)
@@ -14,3 +23,4 @@ api_router.include_router(worker.router)
 api_router.include_router(features.router)
 api_router.include_router(executions.router)
 api_router.include_router(feature_sessions.router)
+api_router.include_router(specs.router)
