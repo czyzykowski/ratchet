@@ -832,6 +832,15 @@ body, #root {
   white-space: nowrap;
 }
 
+.deploy-error {
+  font-size: 0.75rem;
+  color: #dc2626;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .btn-sm {
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;

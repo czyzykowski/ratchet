@@ -302,7 +302,10 @@ async def deploy_task(task_id: UUID, request: Request) -> JSONResponse:
         except subprocess.CalledProcessError:
             pass
     except subprocess.CalledProcessError as exc:
-        raise HTTPException(status_code=400, detail=exc.stderr.decode())
+        stderr = exc.stderr.decode().strip()
+        stdout = exc.stdout.decode().strip()
+        detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
+        raise HTTPException(status_code=400, detail=detail)
 
     await state_machine.transition(task_id, ev.DEPLOYED)
 

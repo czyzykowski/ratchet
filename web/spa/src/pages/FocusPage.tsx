@@ -41,6 +41,7 @@ export function FocusPage() {
   const { data: activity, isLoading: activityLoading } = useActivity()
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [deploying, setDeploying] = useState<string | null>(null)
+  const [deployErrors, setDeployErrors] = useState<Record<string, string>>({})
 
   useSSE(() => {
     queryClient.invalidateQueries({ queryKey: ['board'] })
@@ -50,10 +51,22 @@ export function FocusPage() {
   async function handleDeploy(e: React.MouseEvent, taskId: string) {
     e.stopPropagation()
     setDeploying(taskId)
+    setDeployErrors(prev => { const next = { ...prev }; delete next[taskId]; return next })
     try {
-      await fetch(`/api/tasks/${taskId}/deploy`, { method: 'POST' })
+      const res = await fetch(`/api/tasks/${taskId}/deploy`, { method: 'POST' })
+      if (!res.ok) {
+        let message = `Deploy failed (${res.status})`
+        try {
+          const body = await res.json()
+          if (body.detail) message = body.detail
+        } catch { /* ignore parse errors */ }
+        setDeployErrors(prev => ({ ...prev, [taskId]: message }))
+        return
+      }
       queryClient.invalidateQueries({ queryKey: ['board'] })
       queryClient.invalidateQueries({ queryKey: ['activity'] })
+    } catch (err) {
+      setDeployErrors(prev => ({ ...prev, [taskId]: err instanceof Error ? err.message : 'Network error' }))
     } finally {
       setDeploying(null)
     }
@@ -98,13 +111,20 @@ export function FocusPage() {
               <span className="attention-meta">{task.project_name}</span>
               <span className="attention-meta">{formatRelativeTime(task.updated_at)}</span>
               {task.status === 'ready_for_deployment' && (
-                <button
-                  className="btn btn-primary btn-sm"
-                  disabled={deploying === task.id}
-                  onClick={e => handleDeploy(e, task.id)}
-                >
-                  {deploying === task.id ? '...' : 'Deploy'}
-                </button>
+                <>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={deploying === task.id}
+                    onClick={e => handleDeploy(e, task.id)}
+                  >
+                    {deploying === task.id ? '...' : 'Deploy'}
+                  </button>
+                  {deployErrors[task.id] && (
+                    <span className="deploy-error" title={deployErrors[task.id]}>
+                      {deployErrors[task.id]}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           ))}
