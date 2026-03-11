@@ -16,7 +16,7 @@ VALID_TRANSITIONS: dict[str, set[str]] = {
     ev.IN_PROGRESS: {
         ev.BLOCKED, ev.READY_FOR_QA, ev.READY_FOR_SPEC, ev.ABANDONED, ev.WAITING_FOR_INPUT
     },
-    ev.WAITING_FOR_INPUT: {ev.IN_PROGRESS, ev.BLOCKED, ev.ABANDONED},
+    ev.WAITING_FOR_INPUT: {ev.IN_PROGRESS, ev.ABANDONED},
     ev.READY_FOR_QA: {
         ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT, ev.BLOCKED,
         ev.READY_FOR_SPEC, ev.READY_FOR_IMPLEMENTATION, ev.ABANDONED
@@ -74,6 +74,12 @@ class TaskStateMachine:
             raise InvalidTransitionError(
                 f"Cannot transition task {task_id} from {current!r} to {new_status!r}"
             )
+        if new_status == ev.WAITING_FOR_INPUT:
+            if not extra_payload or "execution_id" not in extra_payload:
+                raise InvalidTransitionError(
+                    f"Transition to {ev.WAITING_FOR_INPUT!r} requires"
+                    " 'execution_id' in extra_payload"
+                )
         # "status" key required by current_tasks materialized view (payload->>'status')
         payload: dict[str, Any] = {
             "from_status": current, "to_status": new_status, "status": new_status

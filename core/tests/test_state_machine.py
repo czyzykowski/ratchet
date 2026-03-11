@@ -289,9 +289,15 @@ async def test_invalid_abandoned_to_in_progress() -> None:
 async def test_transition_in_progress_to_waiting_for_input() -> None:
     sm, store = _make_sm()
     task_id = uuid.uuid4()
+    execution_id = str(uuid.uuid4())
     await _seed_task(store, task_id, ev.IN_PROGRESS)
-    await sm.transition(task_id, ev.WAITING_FOR_INPUT)
+    event = await sm.transition(
+        task_id, ev.WAITING_FOR_INPUT, extra_payload={"execution_id": execution_id}
+    )
     assert await sm.get_current_status(task_id) == ev.WAITING_FOR_INPUT
+    assert event.payload["execution_id"] == execution_id
+    assert event.payload["from_status"] == ev.IN_PROGRESS
+    assert event.payload["to_status"] == ev.WAITING_FOR_INPUT
 
 
 async def test_transition_waiting_for_input_to_in_progress() -> None:
@@ -306,8 +312,8 @@ async def test_transition_waiting_for_input_to_blocked() -> None:
     sm, store = _make_sm()
     task_id = uuid.uuid4()
     await _seed_task(store, task_id, ev.WAITING_FOR_INPUT)
-    await sm.transition(task_id, ev.BLOCKED)
-    assert await sm.get_current_status(task_id) == ev.BLOCKED
+    with pytest.raises(InvalidTransitionError):
+        await sm.transition(task_id, ev.BLOCKED)
 
 
 async def test_transition_waiting_for_input_to_abandoned() -> None:
@@ -324,6 +330,22 @@ async def test_invalid_waiting_for_input_to_ready_for_spec() -> None:
     await _seed_task(store, task_id, ev.WAITING_FOR_INPUT)
     with pytest.raises(InvalidTransitionError):
         await sm.transition(task_id, ev.READY_FOR_SPEC)
+
+
+async def test_invalid_waiting_for_input_to_ready_for_qa() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.WAITING_FOR_INPUT)
+    with pytest.raises(InvalidTransitionError):
+        await sm.transition(task_id, ev.READY_FOR_QA)
+
+
+async def test_invalid_waiting_for_input_without_execution_id() -> None:
+    sm, store = _make_sm()
+    task_id = uuid.uuid4()
+    await _seed_task(store, task_id, ev.IN_PROGRESS)
+    with pytest.raises(InvalidTransitionError):
+        await sm.transition(task_id, ev.WAITING_FOR_INPUT)
 
 
 async def test_invalid_ready_for_spec_to_waiting_for_input() -> None:
