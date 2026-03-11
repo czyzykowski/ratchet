@@ -8,10 +8,18 @@ import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectPage } from './pages/ProjectPage'
 import { SpecDetailPage } from './pages/SpecDetailPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
+import { NotificationsContext, useNotificationsState } from './hooks/useNotifications'
+import { useTitleBadge } from './hooks/useTitleBadge'
+import { Notifications } from './components/Notifications'
+import { NotificationsController } from './components/NotificationsController'
 
-export function App() {
+function AppInner() {
+  useTitleBadge()
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      <NotificationsController />
+      <Notifications />
       <nav className="spa-nav">
         <NavLink to="/" end>Focus</NavLink>
         <NavLink to="/board">Board</NavLink>
@@ -30,5 +38,15 @@ export function App() {
         <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
       </Routes>
     </div>
+  )
+}
+
+export function App() {
+  const notificationsValue = useNotificationsState()
+
+  return (
+    <NotificationsContext.Provider value={notificationsValue}>
+      <AppInner />
+    </NotificationsContext.Provider>
   )
 }

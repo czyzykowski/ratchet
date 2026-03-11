@@ -5,7 +5,7 @@ import { useActivity } from '../hooks/useActivity'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 
-const ATTENTION_STATUSES = ['ready_for_spec', 'blocked', 'ready_for_deployment']
+const ATTENTION_STATUSES = ['ready_for_spec', 'blocked', 'ready_for_deployment', 'waiting_for_input']
 
 const STATUS_LABELS: Record<string, string> = {
   ready_for_spec: 'Ready for Spec',
@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
   ready_for_deployment: 'Ready to Deploy',
   deployed: 'Deployed',
   abandoned: 'Abandoned',
+  waiting_for_input: 'Waiting for Input',
 }
 
 function formatRelativeTime(isoString: string | null): string {

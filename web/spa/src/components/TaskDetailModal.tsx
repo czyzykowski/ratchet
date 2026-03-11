@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreateSpecChat } from './CreateSpecChat'
 import { Markdown } from './Markdown'
+import { fetchTaskQA, submitAnswer } from '../api/qa'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -78,6 +79,33 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [retryError, setRetryError] = useState<string | null>(null)
   const [forceExecuting, setForceExecuting] = useState(false)
   const [forceExecuteError, setForceExecuteError] = useState<string | null>(null)
+  const [answerText, setAnswerText] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const isWaitingForInput = data?.task.status === 'waiting_for_input'
+  const { data: qaData } = useQuery({
+    queryKey: ['task-qa', taskId],
+    queryFn: () => fetchTaskQA(taskId!),
+    enabled: taskId !== null && isWaitingForInput,
+  })
+
+  async function handleSubmitAnswer() {
+    if (!taskId || !qaData?.pending) return
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await submitAnswer(taskId, answerText, qaData.pending.question_index)
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['task-qa', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+      setAnswerText('')
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (!taskId) return null
 
@@ -279,6 +307,45 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 </div>
               )}
             </div>
+
+            {isWaitingForInput && qaData && (
+              <div className="qa-panel">
+                <div className="modal-label">Question</div>
+                <div className="qa-question">{qaData.pending?.question}</div>
+                <textarea
+                  className="reset-spec-textarea"
+                  value={answerText}
+                  onChange={e => setAnswerText(e.target.value)}
+                  rows={4}
+                  placeholder="Your answer…"
+                  disabled={submitting}
+                />
+                {submitError && <div className="error-state">{submitError}</div>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleSubmitAnswer}
+                    disabled={submitting || !answerText.trim()}
+                  >
+                    {submitting ? 'Submitting…' : 'Submit Answer'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {qaData && qaData.history.filter(x => x.answer !== null).length > 0 && (
+              <div className="modal-field">
+                <div className="modal-label">
+                  Q&amp;A History ({qaData.history.filter(x => x.answer !== null).length})
+                </div>
+                {qaData.history.filter(x => x.answer !== null).map(ex => (
+                  <div key={ex.question_index} className="qa-history-item">
+                    <div className="qa-question">{ex.question}</div>
+                    <div className="qa-answer"><strong>Answer:</strong> {ex.answer}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {data.baseline_qa_failure && (
               <div className="modal-field">
