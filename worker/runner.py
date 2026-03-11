@@ -168,7 +168,8 @@ async def run_once(
     skip_baseline = _should_skip_baseline_qa(task_events)
 
     if not skip_baseline:
-        baseline_failures = check_baseline_qa(project.local_path)
+        ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
+        baseline_failures = check_baseline_qa(project.local_path, ratchet_yaml)
         if baseline_failures:
             combined = "\n\n".join(
                 f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
@@ -201,7 +202,7 @@ async def run_once(
     await state_machine.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
 
     try:
-        execution = await execution_manager.start_execution(task.id, spec.id)
+        execution = await execution_manager.start_execution(task.id, spec.id, project)
     except OSError as exc:
         failure_reason = str(exc)
         logger.error(
@@ -214,7 +215,7 @@ async def run_once(
     logger.info("Execution started: task=%s execution=%s", task.id, execution_id)
 
     try:
-        context = await context_assembler.assemble(execution_id)
+        context = await context_assembler.assemble(execution_id, project)
     except ContextAssemblyError as exc:
         failure_reason = str(exc)
         logger.error(
@@ -402,7 +403,8 @@ async def run_qa_once(
     task, project, spec = result
 
     # Step 2: load QA config
-    config = load_qa_config(project.local_path)
+    qa_ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
+    config = load_qa_config(project.local_path, qa_ratchet_yaml)
     if config is None:
         logger.info(
             "No QA config found for task=%s, transitioning to ready_for_deployment", task.id

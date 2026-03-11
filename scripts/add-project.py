@@ -17,7 +17,21 @@ def parse_args() -> argparse.Namespace:
         "--path",
         required=True,
         metavar="repo_path",
-        help="Path to the local git repository. Must contain CLAUDE.md and docs/INTENT.md.",
+        help=(
+            "Path to the local git repository. "
+            "Must contain CLAUDE.md and docs/INTENT.md unless --config-source db is set."
+        ),
+    )
+    parser.add_argument(
+        "--config-source",
+        choices=["disk", "db"],
+        default="disk",
+        dest="config_source",
+        help=(
+            "Where config files (CLAUDE.md, INTENT.md, ratchet.yaml) are stored. "
+            "When 'db', file existence checks are skipped at registration time. "
+            "Use set-project-config.py to upload content. Default: disk."
+        ),
     )
     return parser.parse_args()
 
@@ -41,10 +55,12 @@ async def main() -> None:
             name=args.name,
             repo_url=args.path,
             local_path=args.path,
+            config_source=args.config_source,
         )
         print(f"Registered project: {project.name}")
         print(f"Project ID: {project.id}")
         print(f"Repo: {project.local_path}")
+        print(f"Config source: {project.config_source}")
     except OnboardingError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

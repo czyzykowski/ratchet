@@ -23,7 +23,9 @@ def _make_em() -> tuple[ExecutionManager, InMemoryStore]:
     return em, store
 
 
-def _fake_worktree_path(repo_path: str, execution_id: uuid.UUID) -> str:
+def _fake_worktree_path(
+    repo_path: str, execution_id: uuid.UUID, claude_md: str | None = None
+) -> str:
     return f"{repo_path}/.worktrees/{execution_id}"
 
 
@@ -38,7 +40,7 @@ async def test_start_execution_returns_running_execution() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     assert execution.task_id == task_id
@@ -55,7 +57,7 @@ async def test_start_execution_appends_execution_started_event() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     execution_events = await store.get_events(execution.id, "execution")
@@ -76,7 +78,7 @@ async def test_start_execution_branch_name_in_execution_and_payload() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     assert execution.branch_name == f"execution/{execution.id}"
@@ -92,10 +94,10 @@ async def test_start_execution_calls_prepare_with_correct_args() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
-    mock_prepare.assert_called_once_with(REPO_PATH, execution.id)
+    mock_prepare.assert_called_once_with(REPO_PATH, execution.id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +111,7 @@ async def test_complete_execution_appends_completed_event() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         event = await em.complete_execution(execution.id)
 
@@ -129,7 +131,7 @@ async def test_complete_execution_calls_cleanup_with_correct_args() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP) as mock_cleanup:
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         await em.complete_execution(execution.id)
 
@@ -148,7 +150,7 @@ async def test_fail_execution_appends_failed_event_with_reason() -> None:
     reason = "tests failed"
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         event = await em.fail_execution(execution.id, reason)
 
@@ -169,7 +171,7 @@ async def test_fail_execution_calls_cleanup_with_correct_args() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP) as mock_cleanup:
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         await em.fail_execution(execution.id, "reason")
 
@@ -261,7 +263,7 @@ async def test_get_current_execution_after_start_returns_running() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     current = await em.get_current_execution(task_id)
@@ -276,7 +278,7 @@ async def test_get_current_execution_after_complete_returns_none() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         await em.complete_execution(execution.id)
 
@@ -290,7 +292,7 @@ async def test_get_current_execution_after_fail_returns_none() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
         await em.fail_execution(execution.id, "something broke")
 
@@ -315,7 +317,7 @@ async def test_get_execution_history_after_two_executions_ordered_by_started_at(
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         exec_a = await em.start_execution(task_id, spec_id)
         await em.complete_execution(exec_a.id)
         exec_b = await em.start_execution(task_id, spec_id)
@@ -336,7 +338,7 @@ async def test_get_execution_history_single_running_execution() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     history = await em.get_execution_history(task_id)
@@ -356,7 +358,7 @@ async def test_cleanup_error_on_complete_does_not_raise() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP) as mock_cleanup:
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         mock_cleanup.side_effect = subprocess.CalledProcessError(128, "git")
         execution = await em.start_execution(task_id, spec_id)
         # Should not raise despite cleanup failure
@@ -371,7 +373,7 @@ async def test_cleanup_error_on_fail_does_not_raise() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP) as mock_cleanup:
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         mock_cleanup.side_effect = subprocess.CalledProcessError(128, "git")
         execution = await em.start_execution(task_id, spec_id)
         event = await em.fail_execution(execution.id, "something failed")
@@ -390,7 +392,7 @@ async def test_worktree_path_in_event_follows_convention() -> None:
     spec_id = uuid.uuid4()
 
     with patch(PATCH_PREPARE) as mock_prepare, patch(PATCH_CLEANUP):
-        mock_prepare.side_effect = lambda rp, eid: _fake_worktree_path(rp, eid)
+        mock_prepare.side_effect = _fake_worktree_path
         execution = await em.start_execution(task_id, spec_id)
 
     execution_events = await store.get_events(execution.id, "execution")

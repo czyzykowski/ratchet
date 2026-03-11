@@ -26,6 +26,10 @@ class Project(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    config_source: str = "disk"
+    claude_md: str | None = None
+    intent_md: str | None = None
+    ratchet_yaml: str | None = None
 
 
 class Task(BaseModel):

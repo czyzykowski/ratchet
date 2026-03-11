@@ -36,17 +36,21 @@ class QaReviewResult:
     full_output: str
 
 
-def load_qa_config(local_path: str) -> QaConfig | None:
+def load_qa_config(local_path: str, ratchet_yaml: str | None = None) -> QaConfig | None:
     """Read <local_path>/ratchet.yaml and return QaConfig, or None if absent/missing qa section.
 
+    When ratchet_yaml is not None, parses that string directly instead of reading from disk.
     Normalizes both plain string and {command: ...} step forms.
     """
-    config_path = Path(local_path) / "ratchet.yaml"
-    if not config_path.exists():
-        return None
+    if ratchet_yaml is not None:
+        data: Any = yaml.safe_load(ratchet_yaml)
+    else:
+        config_path = Path(local_path) / "ratchet.yaml"
+        if not config_path.exists():
+            return None
 
-    with config_path.open() as f:
-        data: Any = yaml.safe_load(f)
+        with config_path.open() as f:
+            data = yaml.safe_load(f)
 
     if not isinstance(data, dict) or "qa" not in data:
         return None
@@ -173,13 +177,16 @@ def run_deploy_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     return results
 
 
-def check_baseline_qa(project_path: str) -> list[QaStepResult]:
+def check_baseline_qa(
+    project_path: str, ratchet_yaml: str | None = None
+) -> list[QaStepResult]:
     """Run QA steps on the base branch to detect pre-existing failures.
 
     Runs steps in project_path directly (no worktree). Returns list of
     failed QaStepResult objects; empty list means all passed or no QA config.
+    When ratchet_yaml is not None, parses it directly instead of reading from disk.
     """
-    config = load_qa_config(project_path)
+    config = load_qa_config(project_path, ratchet_yaml)
     if config is None:
         return []
     results = run_qa_steps(config, project_path)

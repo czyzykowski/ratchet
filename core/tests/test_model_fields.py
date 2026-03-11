@@ -11,7 +11,19 @@ from core.models import Execution, Project, Spec, Task
 
 def test_project_fields() -> None:
     """Project model fields must match current_projects view columns."""
-    expected = {"id", "name", "repo_url", "local_path", "status", "created_at", "updated_at"}
+    expected = {
+        "id",
+        "name",
+        "repo_url",
+        "local_path",
+        "status",
+        "created_at",
+        "updated_at",
+        "config_source",
+        "claude_md",
+        "intent_md",
+        "ratchet_yaml",
+    }
     assert set(Project.model_fields) == expected
 
 

@@ -18,14 +18,14 @@ class OnboardingError(Exception):
     """Raised when a repo fails onboarding validation. Message states which requirement failed."""
 
 
-def validate_repo(local_path: str) -> None:
+def validate_repo(local_path: str, config_source: str = "disk") -> None:
     """Validate that local_path meets Ratchet onboarding contract.
 
     Raises OnboardingError with descriptive message on first failed requirement:
       - "repo path does not exist: <path>"
       - "not a git repository: <path>"
-      - "CLAUDE.md not found at repo root: <path>"
-      - "docs/INTENT.md not found: <path>"
+      - "CLAUDE.md not found at repo root: <path>"  (skipped when config_source == "db")
+      - "docs/INTENT.md not found: <path>"          (skipped when config_source == "db")
     Returns None on success.
     """
     path = pathlib.Path(local_path)
@@ -33,10 +33,11 @@ def validate_repo(local_path: str) -> None:
         raise OnboardingError(f"repo path does not exist: {local_path}")
     if not (path / ".git").exists():
         raise OnboardingError(f"not a git repository: {local_path}")
-    if not (path / "CLAUDE.md").exists():
-        raise OnboardingError(f"CLAUDE.md not found at repo root: {local_path}")
-    if not (path / "docs" / "INTENT.md").exists():
-        raise OnboardingError(f"docs/INTENT.md not found: {local_path}")
+    if config_source != "db":
+        if not (path / "CLAUDE.md").exists():
+            raise OnboardingError(f"CLAUDE.md not found at repo root: {local_path}")
+        if not (path / "docs" / "INTENT.md").exists():
+            raise OnboardingError(f"docs/INTENT.md not found: {local_path}")
 
 
 class ProjectManager:
@@ -48,14 +49,15 @@ class ProjectManager:
         name: str,
         repo_url: str,
         local_path: str,
+        config_source: str = "disk",
     ) -> Project:
         """Validate repo and register as a managed project.
 
-        Calls validate_repo(local_path) — raises OnboardingError on failure.
+        Calls validate_repo(local_path, config_source) — raises OnboardingError on failure.
         Appends PROJECT_CREATED event on success.
         Returns Project model.
         """
-        validate_repo(local_path)
+        validate_repo(local_path, config_source)
         project_id = uuid4()
         payload = {
             "project_id": str(project_id),
@@ -63,6 +65,7 @@ class ProjectManager:
             "repo_url": repo_url,
             "local_path": local_path,
             "status": "active",
+            "config_source": config_source,
         }
         event = await self._store.append_event(
             aggregate_id=project_id,
@@ -83,34 +86,75 @@ class ProjectManager:
             repo_url=repo_url,
             local_path=local_path,
             status="active",
+            config_source=config_source,
             created_at=event.occurred_at,
             updated_at=event.occurred_at,
+        )
+
+    async def update_project_config(
+        self,
+        project_id: UUID,
+        claude_md: str | None,
+        intent_md: str | None,
+        ratchet_yaml: str | None,
+    ) -> None:
+        """Store config file contents for a project in the database.
+
+        Appends PROJECT_CONFIG_UPDATED event (dual-written to registry).
+        """
+        payload = {
+            "project_id": str(project_id),
+            "claude_md": claude_md,
+            "intent_md": intent_md,
+            "ratchet_yaml": ratchet_yaml,
+        }
+        await self._store.append_event(
+            aggregate_id=project_id,
+            aggregate_type="project",
+            event_type=ev.PROJECT_CONFIG_UPDATED,
+            payload=payload,
+        )
+        await self._store.append_event(
+            aggregate_id=_PROJECTS_REGISTRY_ID,
+            aggregate_type="projects",
+            event_type=ev.PROJECT_CONFIG_UPDATED,
+            payload=payload,
         )
 
     async def get_project(self, project_id: UUID) -> Project | None:
         """Return project by id, or None if not found.
 
-        Derived by replaying PROJECT_CREATED events.
+        Derived by replaying PROJECT_CREATED and PROJECT_CONFIG_UPDATED events.
         """
         project_events = await self._store.get_events(project_id, "project")
+        project: Project | None = None
         for event in project_events:
             if event.event_type == ev.PROJECT_CREATED:
                 p = event.payload
-                return Project(
+                project = Project(
                     id=UUID(p["project_id"]),
                     name=p["name"],
                     repo_url=p["repo_url"],
                     local_path=p["local_path"],
                     status=p["status"],
+                    config_source=p.get("config_source", "disk"),
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
-        return None
+            elif event.event_type == ev.PROJECT_CONFIG_UPDATED and project is not None:
+                p = event.payload
+                project = project.model_copy(update={
+                    "claude_md": p.get("claude_md"),
+                    "intent_md": p.get("intent_md"),
+                    "ratchet_yaml": p.get("ratchet_yaml"),
+                    "updated_at": event.occurred_at,
+                })
+        return project
 
     async def list_projects(self) -> list[Project]:
         """Return all active (non-archived) projects ordered by created_at ascending.
 
-        Derived by replaying PROJECT_CREATED and PROJECT_ARCHIVED events.
+        Derived by replaying PROJECT_CREATED, PROJECT_CONFIG_UPDATED, and PROJECT_ARCHIVED events.
         """
         registry_events = await self._store.get_events(_PROJECTS_REGISTRY_ID, "projects")
 
@@ -127,9 +171,20 @@ class ProjectManager:
                     repo_url=p["repo_url"],
                     local_path=p["local_path"],
                     status=p["status"],
+                    config_source=p.get("config_source", "disk"),
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
+            elif event.event_type == ev.PROJECT_CONFIG_UPDATED:
+                project_id = UUID(event.payload["project_id"])
+                if project_id in projects:
+                    p = event.payload
+                    projects[project_id] = projects[project_id].model_copy(update={
+                        "claude_md": p.get("claude_md"),
+                        "intent_md": p.get("intent_md"),
+                        "ratchet_yaml": p.get("ratchet_yaml"),
+                        "updated_at": event.occurred_at,
+                    })
             elif event.event_type == ev.PROJECT_ARCHIVED:
                 archived_ids.add(UUID(event.payload["project_id"]))
 

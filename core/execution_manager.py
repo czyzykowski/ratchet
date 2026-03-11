@@ -5,21 +5,25 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from core import events as ev
-from core.models import Event, Execution
+from core.models import Event, Execution, Project
 from core.store import Store
 
 logger = logging.getLogger(__name__)
 
 
-def prepare_task_environment(repo_path: str, execution_id: UUID) -> str:
+def prepare_task_environment(
+    repo_path: str, execution_id: UUID, claude_md: str | None = None
+) -> str:
     """Create git worktree on a named branch for execution.
 
     Worktree path: <repo_path>/.worktrees/<execution_id>
     Branch name: execution/<execution_id>
     Runs: git worktree add <worktree_path> -b execution/<execution_id> HEAD
+    If claude_md is not None, writes it to <worktree_path>/CLAUDE.md.
     Returns worktree_path on success.
     Raises subprocess.CalledProcessError on failure.
     """
@@ -31,6 +35,8 @@ def prepare_task_environment(repo_path: str, execution_id: UUID) -> str:
         check=True,
         capture_output=True,
     )
+    if claude_md is not None:
+        Path(worktree_path, "CLAUDE.md").write_text(claude_md)
     return worktree_path
 
 
@@ -110,19 +116,25 @@ class ExecutionManager:
         self._store = store
         self._repo_path = repo_path
 
-    async def start_execution(self, task_id: UUID, spec_id: UUID) -> Execution:
+    async def start_execution(
+        self, task_id: UUID, spec_id: UUID, project: Project | None = None
+    ) -> Execution:
         """Prepare environment and record execution start.
 
         1. Generate new execution_id
-        2. Call prepare_task_environment(repo_path, execution_id)
+        2. Call prepare_task_environment(repo_path, execution_id, claude_md)
+           - claude_md is taken from project.claude_md when project.config_source == "db"
            - If it raises, append EXECUTION_FAILED with reason and raise EnvironmentError
         3. Append EXECUTION_STARTED event
         4. Return Execution model with status 'running'
         """
         execution_id = uuid4()
+        claude_md: str | None = None
+        if project is not None and project.config_source == "db":
+            claude_md = project.claude_md
 
         try:
-            worktree_path = prepare_task_environment(self._repo_path, execution_id)
+            worktree_path = prepare_task_environment(self._repo_path, execution_id, claude_md)
         except Exception as exc:
             failure_reason = f"Failed to prepare environment: {exc}"
             await self._store.append_event(

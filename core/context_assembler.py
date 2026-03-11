@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 from core import events as ev
+from core.models import Project
 from core.store import Store
 
 _PREAMBLE = """\
@@ -79,12 +80,15 @@ class ContextAssemblyError(Exception):
     """Raised when execution context cannot be assembled. Message states reason."""
 
 
-def read_intent(worktree_path: str) -> str:
-    """Read docs/INTENT.md from worktree.
+def read_intent(worktree_path: str, intent_md: str | None = None) -> str:
+    """Read docs/INTENT.md from worktree, or return intent_md override directly.
 
-    Raises ContextAssemblyError if file not found.
+    When intent_md is not None, returns it immediately without touching disk.
+    Raises ContextAssemblyError if file not found (disk path only).
     Returns file contents as string.
     """
+    if intent_md is not None:
+        return intent_md
     intent_path = Path(worktree_path) / "docs" / "INTENT.md"
     if not intent_path.exists():
         raise ContextAssemblyError(
@@ -166,7 +170,9 @@ class ContextAssembler:
     def __init__(self, store: Store) -> None:
         self._store = store
 
-    async def assemble(self, execution_id: UUID) -> ExecutionContext:
+    async def assemble(
+        self, execution_id: UUID, project: Project | None = None
+    ) -> ExecutionContext:
         """Assemble complete execution context for a running execution.
 
         Steps:
@@ -175,8 +181,9 @@ class ContextAssembler:
            — raise ContextAssemblyError if status != 'running'
         2. Replay events to find Spec for execution's spec_id
            — raise ContextAssemblyError if spec content is empty or None
-        3. Call read_intent(execution.worktree_path)
-           — raises ContextAssemblyError if INTENT.md not found
+        3. Call read_intent(execution.worktree_path, intent_md)
+           — intent_md is project.intent_md when project.config_source == "db"
+           — raises ContextAssemblyError if INTENT.md not found (disk path only)
         4. Call build_prompt(intent_content, spec.content)
         5. Return ExecutionContext
         """
@@ -218,7 +225,10 @@ class ContextAssembler:
             )
 
         # Step 3: read INTENT.md (may raise ContextAssemblyError)
-        intent_content = read_intent(worktree_path)
+        intent_md_override: str | None = None
+        if project is not None and project.config_source == "db":
+            intent_md_override = project.intent_md
+        intent_content = read_intent(worktree_path, intent_md_override)
 
         # Step 3b: find most recent BLOCKED event with failure_reason
         task_events = await self._store.get_events(task_id, "task")
