@@ -112,6 +112,34 @@ async def get_next_task(
     return candidates[0]
 
 
+def _has_pending_baseline_qa_failure(task_events: list[Any]) -> bool:
+    """True if the most recent baseline QA failure has no force-execute after it."""
+    last_failed_seq: int | None = None
+    last_force_seq: int | None = None
+    for event in task_events:
+        if event.event_type == ev.TASK_BASELINE_QA_FAILED:
+            last_failed_seq = event.sequence
+        elif event.event_type == ev.TASK_FORCE_EXECUTE:
+            last_force_seq = event.sequence
+    if last_failed_seq is None:
+        return False
+    return last_force_seq is None or last_failed_seq > last_force_seq
+
+
+def _should_skip_baseline_qa(task_events: list[Any]) -> bool:
+    """True if force-execute was requested after the last baseline QA failure."""
+    last_failed_seq: int | None = None
+    last_force_seq: int | None = None
+    for event in task_events:
+        if event.event_type == ev.TASK_BASELINE_QA_FAILED:
+            last_failed_seq = event.sequence
+        elif event.event_type == ev.TASK_FORCE_EXECUTE:
+            last_force_seq = event.sequence
+    if last_force_seq is None:
+        return False
+    return last_failed_seq is None or last_force_seq > last_failed_seq
+
+
 async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
@@ -134,18 +162,32 @@ async def run_once(
         return False
 
     task, project, spec = result
-    baseline_failures = check_baseline_qa(project.local_path)
-    if baseline_failures:
-        combined = "\n\n".join(
-            f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
-        )
-        logger.warning(
-            "Baseline QA failed for project=%s — skipping task=%s until develop is clean.\n%s",
-            project.name,
-            task.id,
-            combined,
-        )
-        return False
+
+    # Check if force-execute was requested after last baseline failure
+    task_events = await store.get_events(task.id, "task")
+    skip_baseline = _should_skip_baseline_qa(task_events)
+
+    if not skip_baseline:
+        baseline_failures = check_baseline_qa(project.local_path)
+        if baseline_failures:
+            combined = "\n\n".join(
+                f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
+            )
+            logger.warning(
+                "Baseline QA failed for project=%s — skipping task=%s.\n%s",
+                project.name,
+                task.id,
+                combined,
+            )
+            # Only emit event if not already pending (avoid spam on repeated polls)
+            if not _has_pending_baseline_qa_failure(task_events):
+                await store.append_event(
+                    aggregate_id=task.id,
+                    aggregate_type="task",
+                    event_type=ev.TASK_BASELINE_QA_FAILED,
+                    payload={"failure_output": combined},
+                )
+            return False
     execution_manager = ExecutionManager(store, project.local_path)
     context_assembler = ContextAssembler(store)
 

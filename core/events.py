@@ -11,6 +11,8 @@ TASK_SPEC_ASSIGNED = "task.spec_assigned"
 TASK_DEPENDENCY_ADDED = "task.dependency_added"
 TASK_TITLE_UPDATED = "task.title_updated"
 TASK_TITLE_CHANGED = "task.title_changed"
+TASK_BASELINE_QA_FAILED = "task.baseline_qa_failed"
+TASK_FORCE_EXECUTE = "task.force_execute"
 
 # Spec events
 SPEC_CREATED = "spec.created"

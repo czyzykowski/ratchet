@@ -79,6 +79,25 @@ async def get_board(request: Request) -> JSONResponse:
         updated_at = task.get("updated_at")
         updated_at_str = updated_at.isoformat() if updated_at is not None else None
 
+        # Surface baseline QA failure for ready_for_implementation tasks
+        baseline_qa_failure: str | None = None
+        if status == ev.READY_FOR_IMPLEMENTATION:
+            task_events = task_events_cache.get(task["id"], [])
+            last_failed_seq: int | None = None
+            last_force_seq: int | None = None
+            failure_output: str | None = None
+            for e in task_events:
+                if e.event_type == ev.TASK_BASELINE_QA_FAILED:
+                    last_failed_seq = e.sequence
+                    failure_output = e.payload.get("failure_output")
+                elif e.event_type == ev.TASK_FORCE_EXECUTE:
+                    last_force_seq = e.sequence
+            if (
+                last_failed_seq is not None
+                and (last_force_seq is None or last_failed_seq > last_force_seq)
+            ):
+                baseline_qa_failure = failure_output
+
         groups_dict[status].append(
             {
                 "id": str(task["id"]),
@@ -90,6 +109,7 @@ async def get_board(request: Request) -> JSONResponse:
                 "has_spec": task.get("has_spec", False),
                 "refinement_count": task.get("refinement_count", 0),
                 "unmet_deps": unmet,
+                "baseline_qa_failure": baseline_qa_failure,
             }
         )
 

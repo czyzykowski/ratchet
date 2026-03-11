@@ -159,6 +159,7 @@ body, #root {
 .badge-blocked                { background: #fde8e8; color: #c0392b; }
 .badge-ready_for_qa           { background: #f0e8fe; color: #6b2fb5; }
 .badge-ready_for_deployment   { background: #e3f8fe; color: #0e7490; }
+.badge-baseline-qa-failed     { background: #fff3cd; color: #92400e; }
 .badge-deployed               { background: #f0f0f0; color: #6b7280; }
 .badge-abandoned              { background: #f5f5f5; color: #9ca3af; }
 

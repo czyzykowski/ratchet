@@ -51,7 +51,10 @@ export function FocusPage() {
   }
 
   const allTasks = board?.columns.flatMap(c => c.tasks) ?? []
-  const attentionTasks = allTasks.filter(t => ATTENTION_STATUSES.includes(t.status))
+  const attentionTasks = allTasks.filter(t =>
+    ATTENTION_STATUSES.includes(t.status) ||
+    (t.status === 'ready_for_implementation' && t.baseline_qa_failure != null)
+  )
   const pipelineColumns = board?.columns ?? []
 
   return (
@@ -85,6 +88,9 @@ export function FocusPage() {
               onClick={() => setSelectedTaskId(task.id)}
             >
               <span className={`badge badge-${task.status}`}>{fmt(task.status)}</span>
+              {task.baseline_qa_failure && (
+                <span className="badge badge-baseline-qa-failed">Baseline QA failed</span>
+              )}
               <span className="attention-title">{task.title}</span>
               <span className="attention-meta">{task.project_name}</span>
               <span className="attention-meta">{formatRelativeTime(task.updated_at)}</span>

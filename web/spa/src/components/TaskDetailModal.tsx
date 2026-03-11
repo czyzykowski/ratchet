@@ -41,6 +41,7 @@ interface TaskDetailResponse {
   executions: Execution[]
   dependencies: string[]
   qa_failure: string | null
+  baseline_qa_failure: string | null
 }
 
 async function fetchTaskDetail(taskId: string): Promise<TaskDetailResponse> {
@@ -72,6 +73,8 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [skipMerge, setSkipMerge] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState<string | null>(null)
+  const [forceExecuting, setForceExecuting] = useState(false)
+  const [forceExecuteError, setForceExecuteError] = useState<string | null>(null)
 
   if (!taskId) return null
 
@@ -160,6 +163,25 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     }
   }
 
+  async function forceExecute() {
+    if (!taskId) return
+    setForceExecuting(true)
+    setForceExecuteError(null)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/force-execute`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? 'Force execute failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+    } catch (err) {
+      setForceExecuteError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setForceExecuting(false)
+    }
+  }
+
   const latestSpec = data?.specs[data.specs.length - 1] ?? null
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
   const isBlocked = data?.task.status === 'blocked'
@@ -235,6 +257,24 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 </div>
               )}
             </div>
+
+            {data.baseline_qa_failure && (
+              <div className="modal-field">
+                <div className="modal-label">Baseline QA Failure</div>
+                <pre className="modal-pre modal-pre-error">{data.baseline_qa_failure}</pre>
+                {forceExecuteError && (
+                  <div className="error-state" style={{ padding: '0.5rem 0' }}>{forceExecuteError}</div>
+                )}
+                <button
+                  className="btn btn-danger"
+                  onClick={forceExecute}
+                  disabled={forceExecuting}
+                  style={{ marginTop: '0.5rem' }}
+                >
+                  {forceExecuting ? 'Requesting...' : 'Force Execute (skip baseline QA)'}
+                </button>
+              </div>
+            )}
 
             {data.qa_failure && (
               <div className="modal-field">

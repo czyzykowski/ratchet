@@ -10,6 +10,7 @@ export interface BoardTask {
   has_spec: boolean
   refinement_count: number
   unmet_deps: string[]
+  baseline_qa_failure: string | null
 }
 
 export interface BoardColumn {
