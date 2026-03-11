@@ -5,7 +5,7 @@ import { ProjectPage } from './pages/ProjectPage'
 
 export function App() {
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <nav className="spa-nav">
         <NavLink to="/" end>Board</NavLink>
         <NavLink to="/projects">Projects</NavLink>

@@ -14,7 +14,7 @@ export function BoardPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   return (
-    <div>
+    <div className="board-page">
       <header className="board-header">
         <div className="board-title">RATCHET BOARD</div>
       </header>
