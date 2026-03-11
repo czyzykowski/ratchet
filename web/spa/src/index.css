@@ -11,6 +11,37 @@ body {
   min-height: 100vh;
 }
 
+.spa-nav {
+  display: flex;
+  gap: 0;
+  background: #0f3460;
+  border-bottom: 2px solid #e94560;
+  padding: 0 2rem;
+}
+
+.spa-nav a {
+  padding: 0.5rem 1rem;
+  font-family: monospace;
+  font-size: 0.75rem;
+  font-weight: bold;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #a0a0a0;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s;
+}
+
+.spa-nav a:hover {
+  color: #e0e0e0;
+}
+
+.spa-nav a.active {
+  color: #e94560;
+  border-bottom-color: #e94560;
+}
+
 .board-header {
   display: flex;
   align-items: center;
