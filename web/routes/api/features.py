@@ -53,7 +53,9 @@ def _parse_feature_block(block: str) -> tuple[str, str, list[dict]]:
         content_m = re.search(r"\*\*Content:\*\*\s*\n(.*?)(?=\*\*|\Z)", spec_body, re.DOTALL)
         content = content_m.group(1).strip() if content_m else spec_body.strip()
 
-        specs.append({"title": spec_title, "order": order, "content": content, "dep_indices": dep_indices})
+        specs.append({
+            "title": spec_title, "order": order, "content": content, "dep_indices": dep_indices
+        })
 
     return title, description, specs
 
