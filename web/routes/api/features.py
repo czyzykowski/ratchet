@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
-from typing import Any
 
 from core.feature_manager import FeatureManager
 from core.models import HighLevelSpec
