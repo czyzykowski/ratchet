@@ -207,17 +207,23 @@ async def main() -> None:
                         print(f"Error transitioning to blocked: {exc}", file=sys.stderr)
                     sys.exit(1)
 
-            commit_msg = f"feat: {title} (task/{task_id})"
-            try:
-                subprocess.run(
-                    ["git", "commit", "-m", commit_msg],
-                    cwd=local_path,
-                    check=True,
-                    capture_output=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                print(f"Error: git commit failed: {exc.stderr.decode()}", file=sys.stderr)
-                sys.exit(1)
+            has_staged = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
+                cwd=local_path,
+                capture_output=True,
+            ).returncode != 0
+            if has_staged:
+                commit_msg = f"feat: {title} (task/{task_id})"
+                try:
+                    subprocess.run(
+                        ["git", "commit", "-m", commit_msg],
+                        cwd=local_path,
+                        check=True,
+                        capture_output=True,
+                    )
+                except subprocess.CalledProcessError as exc:
+                    print(f"Error: git commit failed: {exc.stderr.decode()}", file=sys.stderr)
+                    sys.exit(1)
 
             try:
                 subprocess.run(

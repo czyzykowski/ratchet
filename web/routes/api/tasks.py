@@ -312,13 +312,19 @@ async def deploy_task(
                 check=True,
                 capture_output=True,
             )
-            commit_msg = f"feat: {title} (task/{task_id})"
-            subprocess.run(
-                ["git", "commit", "-m", commit_msg],
+            has_staged = subprocess.run(
+                ["git", "diff", "--cached", "--quiet"],
                 cwd=local_path,
-                check=True,
                 capture_output=True,
-            )
+            ).returncode != 0
+            if has_staged:
+                commit_msg = f"feat: {title} (task/{task_id})"
+                subprocess.run(
+                    ["git", "commit", "-m", commit_msg],
+                    cwd=local_path,
+                    check=True,
+                    capture_output=True,
+                )
             try:
                 subprocess.run(
                     ["git", "branch", "-D", branch_name],
