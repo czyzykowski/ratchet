@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -83,6 +83,15 @@ class Execution(BaseModel):
     branch_name: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+class ChatSession(BaseModel):
+    id: UUID
+    session_type: Literal["spec", "feature"]
+    context_id: UUID
+    context_type: Literal["task", "feature"]
+    created_at: datetime
+    messages: list[tuple[str, str]]
 
 
 @dataclass

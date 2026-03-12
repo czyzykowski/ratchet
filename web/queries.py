@@ -6,6 +6,8 @@ import json
 from typing import Any
 from uuid import UUID
 
+from core.models import ChatSession
+
 
 async def get_task(conn: Any, task_id: UUID) -> dict[str, Any] | None:
     async with conn.cursor() as cur:
@@ -195,6 +197,53 @@ async def get_task_qa_failure_reason(conn: Any, task_id: UUID) -> str | None:
         if row is None:
             return None
         return row[0] or None
+
+
+async def get_chat_session_by_context(
+    pool: Any, context_id: UUID
+) -> ChatSession | None:
+    """Look up an existing chat session by context_id using the materialized view.
+
+    Returns a fully reconstructed ChatSession with messages, or None if not found.
+    """
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, session_type, context_type, created_at"
+                " FROM current_chat_sessions WHERE context_id = %s LIMIT 1",
+                (str(context_id),),
+            )
+            row = await cur.fetchone()
+    if row is None:
+        return None
+
+    session_id = row[0]
+    session_type = row[1]
+    context_type = row[2]
+    created_at = row[3]
+
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT payload FROM events"
+                " WHERE aggregate_id = %s AND aggregate_type = 'chat_session'"
+                " AND event_type = 'chat_session.message_added'"
+                " ORDER BY sequence ASC",
+                (str(session_id),),
+            )
+            rows = await cur.fetchall()
+
+    messages = [
+        (r[0]["user_input"], r[0]["assistant_text"]) for r in rows
+    ]
+    return ChatSession(
+        id=session_id,
+        session_type=session_type,
+        context_id=context_id,
+        context_type=context_type,
+        created_at=created_at,
+        messages=messages,
+    )
 
 
 async def get_project_tasks(conn: Any, project_id: UUID) -> list[dict[str, Any]]:

@@ -24,7 +24,6 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const sessionIdRef = useRef<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initialized = useRef(false)
@@ -36,19 +35,22 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
   useEffect(() => {
     if (!initialized.current) {
       initialized.current = true
-      createSession().then(sid => sendMessage(taskTitle, sid))
+      createSession().then(({ sid, history }) => {
+        if (history.length > 0) {
+          const restored: Message[] = []
+          for (const entry of history) {
+            restored.push({ role: 'user', content: entry.content })
+            restored.push({ role: 'assistant', content: entry.assistant })
+          }
+          setMessages(restored)
+        } else {
+          sendMessage(taskTitle, sid)
+        }
+      })
     }
   }, [])
 
-  useEffect(() => {
-    return () => {
-      if (sessionIdRef.current) {
-        fetch(`/api/spec-sessions/${sessionIdRef.current}`, { method: 'DELETE' })
-      }
-    }
-  }, [])
-
-  async function createSession(): Promise<string> {
+  async function createSession(): Promise<{ sid: string; history: Array<{ content: string; assistant: string }> }> {
     const res = await fetch('/api/spec-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -57,8 +59,10 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
     const data = await res.json()
     const sid: string = data.session_id
     setSessionId(sid)
-    sessionIdRef.current = sid
-    return sid
+    const history: Array<{ content: string; assistant: string }> = (data.messages ?? []).map(
+      (m: { content: string; assistant: string }) => ({ content: m.content, assistant: m.assistant })
+    )
+    return { sid, history }
   }
 
   async function sendMessage(userInput: string, sid?: string) {

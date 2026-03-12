@@ -49,6 +49,10 @@ FEATURE_CREATED = "feature.created"
 HIGH_LEVEL_SPEC_ADDED = "high_level_spec.added"
 HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
 
+# Chat session events
+CHAT_SESSION_CREATED = "chat_session.created"
+CHAT_SESSION_MESSAGE_ADDED = "chat_session.message_added"
+
 # Feature status constants (derived, not stored)
 FEATURE_DRAFT = "draft"
 FEATURE_GENERATED = "generated"

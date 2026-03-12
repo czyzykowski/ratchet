@@ -30,7 +30,6 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const sessionIdRef = useRef<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -39,15 +38,20 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
   }, [messages, currentStream])
 
   useEffect(() => {
-    createSession()
-    return () => {
-      if (sessionIdRef.current) {
-        fetch(`/api/feature-sessions/${sessionIdRef.current}`, { method: 'DELETE' })
+    createSession().then(({ history }) => {
+      if (history.length > 0) {
+        const restored: Message[] = []
+        for (const entry of history) {
+          restored.push({ role: 'user', content: entry.content })
+          restored.push({ role: 'assistant', content: entry.assistant })
+        }
+        setMessages(restored)
       }
-    }
+      setTimeout(() => inputRef.current?.focus(), 50)
+    })
   }, [])
 
-  async function createSession() {
+  async function createSession(): Promise<{ sid: string; history: Array<{ content: string; assistant: string }> }> {
     const res = await fetch('/api/feature-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -56,8 +60,10 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
     const data = await res.json()
     const sid: string = data.session_id
     setSessionId(sid)
-    sessionIdRef.current = sid
-    setTimeout(() => inputRef.current?.focus(), 50)
+    const history: Array<{ content: string; assistant: string }> = (data.messages ?? []).map(
+      (m: { content: string; assistant: string }) => ({ content: m.content, assistant: m.assistant })
+    )
+    return { sid, history }
   }
 
   async function sendMessage(userInput: string) {

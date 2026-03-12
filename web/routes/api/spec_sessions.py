@@ -11,9 +11,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from core import events as ev
 from core.claude_repl import SpecReplSession
 from core.project_manager import ProjectManager
 from core.task_manager import TaskManager
+from web.queries import get_chat_session_by_context
 from web.routes.api.tasks import _build_initial_spec_prompt
 
 router = APIRouter(prefix="/spec-sessions")
@@ -30,8 +32,47 @@ class MessageBody(BaseModel):
 @router.post("")
 async def create_session(body: CreateSessionBody, request: Request) -> JSONResponse:
     store = request.app.state.store
-    task_manager = TaskManager(store)
+    pool = request.app.state.pool
 
+    # Return existing session if one already exists for this task.
+    existing = await get_chat_session_by_context(pool, body.task_id)
+    if existing is not None:
+        session_id = str(existing.id)
+        if session_id not in request.app.state.spec_sessions:
+            task_manager = TaskManager(store)
+            task = await task_manager.get_task(body.task_id)
+            if task is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Task {body.task_id} not found"
+                )
+            pm = ProjectManager(store)
+            project = await pm.get_project(task.project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            local_path = str(project.local_path)
+            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+            if not intent_md_path.exists():
+                raise HTTPException(
+                    status_code=400, detail="INTENT.md not found in project"
+                )
+            intent_md = intent_md_path.read_text()
+            system_prompt = _build_initial_spec_prompt(
+                intent_md, task.title, task.title
+            )
+            session = SpecReplSession(
+                task_id=str(body.task_id),
+                system_prompt=system_prompt,
+                cwd=local_path,
+                history=list(existing.messages),
+            )
+            request.app.state.spec_sessions[session_id] = session
+        messages = [
+            {"role": "user", "content": u, "assistant": a}
+            for u, a in existing.messages
+        ]
+        return JSONResponse({"session_id": session_id, "messages": messages})
+
+    task_manager = TaskManager(store)
     task = await task_manager.get_task(body.task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task {body.task_id} not found")
@@ -50,15 +91,26 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     task_title: str = task.title
 
     system_prompt = _build_initial_spec_prompt(intent_md, task_title, task_title)
+    session_id = str(uuid4())
     session = SpecReplSession(
         task_id=str(body.task_id),
         system_prompt=system_prompt,
         cwd=local_path,
     )
-
-    session_id = str(uuid4())
     request.app.state.spec_sessions[session_id] = session
-    return JSONResponse({"session_id": session_id})
+
+    await store.append_event(
+        aggregate_id=UUID(session_id),
+        aggregate_type="chat_session",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_type": "spec",
+            "context_id": str(body.task_id),
+            "context_type": "task",
+        },
+    )
+
+    return JSONResponse({"session_id": session_id, "messages": []})
 
 
 @router.post("/{session_id}/message")
@@ -69,6 +121,8 @@ async def send_message(
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+    store = request.app.state.store
+
     async def _stream() -> AsyncGenerator[str, None]:
         full_text = ""
         async for chunk in session.ask(body.user_input):
@@ -78,7 +132,17 @@ async def send_message(
         spec_content: str | None = None
         if "## SPEC READY" in full_text:
             idx = full_text.find("## SPEC READY")
-            spec_content = full_text[idx + len("## SPEC READY") :].strip()
+            spec_content = full_text[idx + len("## SPEC READY"):].strip()
+
+        await store.append_event(
+            aggregate_id=UUID(session_id),
+            aggregate_type="chat_session",
+            event_type=ev.CHAT_SESSION_MESSAGE_ADDED,
+            payload={
+                "user_input": body.user_input,
+                "assistant_text": full_text,
+            },
+        )
 
         yield f"data: {json.dumps({'type': 'done', 'spec': spec_content})}\n\n"
 

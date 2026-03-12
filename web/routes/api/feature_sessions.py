@@ -13,8 +13,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from core import events as ev
 from core.claude_repl import SpecReplSession
 from core.project_manager import ProjectManager
+from web.queries import get_chat_session_by_context
 
 router = APIRouter(prefix="/feature-sessions")
 
@@ -75,7 +77,9 @@ def _extract_feature_preview(text: str) -> dict[str, Any] | None:
     title_m = re.search(r"^#\s+Feature:\s+(.+)$", block, re.MULTILINE)
     title = title_m.group(1).strip() if title_m else "Untitled Feature"
 
-    desc_m = re.search(r"##\s+Description\s*\n(.*?)(?=##\s+High-Level Specs|$)", block, re.DOTALL)
+    desc_m = re.search(
+        r"##\s+Description\s*\n(.*?)(?=##\s+High-Level Specs|$)", block, re.DOTALL
+    )
     description = desc_m.group(1).strip() if desc_m else ""
 
     specs_m = re.search(r"##\s+High-Level Specs\s*\n(.*?)$", block, re.DOTALL)
@@ -96,8 +100,41 @@ class MessageBody(BaseModel):
 @router.post("")
 async def create_session(body: CreateSessionBody, request: Request) -> JSONResponse:
     store = request.app.state.store
-    pm = ProjectManager(store)
+    pool = request.app.state.pool
 
+    # Return existing session if one already exists for this feature/project.
+    existing = await get_chat_session_by_context(pool, body.project_id)
+    if existing is not None:
+        session_id = str(existing.id)
+        if session_id not in request.app.state.feature_sessions:
+            pm = ProjectManager(store)
+            project = await pm.get_project(body.project_id)
+            if project is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Project {body.project_id} not found"
+                )
+            local_path = str(project.local_path)
+            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+            if not intent_md_path.exists():
+                raise HTTPException(
+                    status_code=400, detail="INTENT.md not found in project"
+                )
+            intent_md = intent_md_path.read_text()
+            system_prompt = _build_feature_system_prompt(intent_md)
+            session = SpecReplSession(
+                task_id=str(body.project_id),
+                system_prompt=system_prompt,
+                cwd=local_path,
+                history=list(existing.messages),
+            )
+            request.app.state.feature_sessions[session_id] = session
+        messages = [
+            {"role": "user", "content": u, "assistant": a}
+            for u, a in existing.messages
+        ]
+        return JSONResponse({"session_id": session_id, "messages": messages})
+
+    pm = ProjectManager(store)
     project = await pm.get_project(body.project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
@@ -110,15 +147,26 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     intent_md = intent_md_path.read_text()
     system_prompt = _build_feature_system_prompt(intent_md)
 
+    session_id = str(uuid4())
     session = SpecReplSession(
         task_id=str(body.project_id),
         system_prompt=system_prompt,
         cwd=local_path,
     )
-
-    session_id = str(uuid4())
     request.app.state.feature_sessions[session_id] = session
-    return JSONResponse({"session_id": session_id})
+
+    await store.append_event(
+        aggregate_id=UUID(session_id),
+        aggregate_type="chat_session",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_type": "feature",
+            "context_id": str(body.project_id),
+            "context_type": "feature",
+        },
+    )
+
+    return JSONResponse({"session_id": session_id, "messages": []})
 
 
 @router.post("/{session_id}/message")
@@ -129,6 +177,8 @@ async def send_message(
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+    store = request.app.state.store
+
     async def _stream() -> AsyncGenerator[str, None]:
         full_text = ""
         async for chunk in session.ask(body.user_input):
@@ -136,6 +186,17 @@ async def send_message(
             yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
 
         feature_preview = _extract_feature_preview(full_text)
+
+        await store.append_event(
+            aggregate_id=UUID(session_id),
+            aggregate_type="chat_session",
+            event_type=ev.CHAT_SESSION_MESSAGE_ADDED,
+            payload={
+                "user_input": body.user_input,
+                "assistant_text": full_text,
+            },
+        )
+
         yield f"data: {json.dumps({'type': 'done', 'feature': feature_preview})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
