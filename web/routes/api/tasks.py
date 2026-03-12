@@ -539,6 +539,10 @@ Use the standard Ratchet spec format exactly as shown. Be specific about file pa
 function names, and test requirements. Read the codebase to understand current patterns
 before generating the spec.
 
+IMPORTANT: Every response must contain visible text. If you are reading files or using
+tools, first write a brief message like "Let me read the codebase before writing the spec."
+Never produce a response that consists only of tool use with no text.
+
 ## User's Opening Description
 
 {user_description}"""

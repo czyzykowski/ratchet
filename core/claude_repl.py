@@ -105,6 +105,7 @@ class SpecReplSession:
         await self._send(make_user_msg(user_input, self.session_id))
 
         assistant_text = ""
+        saw_tool_use = False
 
         while True:
             line_bytes = await self._proc.stdout.readline()
@@ -125,10 +126,13 @@ class SpecReplSession:
 
             if etype == "stream_event":
                 delta = event.get("event", {}).get("delta", {})
-                if delta.get("type") == "text_delta":
+                delta_type = delta.get("type", "")
+                if delta_type == "text_delta":
                     chunk = str(delta["text"])
                     assistant_text += chunk
                     yield chunk
+                elif delta_type == "input_json_delta":
+                    saw_tool_use = True
 
             elif etype == "result":
                 result_text = event.get("result", "")
@@ -139,6 +143,12 @@ class SpecReplSession:
                 if result_text and not assistant_text:
                     assistant_text = str(result_text)
                     yield assistant_text
+                elif not assistant_text and saw_tool_use:
+                    # Claude used tools but produced no visible text — emit a placeholder
+                    # so the UI isn't silently empty.
+                    placeholder = "*(Reading codebase…)*"
+                    assistant_text = placeholder
+                    yield placeholder
                 break
 
         if assistant_text:
