@@ -83,7 +83,7 @@ class SpecReplSession:
     async def _replay_history(self) -> None:
         for user_text, assistant_text in self.history:
             if not assistant_text:
-                continue  # skip incomplete exchanges — empty assistant messages crash the subprocess
+                continue  # skip incomplete exchanges — empty assistant messages crash subprocess
             if "[Request interrupted by user]" in user_text:
                 continue  # skip interrupted markers — cause error_during_execution on replay
             await self._send(make_user_msg(user_text, "default"))

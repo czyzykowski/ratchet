@@ -18,6 +18,13 @@ from core.task_manager import TaskManager
 from web.queries import get_chat_session_by_context, get_chat_session_by_id
 from web.routes.api.tasks import _build_initial_spec_prompt
 
+_INTERRUPTED = "[Request interrupted by user]"
+
+
+def _clean_history(messages: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [(u, a) for u, a in messages if a and _INTERRUPTED not in u]
+
+
 router = APIRouter(prefix="/spec-sessions")
 
 
@@ -63,7 +70,7 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
                 task_id=str(body.task_id),
                 system_prompt=system_prompt,
                 cwd=local_path,
-                history=[(u, a) for u, a in existing.messages if a and "[Request interrupted by user]" not in u],
+                history=_clean_history(list(existing.messages)),
             )
             request.app.state.spec_sessions[session_id] = session
         messages = [
@@ -139,7 +146,7 @@ async def _recover_session(session_id: str, request: Request) -> SpecReplSession
         task_id=str(task_id),
         system_prompt=system_prompt,
         cwd=local_path,
-        history=[(u, a) for u, a in existing.messages if a and "[Request interrupted by user]" not in u],
+        history=_clean_history(list(existing.messages)),
     )
     request.app.state.spec_sessions[session_id] = session
     return session
