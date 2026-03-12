@@ -15,9 +15,18 @@ parser.add_argument(
     metavar="SECONDS",
     help="Seconds of silence before watchdog warning (default: 300)",
 )
+parser.add_argument(
+    "--capabilities",
+    default="",
+    metavar="CAP1,CAP2",
+    help="Comma-separated list of local worker capabilities (default: none)",
+)
 args = parser.parse_args()
+capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
 
 if args.once:
-    main(watchdog_timeout=args.watchdog_timeout)
+    main(watchdog_timeout=args.watchdog_timeout, local_capabilities=capabilities)
 else:
-    main_loop_entry(watchdog_timeout=args.watchdog_timeout)
+    main_loop_entry(
+        watchdog_timeout=args.watchdog_timeout, local_capabilities=capabilities
+    )

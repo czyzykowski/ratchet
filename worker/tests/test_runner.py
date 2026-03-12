@@ -44,15 +44,17 @@ async def _setup_task(
     store: InMemoryStore,
     project_id: uuid.UUID,
     initial_status: str = ev.READY_FOR_SPEC,
+    required_capabilities: list[str] = [],
 ) -> uuid.UUID:
     """Create a task in the store with project_tasks registry entry."""
     task_id = uuid.uuid4()
-    task_payload = {
+    task_payload: dict[str, object] = {
         "task_id": str(task_id),
         "project_id": str(project_id),
         "title": "Test task",
         "status": initial_status,
         "refinement_count": 0,
+        "required_capabilities": required_capabilities,
     }
     # Store task events under the task aggregate.
     await store.append_event(
@@ -531,3 +533,70 @@ async def test_resume_path_blocks_task_when_no_running_execution() -> None:
     state_machine = TaskStateMachine(store)
     status = await state_machine.get_current_status(task_id)
     assert status == ev.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_task_with_no_required_capabilities_always_matched() -> None:
+    store = InMemoryStore()
+    project_manager, project = await _setup_project(store)
+    task_id = await _setup_task(
+        store, project.id, initial_status=ev.READY_FOR_SPEC, required_capabilities=[]
+    )
+    await _advance_task_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(
+        store, project_manager, spec_manager, state_machine, local_capabilities=[]
+    )
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_task_with_matched_capabilities_is_eligible() -> None:
+    store = InMemoryStore()
+    project_manager, project = await _setup_project(store)
+    task_id = await _setup_task(
+        store,
+        project.id,
+        initial_status=ev.READY_FOR_SPEC,
+        required_capabilities=["docker"],
+    )
+    await _advance_task_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(
+        store,
+        project_manager,
+        spec_manager,
+        state_machine,
+        local_capabilities=["docker", "gpu"],
+    )
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_task_with_unmatched_capabilities_is_skipped() -> None:
+    store = InMemoryStore()
+    project_manager, project = await _setup_project(store)
+    task_id = await _setup_task(
+        store,
+        project.id,
+        initial_status=ev.READY_FOR_SPEC,
+        required_capabilities=["gpu"],
+    )
+    await _advance_task_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(
+        store, project_manager, spec_manager, state_machine, local_capabilities=[]
+    )
+    assert result is None

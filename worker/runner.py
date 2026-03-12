@@ -40,6 +40,7 @@ async def get_next_task(
     project_manager: ProjectManager,
     spec_manager: SpecManager,
     state_machine: TaskStateMachine,
+    local_capabilities: list[str] = [],
 ) -> tuple[Task, Project, Spec] | None:
     """Find oldest ready_for_implementation task with active project and assigned spec.
 
@@ -105,6 +106,15 @@ async def get_next_task(
                 if unmet:
                     continue
 
+            if not set(task.required_capabilities).issubset(set(local_capabilities)):
+                logger.debug(
+                    "Task %s skipped: required_capabilities %s not met by local %s",
+                    task_id,
+                    task.required_capabilities,
+                    local_capabilities,
+                )
+                continue
+
             spec = await spec_manager.get_current_spec(task_id)
             if spec is None:
                 logger.warning("Task %s has no spec assigned, skipping", task_id)
@@ -150,6 +160,7 @@ def _should_skip_baseline_qa(task_events: list[Any]) -> bool:
 async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
+    local_capabilities: list[str] = [],
 ) -> bool:
     """Single-pass task execution.
 
@@ -163,7 +174,9 @@ async def run_once(
     spec_manager = SpecManager(store)
     state_machine = TaskStateMachine(store)
 
-    result = await get_next_task(store, project_manager, spec_manager, state_machine)
+    result = await get_next_task(
+        store, project_manager, spec_manager, state_machine, local_capabilities
+    )
     if result is None:
         logger.info("No tasks ready for implementation.")
         return False
@@ -594,6 +607,7 @@ async def notification_loop(
     invoker: ClaudeCodeInvoker,
     dsn: str,
     max_workers: int = 1,
+    local_capabilities: list[str] = [],
 ) -> None:
     """React to Postgres LISTEN/NOTIFY events for task status changes and compilation triggers.
 
@@ -614,7 +628,7 @@ async def notification_loop(
         """Run one pass: QA first, then implementation, then compilation."""
         did_qa = await run_qa_once(store, invoker)
         if not did_qa:
-            did_impl = await run_once(store, invoker)
+            did_impl = await run_once(store, invoker, local_capabilities)
             if not did_impl:
                 await compile_once(store)
 
@@ -682,15 +696,23 @@ async def notification_loop(
                     raise exc
 
 
-def main(watchdog_timeout: int = 300) -> None:
+def main(watchdog_timeout: int = 300, local_capabilities: list[str] = []) -> None:
     """Initialize all components with PostgresStore and run once."""
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    asyncio.run(_main_async(watchdog_timeout=watchdog_timeout))
+    asyncio.run(
+        _main_async(
+            watchdog_timeout=watchdog_timeout,
+            local_capabilities=local_capabilities,
+        )
+    )
 
 
-async def _main_async(watchdog_timeout: int = 300) -> None:
+async def _main_async(
+    watchdog_timeout: int = 300,
+    local_capabilities: list[str] = [],
+) -> None:
     from core.db import close_pool
     from core.store import PostgresStore
 
@@ -699,14 +721,17 @@ async def _main_async(watchdog_timeout: int = 300) -> None:
     try:
         did_qa = await run_qa_once(store, invoker)
         if not did_qa:
-            did_impl = await run_once(store, invoker)
+            did_impl = await run_once(store, invoker, local_capabilities)
             if not did_impl:
                 await compile_once(store)
     finally:
         await close_pool()
 
 
-async def _main_loop_async(watchdog_timeout: int = 300) -> None:
+async def _main_loop_async(
+    watchdog_timeout: int = 300,
+    local_capabilities: list[str] = [],
+) -> None:
     import os
     import signal
 
@@ -727,7 +752,9 @@ async def _main_loop_async(watchdog_timeout: int = 300) -> None:
 
     loop.add_signal_handler(signal.SIGINT, _handle_sigint)
     try:
-        await notification_loop(store, invoker, dsn)
+        await notification_loop(
+            store, invoker, dsn, local_capabilities=local_capabilities
+        )
     except asyncio.CancelledError:
         logger.info("Worker stopped.")
     finally:
@@ -735,9 +762,16 @@ async def _main_loop_async(watchdog_timeout: int = 300) -> None:
         await close_pool()
 
 
-def main_loop_entry(watchdog_timeout: int = 300) -> None:
+def main_loop_entry(
+    watchdog_timeout: int = 300, local_capabilities: list[str] = []
+) -> None:
     """Initialize all components with PostgresStore and run the continuous loop."""
     import logging as _logging
 
     _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    asyncio.run(_main_loop_async(watchdog_timeout=watchdog_timeout))
+    asyncio.run(
+        _main_loop_async(
+            watchdog_timeout=watchdog_timeout,
+            local_capabilities=local_capabilities,
+        )
+    )
