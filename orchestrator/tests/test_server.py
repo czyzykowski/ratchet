@@ -114,6 +114,7 @@ def test_workers_shows_registered_worker(monkeypatch: pytest.MonkeyPatch) -> Non
             assert workers[0]["capabilities"] == ["python"]
             assert "id" in workers[0]
             assert "current_execution_id" in workers[0]
+            assert "connected_at" in workers[0]
 
 
 def test_execution_completed_clears_job(monkeypatch: pytest.MonkeyPatch) -> None:

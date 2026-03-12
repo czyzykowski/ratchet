@@ -149,6 +149,7 @@ async def workers() -> list[dict[str, object]]:
             "id": w.worker_id,
             "capabilities": w.capabilities,
             "current_execution_id": w.current_execution_id,
+            "connected_at": w.connected_at.isoformat(),
         }
         for w in app.state.registry.all_workers()
     ]
