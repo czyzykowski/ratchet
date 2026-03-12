@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- `get_next_task()` filters tasks by capability match: tasks whose `required_capabilities` is not a subset of the worker's `local_capabilities` are skipped silently
+- `--capabilities CAP1,CAP2` CLI flag on `python -m worker` to specify comma-separated local worker capabilities
 - `GET /api/tasks/{task_id}/qa` endpoint returns full Q&A history and pending question for a task
 - `POST /api/tasks/{task_id}/answer` endpoint records a human answer to a pending question, validated against `WAITING_FOR_INPUT` status; `answered_by` is always `"spa"`
 - Post-deploy hooks via `deploy:` section in `ratchet.yaml`; `deploy-task.py` and web deploy route run all steps unconditionally, record `task.deploy_hooks_run` event with full results, and always transition to `deployed`; `--skip-deploy-hooks` CLI flag and matching web checkbox bypass hook execution entirely
