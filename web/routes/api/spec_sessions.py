@@ -15,7 +15,7 @@ from core import events as ev
 from core.claude_repl import SpecReplSession
 from core.project_manager import ProjectManager
 from core.task_manager import TaskManager
-from web.queries import get_chat_session_by_context
+from web.queries import get_chat_session_by_context, get_chat_session_by_id
 from web.routes.api.tasks import _build_initial_spec_prompt
 
 router = APIRouter(prefix="/spec-sessions")
@@ -63,7 +63,7 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
                 task_id=str(body.task_id),
                 system_prompt=system_prompt,
                 cwd=local_path,
-                history=list(existing.messages),
+                history=[(u, a) for u, a in existing.messages if a and "[Request interrupted by user]" not in u],
             )
             request.app.state.spec_sessions[session_id] = session
         messages = [
@@ -113,11 +113,45 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     return JSONResponse({"session_id": session_id, "messages": []})
 
 
+async def _recover_session(session_id: str, request: Request) -> SpecReplSession | None:
+    """Re-create a session from DB if it was lost due to server restart."""
+    pool = request.app.state.pool
+    store = request.app.state.store
+    existing = await get_chat_session_by_id(pool, UUID(session_id))
+    if existing is None:
+        return None
+    task_id = existing.context_id
+    task_manager = TaskManager(store)
+    task = await task_manager.get_task(task_id)
+    if task is None:
+        return None
+    pm = ProjectManager(store)
+    project = await pm.get_project(task.project_id)
+    if project is None:
+        return None
+    local_path = str(project.local_path)
+    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+    if not intent_md_path.exists():
+        return None
+    intent_md = intent_md_path.read_text()
+    system_prompt = _build_initial_spec_prompt(intent_md, task.title, task.title)
+    session = SpecReplSession(
+        task_id=str(task_id),
+        system_prompt=system_prompt,
+        cwd=local_path,
+        history=[(u, a) for u, a in existing.messages if a and "[Request interrupted by user]" not in u],
+    )
+    request.app.state.spec_sessions[session_id] = session
+    return session
+
+
 @router.post("/{session_id}/message")
 async def send_message(
     session_id: str, body: MessageBody, request: Request
 ) -> StreamingResponse:
     session: SpecReplSession | None = request.app.state.spec_sessions.get(session_id)
+    if session is None:
+        session = await _recover_session(session_id, request)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 

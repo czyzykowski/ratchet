@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,7 +28,7 @@ def make_assistant_msg(text: str, session_id: str) -> dict[str, Any]:
         "type": "assistant",
         "message": {
             "role": "assistant",
-            "content": text,
+            "content": [{"type": "text", "text": text}],
         },
         "session_id": session_id,
         "parent_tool_use_id": None,
@@ -47,6 +48,7 @@ class SpecReplSession:
 
     async def _spawn(self) -> None:
         limit = 10 * 1024 * 1024  # 10 MB — Claude can output large JSON lines
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
         self._proc = await asyncio.create_subprocess_exec(
             "claude",
             "-p",
@@ -61,6 +63,7 @@ class SpecReplSession:
             "--system-prompt",
             self.system_prompt,
             cwd=self.cwd,
+            env=env,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -79,6 +82,10 @@ class SpecReplSession:
 
     async def _replay_history(self) -> None:
         for user_text, assistant_text in self.history:
+            if not assistant_text:
+                continue  # skip incomplete exchanges — empty assistant messages crash the subprocess
+            if "[Request interrupted by user]" in user_text:
+                continue  # skip interrupted markers — cause error_during_execution on replay
             await self._send(make_user_msg(user_text, "default"))
             await self._send(make_assistant_msg(assistant_text, "default"))
 

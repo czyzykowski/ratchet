@@ -246,6 +246,50 @@ async def get_chat_session_by_context(
     )
 
 
+async def get_chat_session_by_id(
+    pool: Any, session_id: UUID
+) -> ChatSession | None:
+    """Look up an existing chat session by its own ID."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT context_id, session_type, context_type, created_at"
+                " FROM current_chat_sessions WHERE id = %s LIMIT 1",
+                (str(session_id),),
+            )
+            row = await cur.fetchone()
+    if row is None:
+        return None
+
+    context_id = row[0]
+    session_type = row[1]
+    context_type = row[2]
+    created_at = row[3]
+
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT payload FROM events"
+                " WHERE aggregate_id = %s AND aggregate_type = 'chat_session'"
+                " AND event_type = 'chat_session.message_added'"
+                " ORDER BY sequence ASC",
+                (str(session_id),),
+            )
+            rows = await cur.fetchall()
+
+    messages = [
+        (r[0]["user_input"], r[0]["assistant_text"]) for r in rows
+    ]
+    return ChatSession(
+        id=session_id,
+        session_type=session_type,
+        context_id=context_id,
+        context_type=context_type,
+        created_at=created_at,
+        messages=messages,
+    )
+
+
 async def get_project_tasks(conn: Any, project_id: UUID) -> list[dict[str, Any]]:
     async with conn.cursor() as cur:
         await cur.execute(
