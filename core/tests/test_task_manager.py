@@ -129,6 +129,25 @@ async def test_get_task_replays_dependency_added(
 
 
 @pytest.mark.asyncio
+async def test_create_task_default_required_capabilities(manager: TaskManager) -> None:
+    project_id = uuid4()
+    task = await manager.create_task(project_id, "Default Capabilities Task")
+    assert task.required_capabilities == []
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_required_capabilities(manager: TaskManager) -> None:
+    project_id = uuid4()
+    task = await manager.create_task(
+        project_id, "GPU Task", required_capabilities=["gpu", "os:linux"]
+    )
+    assert task.required_capabilities == ["gpu", "os:linux"]
+    replayed = await manager.get_task(task.id)
+    assert replayed is not None
+    assert replayed.required_capabilities == ["gpu", "os:linux"]
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_by_project_returns_all_tasks(manager: TaskManager) -> None:
     project_id = uuid4()
     other_project_id = uuid4()

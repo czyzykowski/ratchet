@@ -43,6 +43,7 @@ class Task(BaseModel):
     created_at: datetime
     updated_at: datetime
     depends_on: list[str] = []
+    required_capabilities: list[str] = []
 
 
 class Spec(BaseModel):

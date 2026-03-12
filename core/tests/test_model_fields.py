@@ -39,6 +39,7 @@ def test_task_fields() -> None:
         "created_at",
         "updated_at",
         "depends_on",
+        "required_capabilities",
     }
     assert set(Task.model_fields) == expected
 

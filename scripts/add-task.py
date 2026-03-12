@@ -18,6 +18,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Comma-separated list of upstream task UUIDs this task depends on.",
     )
+    parser.add_argument(
+        "--capabilities",
+        default=None,
+        help="Comma-separated list of required capabilities (e.g. os:windows,gpu).",
+    )
     return parser.parse_args()
 
 
@@ -45,6 +50,10 @@ async def main() -> None:
                 sys.exit(1)
             dep_uuids.append(raw)
 
+    cap_list = (
+        [c.strip() for c in args.capabilities.split(",") if c.strip()] if args.capabilities else []
+    )
+
     from core.db import close_pool
     from core.store import PostgresStore
     from core.task_manager import TaskManager
@@ -52,13 +61,17 @@ async def main() -> None:
     store = PostgresStore()
     try:
         task_manager = TaskManager(store)
-        task = await task_manager.create_task(project_id, args.title, dep_uuids or None)
+        task = await task_manager.create_task(
+            project_id, args.title, dep_uuids or None, required_capabilities=cap_list or None
+        )
 
         print(f"Created task: {task.title}")
         print(f"Task ID: {task.id}")
         print(f"Status: {task.status}")
         if task.depends_on:
             print(f"Depends on: {', '.join(task.depends_on)}")
+        if task.required_capabilities:
+            print(f"Capabilities: {', '.join(task.required_capabilities)}")
     finally:
         await close_pool()
 

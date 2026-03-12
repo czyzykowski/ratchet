@@ -18,6 +18,7 @@ class TaskManager:
         project_id: UUID,
         title: str,
         depends_on: list[str] | None = None,
+        required_capabilities: list[str] | None = None,
     ) -> Task:
         """Create a new task in ready_for_spec status.
 
@@ -26,6 +27,8 @@ class TaskManager:
         """
         if depends_on is None:
             depends_on = []
+        if required_capabilities is None:
+            required_capabilities = []
         task_id = uuid4()
         await self._store.append_event(
             aggregate_id=task_id,
@@ -36,6 +39,7 @@ class TaskManager:
                 "project_id": str(project_id),
                 "title": title,
                 "status": ev.READY_FOR_SPEC,
+                "required_capabilities": required_capabilities,
             },
         )
         await self._store.append_event(
@@ -101,6 +105,7 @@ class TaskManager:
                     refinement_count=0,
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
+                    required_capabilities=p.get("required_capabilities", []),
                 )
             elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
                 task = task.model_copy(
