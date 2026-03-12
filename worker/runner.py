@@ -632,6 +632,12 @@ async def notification_loop(
             if not did_impl:
                 await compile_once(store)
 
+    async def _heartbeat_producer() -> None:
+        while True:
+            await asyncio.sleep(600)
+            logger.info("Worker: heartbeat — queuing catchup pass")
+            await queue.put(("heartbeat", "", ""))
+
     async def _notification_producer(listener: NotificationListener) -> None:
         async for event_tuple in listener.listen():
             await queue.put(event_tuple)
@@ -652,6 +658,8 @@ async def notification_loop(
             if kind == "compile":
                 reason = event_tuple[1]
                 logger.info("Worker: dequeued compilation trigger reason=%s", reason)
+            elif kind == "heartbeat":
+                logger.info("Worker: processing heartbeat catchup pass")
             else:
                 task_id, status = event_tuple[1], event_tuple[2]
                 logger.info(
@@ -670,10 +678,11 @@ async def notification_loop(
 
     async with NotificationListener(dsn, max_workers=max_workers) as listener:
         producer_task = asyncio.create_task(_notification_producer(listener))
+        heartbeat_task = asyncio.create_task(_heartbeat_producer())
         consumer_task = asyncio.create_task(_run_loop())
         try:
             done, pending = await asyncio.wait(
-                [producer_task, consumer_task],
+                [producer_task, heartbeat_task, consumer_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
         except asyncio.CancelledError:
