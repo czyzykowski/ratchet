@@ -16,6 +16,7 @@ TASK_BASELINE_QA_FAILED = "task.baseline_qa_failed"
 TASK_BASELINE_QA_RETRY = "task.baseline_qa_retry"
 TASK_FORCE_EXECUTE = "task.force_execute"
 TASK_DEPLOY_HOOKS_RUN = "task.deploy_hooks_run"
+TASK_WORKER_DISCONNECTED = "task.worker_disconnected"
 
 # Spec events
 SPEC_CREATED = "spec.created"
