@@ -1,9 +1,9 @@
 qa:
   max_fix_attempts: 3
   steps:
-    test: ".venv/bin/python -m pytest core/tests/ web/tests/ -v"
+    test: ".venv/bin/python -m pytest core/tests/ web/tests/ orchestrator/tests/ -v"
     lint: "ruff check ."
-    typecheck: "mypy core/ worker/ web/"
+    typecheck: "mypy core/ worker/ web/ orchestrator/"
     build-spa: "npm ci --prefix web/spa && npm --prefix web/spa run build"
     typecheck-spa: "npm --prefix web/spa run typecheck"
 

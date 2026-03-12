@@ -32,7 +32,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "worker*", "tui*", "web*"]
+include = ["core*", "worker*", "tui*", "web*", "orchestrator*"]
 
 [tool.ruff]
 line-length = 100
@@ -48,7 +48,7 @@ asyncio_mode = "auto"
 [tool.mypy]
 strict = true
 python_version = "3.12"
-exclude = ["core/tests/", "worker/tests/", "web/tests/"]
+exclude = ["core/tests/", "worker/tests/", "web/tests/", "orchestrator/tests/"]
 python_executable = ".venv/bin/python"
 
 [[tool.mypy.overrides]]
