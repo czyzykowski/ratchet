@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- JobDispatcher in orchestrator/dispatcher.py with dispatch_pending, _dispatch_one, and dispatch_loop
+- `remote_worker/` package: `ClaudeAuthError`, `verify_claude_auth()`, `RemoteWorkerClient` with WebSocket reconnect loop; `python -m remote_worker --orchestrator URL --capabilities ...` CLI
+- `AssignTaskMessage.git_bundle_b64: str` and `ExecutionCompletedMessage.patch: str` fields in `core/remote_protocol.py`
+- `websockets>=12.0` runtime dependency
 - `get_next_task()` filters tasks by capability match: tasks whose `required_capabilities` is not a subset of the worker's `local_capabilities` are skipped silently
 - `--capabilities CAP1,CAP2` CLI flag on `python -m worker` to specify comma-separated local worker capabilities
 - `GET /api/tasks/{task_id}/qa` endpoint returns full Q&A history and pending question for a task

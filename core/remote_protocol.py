@@ -48,6 +48,7 @@ class ExecutionCompletedMessage(BaseModel):
     worker_id: str
     task_id: str
     execution_id: str
+    patch: str
     timestamp_utc: str
 
 
@@ -103,6 +104,7 @@ class AssignTaskMessage(BaseModel):
     project_intent_md: str | None
     project_ratchet_yaml: str | None
     project_config_source: str
+    git_bundle_b64: str
 
 
 class ProvideAnswerMessage(BaseModel):

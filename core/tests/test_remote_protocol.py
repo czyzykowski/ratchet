@@ -82,6 +82,7 @@ def test_execution_completed_round_trip():
         worker_id="host-123",
         task_id="task-uuid",
         execution_id="exec-uuid",
+        patch="--- a\n+++ b\n",
         timestamp_utc="2026-03-12T00:00:00Z",
     )
     parsed = parse_worker_message(msg.model_dump_json())
@@ -166,6 +167,7 @@ def test_assign_task_round_trip():
         project_intent_md="# Intent\nBuild stuff.",
         project_ratchet_yaml="qa:\n  test: pytest",
         project_config_source="disk",
+        git_bundle_b64="YnVuZGxlZGF0YQ==",
     )
     parsed = parse_orchestrator_message(msg.model_dump_json())
     assert isinstance(parsed, AssignTaskMessage)
@@ -185,6 +187,7 @@ def test_assign_task_none_optional_fields_round_trip():
         project_intent_md=None,
         project_ratchet_yaml=None,
         project_config_source="db",
+        git_bundle_b64="YnVuZGxlZGF0YQ==",
     )
     parsed = parse_orchestrator_message(msg.model_dump_json())
     assert isinstance(parsed, AssignTaskMessage)
