@@ -78,10 +78,17 @@ async def _emit_pr_created(store: InMemoryStore, task_id: uuid.UUID, pr_number: 
     )
 
 
-def _make_gh_proc(state: str, returncode: int = 0) -> MagicMock:
+def _make_gh_proc(
+    state: str,
+    returncode: int = 0,
+    merge_commit_sha: str | None = None,
+) -> MagicMock:
     proc = MagicMock()
     proc.returncode = returncode
-    proc.stdout = json.dumps({"state": state})
+    body: dict = {"state": state}
+    if merge_commit_sha is not None:
+        body["mergeCommit"] = {"oid": merge_commit_sha}
+    proc.stdout = json.dumps(body)
     proc.stderr = ""
     return proc
 
@@ -133,3 +140,59 @@ async def test_poll_pr_merges_skips_tasks_without_pr_created_event() -> None:
     task = await task_manager.get_task(task_id)
     assert task is not None
     assert task.status == ev.READY_FOR_DEPLOYMENT
+
+
+@pytest.mark.asyncio
+async def test_poll_pr_merges_captures_merge_commit_sha() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task_in_ready_for_deployment(store, project.id)
+    await _emit_pr_created(store, task_id, pr_number=99)
+
+    sha = "abc123def456abc123def456abc123def456abc1"
+    mock_proc = _make_gh_proc("MERGED", merge_commit_sha=sha)
+    with patch("worker.runner._gh_command", return_value=mock_proc):
+        await poll_pr_merges(store, FAKE_REPO_PATH)
+
+    task_manager = TaskManager(store)
+    task = await task_manager.get_task(task_id)
+    assert task is not None
+    assert task.status == ev.DEPLOYED
+    assert task.merge_commit_sha == sha
+
+    # Verify the SHA is stored in the deployed event payload
+    task_events = await store.get_events(task_id, "task")
+    deployed_event = next(
+        e for e in reversed(task_events)
+        if e.event_type == ev.TASK_STATUS_CHANGED
+        and e.payload.get("to_status") == ev.DEPLOYED
+    )
+    assert deployed_event.payload.get("merge_commit_sha") == sha
+
+
+@pytest.mark.asyncio
+async def test_poll_pr_merges_deployed_without_sha() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task_in_ready_for_deployment(store, project.id)
+    await _emit_pr_created(store, task_id, pr_number=77)
+
+    # No mergeCommit key in response
+    mock_proc = _make_gh_proc("MERGED")
+    with patch("worker.runner._gh_command", return_value=mock_proc):
+        await poll_pr_merges(store, FAKE_REPO_PATH)
+
+    task_manager = TaskManager(store)
+    task = await task_manager.get_task(task_id)
+    assert task is not None
+    assert task.status == ev.DEPLOYED
+    assert task.merge_commit_sha is None
+
+    # Verify no merge_commit_sha key in deployed event payload
+    task_events = await store.get_events(task_id, "task")
+    deployed_event = next(
+        e for e in reversed(task_events)
+        if e.event_type == ev.TASK_STATUS_CHANGED
+        and e.payload.get("to_status") == ev.DEPLOYED
+    )
+    assert "merge_commit_sha" not in deployed_event.payload

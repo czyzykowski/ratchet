@@ -659,7 +659,9 @@ async def poll_pr_merges(store: Store, project_local_path: str) -> None:
             _cwd = str(cwd)
             proc = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: _gh_command(["pr", "view", str(_pr_num), "--json", "state"], _cwd),
+                lambda: _gh_command(
+                    ["pr", "view", str(_pr_num), "--json", "state,mergeCommit"], _cwd
+                ),
             )
             if proc.returncode != 0:
                 logger.warning(
@@ -680,7 +682,9 @@ async def poll_pr_merges(store: Store, project_local_path: str) -> None:
 
             if pr_state == "MERGED":
                 logger.info("PR %s merged — transitioning task=%s to deployed", pr_number, task_id)
-                await state_machine.transition(task_id, ev.DEPLOYED)
+                sha = (state_data.get("mergeCommit") or {}).get("oid") or None
+                extra_payload = {"merge_commit_sha": sha} if sha else None
+                await state_machine.transition(task_id, ev.DEPLOYED, extra_payload=extra_payload)
 
 
 async def compile_once(store: Store) -> bool:
