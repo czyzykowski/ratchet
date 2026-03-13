@@ -226,6 +226,44 @@ def test_should_update_project_config_when_config_source_is_db(
     assert data["project"]["ratchet_yaml"] == "steps: []"
 
 
+def test_should_use_explicit_repo_url_when_provided(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    with patch(
+        "web.routes.api.projects.ProjectManager.register_project",
+        new_callable=AsyncMock,
+    ) as mock_register:
+        project_id = uuid4()
+        now = datetime.now(UTC)
+        mock_register.return_value = Project(
+            id=project_id,
+            name="GH Project",
+            repo_url="https://github.com/org/repo",
+            local_path="/tmp/local",
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "GH Project",
+                "path": "/tmp/local",
+                "repo_url": "https://github.com/org/repo",
+            },
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["project"]["repo_url"] == "https://github.com/org/repo"
+    mock_register.assert_called_once_with(
+        name="GH Project",
+        repo_url="https://github.com/org/repo",
+        local_path="/tmp/local",
+        config_source="disk",
+    )
+
+
 def test_should_create_project_with_config_source_db_and_file_contents(
     client: TestClient, store: InMemoryStore
 ) -> None:

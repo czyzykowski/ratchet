@@ -18,6 +18,7 @@ router = APIRouter()
 class CreateProjectBody(BaseModel):
     name: str
     path: str
+    repo_url: str | None = None
     config_source: str = "disk"
     claude_md: str | None = None
     intent_md: str | None = None
@@ -80,7 +81,7 @@ async def create_project(body: CreateProjectBody, request: Request) -> JSONRespo
     try:
         project = await pm.register_project(
             name=body.name,
-            repo_url=body.path,
+            repo_url=body.repo_url or body.path,
             local_path=body.path,
             config_source=body.config_source,
         )

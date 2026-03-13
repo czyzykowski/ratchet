@@ -11,6 +11,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
+  const [repoUrl, setRepoUrl] = useState('')
   const [configSource, setConfigSource] = useState('disk')
   const [claudeMd, setClaudeMd] = useState('')
   const [intentMd, setIntentMd] = useState('')
@@ -31,6 +32,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     try {
       await createProject(name, path, {
         config_source: configSource,
+        repo_url: repoUrl || undefined,
         claude_md: configSource === 'db' ? claudeMd || null : null,
         intent_md: configSource === 'db' ? intentMd || null : null,
         ratchet_yaml: configSource === 'db' ? ratchetYaml || null : null,
@@ -38,6 +40,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
       setName('')
       setPath('')
+      setRepoUrl('')
       setConfigSource('disk')
       setClaudeMd('')
       setIntentMd('')
@@ -79,6 +82,16 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
               onChange={e => setPath(e.target.value)}
               required
               placeholder="/path/to/repo"
+            />
+          </div>
+          <div className="modal-field">
+            <label className="modal-label" htmlFor="project-repo-url">Repo URL <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional)</span></label>
+            <input
+              id="project-repo-url"
+              className="form-input"
+              value={repoUrl}
+              onChange={e => setRepoUrl(e.target.value)}
+              placeholder="https://github.com/org/repo"
             />
           </div>
           <div className="modal-field">

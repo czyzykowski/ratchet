@@ -23,6 +23,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--repo-url",
+        default=None,
+        dest="repo_url",
+        metavar="repo_url",
+        help=(
+            "GitHub URL of the repository (e.g. https://github.com/org/repo). "
+            "When omitted, falls back to --path."
+        ),
+    )
+    parser.add_argument(
         "--config-source",
         choices=["disk", "db"],
         default="disk",
@@ -50,10 +60,9 @@ async def main() -> None:
     store = PostgresStore()
     try:
         pm = ProjectManager(store)
-        # In v1, repo_url and local_path are set to the same value.
         project = await pm.register_project(
             name=args.name,
-            repo_url=args.path,
+            repo_url=args.repo_url or args.path,
             local_path=args.path,
             config_source=args.config_source,
         )
