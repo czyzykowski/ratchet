@@ -246,6 +246,14 @@ async def main() -> None:
                     capture_output=True,
                 )
 
+            # Fast-forward local_path to the newly merged develop so deploy hooks
+            # and future execution worktrees see the correct code.
+            subprocess.run(
+                ["git", "checkout", target_branch],
+                cwd=local_path,
+                capture_output=True,
+            )
+
             try:
                 subprocess.run(
                     ["git", "branch", "-D", branch_name],

@@ -405,6 +405,14 @@ async def deploy_task(
                 capture_output=True,
             )
 
+        # Fast-forward local_path to the newly merged develop so deploy hooks
+        # and future execution worktrees see the correct code.
+        subprocess.run(
+            ["git", "checkout", target_branch],
+            cwd=local_path,
+            capture_output=True,
+        )
+
     if not body.skip_merge:
         from core.qa_runner import load_deploy_config, run_deploy_steps
 
