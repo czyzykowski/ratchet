@@ -41,6 +41,7 @@ async def get_next_task(
     spec_manager: SpecManager,
     state_machine: TaskStateMachine,
     local_capabilities: list[str] = [],
+    project_id: UUID | None = None,
 ) -> tuple[Task, Project, Spec] | None:
     """Find oldest ready_for_implementation task with active project and assigned spec.
 
@@ -55,6 +56,8 @@ async def get_next_task(
     6. Return candidate with oldest task.created_at, or None if empty
     """
     active_projects = await project_manager.list_projects()
+    if project_id is not None:
+        active_projects = [p for p in active_projects if p.id == project_id]
     task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
@@ -161,6 +164,7 @@ async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
     local_capabilities: list[str] = [],
+    project_id: UUID | None = None,
 ) -> bool:
     """Single-pass task execution.
 
@@ -175,7 +179,8 @@ async def run_once(
     state_machine = TaskStateMachine(store)
 
     result = await get_next_task(
-        store, project_manager, spec_manager, state_machine, local_capabilities
+        store, project_manager, spec_manager, state_machine, local_capabilities,
+        project_id=project_id,
     )
     if result is None:
         logger.info("No tasks ready for implementation.")
@@ -350,12 +355,15 @@ async def get_next_qa_task(
     project_manager: ProjectManager,
     spec_manager: SpecManager,
     state_machine: TaskStateMachine,
+    project_id: UUID | None = None,
 ) -> tuple[Task, Project, Spec] | None:
     """Find oldest ready_for_qa task with active project and assigned spec.
 
     Returns (task, project, spec) tuple or None if nothing ready.
     """
     active_projects = await project_manager.list_projects()
+    if project_id is not None:
+        active_projects = [p for p in active_projects if p.id == project_id]
     task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
@@ -456,6 +464,7 @@ def _get_qa_fix_attempts(task_events: list[Any]) -> int:
 async def run_qa_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
+    project_id: UUID | None = None,
 ) -> bool:
     """Single-pass QA execution.
 
@@ -470,7 +479,9 @@ async def run_qa_once(
     state_machine = TaskStateMachine(store)
 
     # Step 1: find next QA task
-    result = await get_next_qa_task(store, project_manager, spec_manager, state_machine)
+    result = await get_next_qa_task(
+        store, project_manager, spec_manager, state_machine, project_id=project_id
+    )
     if result is None:
         logger.info("No QA tasks ready.")
         return False
@@ -695,6 +706,7 @@ async def notification_loop(
     dsn: str,
     max_workers: int = 1,
     local_capabilities: list[str] = [],
+    _initial_busy_projects: set[UUID] | None = None,
 ) -> None:
     """React to Postgres LISTEN/NOTIFY events for task status changes and compilation triggers.
 
@@ -703,21 +715,36 @@ async def notification_loop(
     3. Queues notifications received during execution using asyncio.Queue.
     4. Processes queued items after each task completes.
     5. Compilation trigger events route to compile_once only.
-    6. Task status events route to run_once + run_qa_once.
+    6. Task status events route to per-project run_qa_once + run_once, then compile_once once.
 
-    With max_workers=1, only one task runs at a time; additional notifications
-    are queued and processed sequentially after each task completes.
+    Each active project gets its own concurrent dispatch slot. busy_projects tracks
+    which projects are currently executing to prevent concurrent dispatch for the same project.
     """
     queue: asyncio.Queue[tuple[str, ...]] = asyncio.Queue()
     active = False
+    busy_projects: set[UUID] = _initial_busy_projects if _initial_busy_projects is not None else set()
 
-    async def _dispatch_one() -> None:
-        """Run one pass: QA first, then implementation, then compilation."""
-        did_qa = await run_qa_once(store, invoker)
-        if not did_qa:
-            did_impl = await run_once(store, invoker, local_capabilities)
-            if not did_impl:
-                await compile_once(store)
+    async def _dispatch_for_project(pid: UUID) -> None:
+        """Run QA then impl for a single project. Always removes pid from busy_projects."""
+        try:
+            did_qa = await run_qa_once(store, invoker, project_id=pid)
+            if not did_qa:
+                await run_once(store, invoker, local_capabilities, project_id=pid)
+        finally:
+            busy_projects.discard(pid)
+
+    async def _dispatch_all() -> None:
+        """Dispatch one pass per non-busy active project, then compile once."""
+        project_manager = ProjectManager(store)
+        active_projects = await project_manager.list_projects()
+        tasks = []
+        for project in active_projects:
+            if project.id not in busy_projects:
+                busy_projects.add(project.id)
+                tasks.append(asyncio.create_task(_dispatch_for_project(project.id)))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await compile_once(store)
 
     async def _heartbeat_producer() -> None:
         while True:
@@ -741,7 +768,7 @@ async def notification_loop(
         nonlocal active
         # Startup catchup
         logger.info("Worker: running startup catchup")
-        await _dispatch_one()
+        await _dispatch_all()
         try:
             await store.refresh_views()
         except Exception:
@@ -762,7 +789,7 @@ async def notification_loop(
                 )
             active = True
             try:
-                await _dispatch_one()
+                await _dispatch_all()
             finally:
                 active = False
                 queue.task_done()

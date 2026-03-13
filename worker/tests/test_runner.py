@@ -581,6 +581,52 @@ async def test_task_with_matched_capabilities_is_eligible() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_next_task_filters_by_project_id() -> None:
+    """get_next_task with project_id set returns only tasks for that project."""
+    store = InMemoryStore()
+    project_manager, project_a = await _setup_project(store)
+
+    # Second project
+    with patch("core.project_manager.validate_repo"):
+        project_b = await project_manager.register_project(
+            name="project-b",
+            repo_url="https://github.com/test/b",
+            local_path="/fake/b",
+        )
+
+    # Task for project A
+    task_a_id = await _setup_task(store, project_a.id)
+    await _advance_task_to_ready(store, task_a_id)
+    await _setup_spec(store, task_a_id)
+
+    # Task for project B
+    task_b_id = await _setup_task(store, project_b.id)
+    await _advance_task_to_ready(store, task_b_id)
+    await _setup_spec(store, task_b_id)
+
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    # Filter to project_a only
+    result = await get_next_task(
+        store, project_manager, spec_manager, state_machine,
+        project_id=project_a.id,
+    )
+    assert result is not None
+    assert result[1].id == project_a.id
+    assert result[0].id == task_a_id
+
+    # Filter to project_b only
+    result_b = await get_next_task(
+        store, project_manager, spec_manager, state_machine,
+        project_id=project_b.id,
+    )
+    assert result_b is not None
+    assert result_b[1].id == project_b.id
+    assert result_b[0].id == task_b_id
+
+
+@pytest.mark.asyncio
 async def test_task_with_unmatched_capabilities_is_skipped() -> None:
     store = InMemoryStore()
     project_manager, project = await _setup_project(store)
