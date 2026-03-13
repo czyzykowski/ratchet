@@ -340,6 +340,31 @@ async def deploy_task(
             detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
             raise HTTPException(status_code=400, detail=detail)
 
+    if not body.skip_merge:
+        from core.qa_runner import load_deploy_config, run_deploy_steps
+
+        deploy_config = load_deploy_config(str(project.local_path))
+        if deploy_config and deploy_config.steps:
+            hook_results = await asyncio.get_event_loop().run_in_executor(
+                None, run_deploy_steps, deploy_config, str(project.local_path)
+            )
+            await store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+                payload={
+                    "steps": [
+                        {
+                            "name": r.step_name,
+                            "command": r.command,
+                            "returncode": r.returncode,
+                            "output": r.output,
+                        }
+                        for r in hook_results
+                    ]
+                },
+            )
+
     await state_machine.transition(task_id, ev.DEPLOYED)
 
     task = await task_manager.get_task(task_id)

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Web UI deploy endpoint now runs deploy hooks (SPA build was being skipped on UI-triggered deploys)
+
 ### Added
 - JobDispatcher in orchestrator/dispatcher.py with dispatch_pending, _dispatch_one, and dispatch_loop
 - `remote_worker/` package: `ClaudeAuthError`, `verify_claude_auth()`, `RemoteWorkerClient` with WebSocket reconnect loop; `python -m remote_worker --orchestrator URL --capabilities ...` CLI
