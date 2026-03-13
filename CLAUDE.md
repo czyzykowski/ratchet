@@ -93,6 +93,7 @@ scripts/
   run-next.py       — execute next ready task via worker
   board.py          — display task board grouped by status
   review-blocked.py — show blocked tasks with failure reasons
+  archive-task.py   — abandon a task, transitioning it to the terminal 'abandoned' status
 ```
 
 ### Usage
@@ -117,6 +118,9 @@ python scripts/board.py
 
 # Review blocked tasks with failure context
 python scripts/review-blocked.py
+
+# Abandon a task
+python scripts/archive-task.py --task-id <uuid> [--reason "reason text"]
 ```
 
 ### Full Workflow

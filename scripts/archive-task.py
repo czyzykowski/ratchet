@@ -44,35 +44,8 @@ async def main() -> None:
     store = PostgresStore()
     try:
         sm = TaskStateMachine(store)
-        current = await sm.get_current_status(task_id)
-        if current is None:
-            print(f"Error: task {task_id} not found.", file=sys.stderr)
-            sys.exit(1)
-
-        # Validate transition is allowed
-        from core.state_machine import VALID_TRANSITIONS
-        if ev.ABANDONED not in VALID_TRANSITIONS.get(current, set()):
-            print(
-                f"Error: cannot transition task {task_id} from {current!r} to 'abandoned'.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        payload: dict = {
-            "from_status": current,
-            "to_status": ev.ABANDONED,
-            "status": ev.ABANDONED,
-        }
-        if args.reason:
-            payload["reason"] = args.reason
-
-        await store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_STATUS_CHANGED,
-            payload=payload,
-        )
-
+        extra = {"reason": args.reason} if args.reason else None
+        await sm.transition(task_id, ev.ABANDONED, extra_payload=extra)
         print(f"Task {task_id} abandoned.")
     except InvalidTransitionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
