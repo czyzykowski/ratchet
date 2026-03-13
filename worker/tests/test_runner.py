@@ -24,7 +24,7 @@ FAKE_REPO_PATH = "/fake/repo"
 FAKE_WORKTREE_PATH = "/fake/repo/.worktrees/exec"
 
 
-def _fake_worktree(repo_path: str, execution_id: uuid.UUID) -> str:
+def _fake_worktree(repo_path: str, execution_id: uuid.UUID, claude_md: str | None = None) -> str:
     return f"{repo_path}/.worktrees/{execution_id}"
 
 
