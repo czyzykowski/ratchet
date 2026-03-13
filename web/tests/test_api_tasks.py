@@ -464,3 +464,97 @@ def test_should_return_400_when_question_index_does_not_match_pending(
         json={"answer": "stale answer", "question_index": 5},
     )
     assert response.status_code == 400
+
+
+def test_should_return_pr_info_when_task_pr_created_event_exists(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Deploy Task")
+    )
+
+    async def _seed_pr_event() -> None:
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_PR_CREATED,
+            payload={
+                "pr_url": "https://github.com/org/repo/pull/42",
+                "pr_number": 42,
+                "branch": "feat/my-branch",
+            },
+        )
+
+    asyncio.get_event_loop().run_until_complete(_seed_pr_event())
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pr_info"]["pr_url"] == "https://github.com/org/repo/pull/42"
+    assert data["pr_info"]["pr_number"] == 42
+    assert data["pr_info"]["branch"] == "feat/my-branch"
+
+
+def test_should_return_deploy_hooks_when_task_deploy_hooks_run_event_exists(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Deploy Task")
+    )
+
+    async def _seed_hooks_event() -> None:
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+            payload={
+                "steps": [
+                    {
+                        "name": "lint",
+                        "command": "ruff check .",
+                        "returncode": 0,
+                        "output": "ok",
+                    },
+                    {
+                        "name": "test",
+                        "command": "pytest",
+                        "returncode": 1,
+                        "output": "failed",
+                    },
+                ]
+            },
+        )
+
+    asyncio.get_event_loop().run_until_complete(_seed_hooks_event())
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["deploy_hooks"]) == 2
+    assert data["deploy_hooks"][0]["name"] == "lint"
+    assert data["deploy_hooks"][0]["returncode"] == 0
+    assert data["deploy_hooks"][1]["name"] == "test"
+    assert data["deploy_hooks"][1]["returncode"] == 1
+
+
+def test_should_return_null_pr_info_and_deploy_hooks_when_no_deployment_events(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Plain Task")
+    )
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pr_info"] is None
+    assert data["deploy_hooks"] is None

@@ -36,6 +36,19 @@ interface Execution {
   completed_at: string | null
 }
 
+interface PrInfo {
+  pr_url: string
+  pr_number: number
+  branch: string
+}
+
+interface DeployHookStep {
+  name: string
+  command: string
+  returncode: number
+  output: string
+}
+
 interface TaskDetailResponse {
   task: TaskDetail
   project_name: string | null
@@ -44,6 +57,8 @@ interface TaskDetailResponse {
   dependencies: string[]
   qa_failure: string | null
   baseline_qa_failure: string | null
+  pr_info: PrInfo | null
+  deploy_hooks: DeployHookStep[] | null
 }
 
 async function fetchTaskDetail(taskId: string): Promise<TaskDetailResponse> {
@@ -426,6 +441,51 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {data.pr_info && (
+              <div className="modal-field">
+                <div className="modal-label">Deployment</div>
+                <div>
+                  <a
+                    href={data.pr_info.pr_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#7eb8f7' }}
+                  >
+                    PR #{data.pr_info.pr_number}
+                  </a>
+                  <span style={{ marginLeft: '0.5rem', color: '#a0a0a0', fontSize: '0.8rem' }}>
+                    {data.pr_info.branch}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {data.deploy_hooks && (
+              <div className="modal-field">
+                <div className="modal-label">Deployment</div>
+                {data.deploy_hooks.map((step, i) => (
+                  <div key={i} style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                      <strong>{step.name}</strong>
+                      <code style={{ color: '#a0a0a0', fontSize: '0.8rem' }}>{step.command}</code>
+                      <span
+                        style={{
+                          padding: '0.1rem 0.4rem',
+                          borderRadius: 3,
+                          fontSize: '0.75rem',
+                          background: step.returncode === 0 ? '#1a4a1a' : '#4a1a1a',
+                          color: step.returncode === 0 ? '#4caf50' : '#f44336',
+                        }}
+                      >
+                        {step.returncode}
+                      </span>
+                    </div>
+                    <pre className="modal-pre" style={{ margin: 0 }}>{step.output}</pre>
+                  </div>
+                ))}
               </div>
             )}
 
