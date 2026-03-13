@@ -65,12 +65,15 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
             if project is None:
                 raise HTTPException(status_code=404, detail="Project not found")
             local_path = str(project.local_path)
-            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-            if not intent_md_path.exists():
-                raise HTTPException(
-                    status_code=400, detail="INTENT.md not found in project"
-                )
-            intent_md = intent_md_path.read_text()
+            if project.config_source == "db":
+                intent_md = project.intent_md or ""
+            else:
+                intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+                if not intent_md_path.exists():
+                    raise HTTPException(
+                        status_code=400, detail="INTENT.md not found in project"
+                    )
+                intent_md = intent_md_path.read_text()
             system_prompt = _build_initial_spec_prompt(
                 intent_md, task.title, task.title
             )
@@ -98,11 +101,13 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
         raise HTTPException(status_code=404, detail="Project not found")
 
     local_path = str(project.local_path)
-    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-    if not intent_md_path.exists():
-        raise HTTPException(status_code=400, detail="INTENT.md not found in project")
-
-    intent_md = intent_md_path.read_text()
+    if project.config_source == "db":
+        intent_md = project.intent_md or ""
+    else:
+        intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+        if not intent_md_path.exists():
+            raise HTTPException(status_code=400, detail="INTENT.md not found in project")
+        intent_md = intent_md_path.read_text()
     task_title: str = task.title
 
     system_prompt = _build_initial_spec_prompt(intent_md, task_title, task_title)
@@ -145,10 +150,13 @@ async def _recover_session(session_id: str, request: Request) -> SpecReplSession
     if project is None:
         return None
     local_path = str(project.local_path)
-    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-    if not intent_md_path.exists():
-        return None
-    intent_md = intent_md_path.read_text()
+    if project.config_source == "db":
+        intent_md = project.intent_md or ""
+    else:
+        intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+        if not intent_md_path.exists():
+            return None
+        intent_md = intent_md_path.read_text()
     system_prompt = _build_initial_spec_prompt(intent_md, task.title, task.title)
     session = SpecReplSession(
         task_id=str(task_id),
