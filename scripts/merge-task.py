@@ -1,4 +1,4 @@
-"""Squash merge execution branch and advance task to deployed."""
+"""Squash merge execution branch and advance task to merged."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from uuid import UUID
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Squash merge execution branch and advance task to deployed."
+        description="Squash merge execution branch and advance task to merged."
     )
     parser.add_argument("--task-id", required=True, help="Task UUID")
     parser.add_argument(
@@ -23,12 +23,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-merge",
         action="store_true",
-        help="Skip all git operations and advance task directly to deployed status",
+        help="Skip all git operations and advance task directly to merged status",
     )
     parser.add_argument(
-        "--skip-deploy-hooks",
+        "--skip-merge-hooks",
         action="store_true",
-        help="Skip deploy hook execution entirely",
+        help="Skip merge hook execution entirely",
     )
     return parser.parse_args()
 
@@ -64,7 +64,7 @@ async def main() -> None:
 
         if current_status != ev.READY_FOR_DEPLOYMENT:
             print(
-                f"Error: task must be in ready_for_deployment status, got {current_status!r}",
+                f"Error: task must be in ready_for_merge status, got {current_status!r}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -185,7 +185,7 @@ async def main() -> None:
                 result = ClaudeCodeInvoker().invoke(context)
 
                 if result.status == "completed":
-                    print("Conflict resolution succeeded, continuing deployment.", file=sys.stderr)
+                    print("Conflict resolution succeeded, continuing merge.", file=sys.stderr)
                 else:
                     subprocess.run(
                         ["git", "merge", "--abort"],
@@ -237,17 +237,17 @@ async def main() -> None:
                     f"Warning: git branch -d failed: {exc.stderr.decode()}", file=sys.stderr
                 )
 
-        from core.qa_runner import load_deploy_config, run_deploy_steps
+        from core.qa_runner import load_merge_config, run_merge_steps
 
         hook_summary: str
-        if args.skip_deploy_hooks:
-            hook_summary = "(deploy hooks skipped)"
+        if args.skip_merge_hooks:
+            hook_summary = "(merge hooks skipped)"
         else:
-            deploy_config = load_deploy_config(project.local_path)
-            if deploy_config is None or not deploy_config.steps:
-                hook_summary = "(no deploy hooks)"
+            merge_config = load_merge_config(project.local_path)
+            if merge_config is None or not merge_config.steps:
+                hook_summary = "(no merge hooks)"
             else:
-                hook_results = run_deploy_steps(deploy_config, project.local_path)
+                hook_results = run_merge_steps(merge_config, project.local_path)
                 failed_count = sum(1 for r in hook_results if r.returncode != 0)
                 await store.append_event(
                     aggregate_id=task_id,
@@ -265,7 +265,7 @@ async def main() -> None:
                         ]
                     },
                 )
-                hook_summary = f"({len(hook_results)} deploy hooks run, {failed_count} failed)"
+                hook_summary = f"({len(hook_results)} merge hooks run, {failed_count} failed)"
 
         try:
             await state_machine.transition(task_id, ev.DEPLOYED)
@@ -274,9 +274,9 @@ async def main() -> None:
             sys.exit(1)
 
         if args.skip_merge:
-            print(f"Deployed task {title!r} — skipped merge {hook_summary}")
+            print(f"Merged task {title!r} — skipped git merge {hook_summary}")
         else:
-            print(f"Deployed task {title!r} — merged to {args.branch} {hook_summary}")
+            print(f"Merged task {title!r} — merged to {args.branch} {hook_summary}")
     finally:
         await close_pool()
 

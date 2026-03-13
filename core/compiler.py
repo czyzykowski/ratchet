@@ -125,7 +125,7 @@ async def is_eligible(hls: HighLevelSpec, fm: FeatureManager, store: Store) -> b
     A spec is eligible when:
     - compiled == False
     - for every UUID in dependencies, the corresponding HighLevelSpec.task_id is not None
-      and that task's status is deployed
+      and that task's status is merged
     """
     if hls.compiled:
         return False

@@ -8,7 +8,7 @@ import os
 import sys
 from uuid import UUID
 
-_TERMINAL_STATUSES = {"deployed"}
+_TERMINAL_STATUSES = {"merged"}
 
 
 def parse_args() -> argparse.Namespace:

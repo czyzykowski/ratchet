@@ -30,8 +30,8 @@ async def main() -> None:
         help="Show only abandoned tasks instead of the default board.",
     )
     parser.add_argument(
-        "--deployed", action="store_true",
-        help="Show only deployed tasks instead of the default board.",
+        "--merged", action="store_true",
+        help="Show only merged tasks instead of the default board.",
     )
     args = parser.parse_args()
 
@@ -64,14 +64,14 @@ async def main() -> None:
                 print(f"  [{task_id_display}] {task['title']} — {project_label} — {ref_label}")
             return
 
-        if args.deployed:
-            deployed_tasks = [t for t in all_tasks if t["status"] == ev.DEPLOYED]
-            if not deployed_tasks:
-                print("\nNo deployed tasks found.")
+        if args.merged:
+            merged_tasks = [t for t in all_tasks if t["status"] == ev.DEPLOYED]
+            if not merged_tasks:
+                print("\nNo merged tasks found.")
                 return
-            label = STATUS_LABELS.get(ev.DEPLOYED, "DEPLOYED")
-            print(f"\n{label} ({len(deployed_tasks)})")
-            for task in deployed_tasks:
+            label = STATUS_LABELS.get(ev.DEPLOYED, "MERGED")
+            print(f"\n{label} ({len(merged_tasks)})")
+            for task in merged_tasks:
                 task_id_display = str(task["id"]) if args.verbose else str(task["id"])[:8]
                 project_name = project_by_id.get(task["project_id"], None)
                 project_label = project_name.name if project_name else "unknown"
