@@ -176,12 +176,14 @@ async def main() -> None:
             sys.exit(1)
 
         local_path = project.local_path
-        intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-        if not intent_md_path.exists():
-            print(f"Error: INTENT.md not found at {intent_md_path}", file=sys.stderr)
-            sys.exit(1)
-
-        intent_md = intent_md_path.read_text()
+        if project.config_source == "db":
+            intent_md = project.intent_md or ""
+        else:
+            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+            if not intent_md_path.exists():
+                print(f"Error: INTENT.md not found at {intent_md_path}", file=sys.stderr)
+                sys.exit(1)
+            intent_md = intent_md_path.read_text()
 
         print(f"Task: {task_title}")
         print(f"Project: {project.name} ({local_path})")
