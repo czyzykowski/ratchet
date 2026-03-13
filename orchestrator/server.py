@@ -11,7 +11,9 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from core import events as ev
+from core import git_transfer
 from core.execution_manager import ExecutionManager
+from core.git_transfer import GitTransferError
 from core.project_manager import ProjectManager
 from core.remote_protocol import (
     ExecutionCompletedMessage,
@@ -31,6 +33,108 @@ from orchestrator.dispatcher import JobDispatcher
 from orchestrator.registry import WorkerConnection, WorkerRegistry
 
 logger = logging.getLogger(__name__)
+
+
+async def _handle_execution_completed(
+    store: Store, registry: WorkerRegistry, worker_id: str, msg: ExecutionCompletedMessage
+) -> None:
+    """Apply patch, record completion, transition task to ready_for_qa, clear job."""
+    try:
+        execution_id = UUID(msg.execution_id)
+        task_id = UUID(msg.task_id)
+    except ValueError:
+        logger.error(
+            "_handle_execution_completed: invalid UUIDs execution_id=%s task_id=%s, clearing job",
+            msg.execution_id,
+            msg.task_id,
+        )
+        registry.clear_job(worker_id)
+        return
+
+    task = await TaskManager(store).get_task(task_id)
+    if task is None:
+        logger.error(
+            "_handle_execution_completed: task %s not found, clearing job", task_id
+        )
+        registry.clear_job(worker_id)
+        return
+
+    project = await ProjectManager(store).get_project(task.project_id)
+    if project is None:
+        logger.error(
+            "_handle_execution_completed: project %s not found, clearing job", task.project_id
+        )
+        registry.clear_job(worker_id)
+        return
+
+    worktree_path = os.path.join(project.local_path, ".worktrees", str(execution_id))
+    execution_manager = ExecutionManager(store, project.local_path)
+    state_machine = TaskStateMachine(store)
+
+    try:
+        git_transfer.apply_patch(worktree_path, msg.patch)
+    except GitTransferError as err:
+        reason = f"patch apply failed: {err}"
+        logger.warning(
+            "_handle_execution_completed: patch failed for execution %s: %s", execution_id, reason
+        )
+        await execution_manager.fail_execution(execution_id, reason)
+        await state_machine.transition(task_id, ev.BLOCKED)
+        registry.clear_job(worker_id)
+        return
+
+    await execution_manager.complete_execution(execution_id)
+    await state_machine.transition(task_id, ev.READY_FOR_QA)
+    registry.clear_job(worker_id)
+    logger.info(
+        "_handle_execution_completed: execution %s completed, task %s -> ready_for_qa",
+        execution_id,
+        task_id,
+    )
+
+
+async def _handle_execution_failed(
+    store: Store, registry: WorkerRegistry, worker_id: str, msg: ExecutionFailedMessage
+) -> None:
+    """Record failure, transition task to blocked, clear job."""
+    try:
+        execution_id = UUID(msg.execution_id)
+        task_id = UUID(msg.task_id)
+    except ValueError:
+        logger.error(
+            "_handle_execution_failed: invalid UUIDs execution_id=%s task_id=%s, clearing job",
+            msg.execution_id,
+            msg.task_id,
+        )
+        registry.clear_job(worker_id)
+        return
+
+    task = await TaskManager(store).get_task(task_id)
+    if task is None:
+        logger.error(
+            "_handle_execution_failed: task %s not found, clearing job", task_id
+        )
+        registry.clear_job(worker_id)
+        return
+
+    project = await ProjectManager(store).get_project(task.project_id)
+    if project is None:
+        logger.error(
+            "_handle_execution_failed: project %s not found, clearing job", task.project_id
+        )
+        registry.clear_job(worker_id)
+        return
+
+    await ExecutionManager(store, project.local_path).fail_execution(
+        execution_id, msg.failure_reason
+    )
+    await TaskStateMachine(store).transition(task_id, ev.BLOCKED)
+    registry.clear_job(worker_id)
+    logger.info(
+        "_handle_execution_failed: execution %s failed, task %s -> blocked",
+        execution_id,
+        task_id,
+    )
 
 
 async def handle_disconnect(
@@ -190,11 +294,9 @@ async def ws_worker(websocket: WebSocket) -> None:
             if isinstance(msg, ExecutionStartedMessage):
                 dispatcher.handle_execution_started(worker_id, msg)
             elif isinstance(msg, ExecutionCompletedMessage):
-                dispatcher.handle_execution_completed(worker_id, msg)
-                registry.clear_job(worker_id)
+                await _handle_execution_completed(app.state.store, registry, worker_id, msg)
             elif isinstance(msg, ExecutionFailedMessage):
-                dispatcher.handle_execution_failed(worker_id, msg)
-                registry.clear_job(worker_id)
+                await _handle_execution_failed(app.state.store, registry, worker_id, msg)
             elif isinstance(msg, HeartbeatMessage | LogLineMessage | QuestionAskedMessage):
                 logger.debug("received %s from worker %s", type(msg).__name__, worker_id)
             else:
