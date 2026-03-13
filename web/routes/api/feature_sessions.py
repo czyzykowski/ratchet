@@ -231,8 +231,11 @@ async def send_message(
     async def _stream() -> AsyncGenerator[str, None]:
         full_text = ""
         async for chunk in session.ask(body.user_input, image_id_str, image_media_type):
-            full_text += chunk
-            yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+            if chunk is None:
+                yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
+            else:
+                full_text += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
 
         feature_preview = _extract_feature_preview(full_text)
 

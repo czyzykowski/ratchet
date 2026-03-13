@@ -149,7 +149,7 @@ class SpecReplSession:
         user_input: str,
         image_id: str | None = None,
         image_media_type: str | None = None,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | None, None]:
         await self.ensure_alive()
         assert self._proc is not None
         assert self._proc.stdout is not None
@@ -161,7 +161,9 @@ class SpecReplSession:
         await self._send(make_user_msg(user_input, self.session_id, image_b64, image_media_type))
 
         assistant_text = ""
+        sub_texts: list[str] = []
         saw_tool_use = False
+        full_text = ""
 
         while True:
             line_bytes = await self._proc.stdout.readline()
@@ -181,14 +183,22 @@ class SpecReplSession:
             etype = event.get("type")
 
             if etype == "stream_event":
-                delta = event.get("event", {}).get("delta", {})
-                delta_type = delta.get("type", "")
-                if delta_type == "text_delta":
-                    chunk = str(delta["text"])
-                    assistant_text += chunk
-                    yield chunk
-                elif delta_type == "input_json_delta":
-                    saw_tool_use = True
+                inner_event = event.get("event", {})
+                inner_type = inner_event.get("type", "")
+                if inner_type == "message_start":
+                    if assistant_text:
+                        sub_texts.append(assistant_text)
+                        assistant_text = ""
+                        yield None
+                else:
+                    delta = inner_event.get("delta", {})
+                    delta_type = delta.get("type", "")
+                    if delta_type == "text_delta":
+                        chunk = str(delta["text"])
+                        assistant_text += chunk
+                        yield chunk
+                    elif delta_type == "input_json_delta":
+                        saw_tool_use = True
 
             elif etype == "result":
                 result_text = event.get("result", "")
@@ -196,19 +206,24 @@ class SpecReplSession:
                     sid = event.get("session_id", "")
                     if sid:
                         self.session_id = str(sid)
-                if result_text and not assistant_text:
-                    assistant_text = str(result_text)
-                    yield assistant_text
-                elif not assistant_text and saw_tool_use:
-                    # Claude used tools but produced no visible text — emit a placeholder
-                    # so the UI isn't silently empty.
-                    placeholder = "*(Reading codebase…)*"
-                    assistant_text = placeholder
-                    yield placeholder
+                if assistant_text:
+                    sub_texts.append(assistant_text)
+                    assistant_text = ""
+                full_text = "\n\n".join(sub_texts) if sub_texts else ""
+                if not full_text:
+                    if result_text:
+                        full_text = str(result_text)
+                        yield full_text
+                    elif saw_tool_use:
+                        # Claude used tools but produced no visible text — emit a placeholder
+                        # so the UI isn't silently empty.
+                        placeholder = "*(Reading codebase…)*"
+                        full_text = placeholder
+                        yield placeholder
                 break
 
-        if assistant_text:
-            self.history.append((user_input, assistant_text, image_id, image_media_type))
+        if full_text:
+            self.history.append((user_input, full_text, image_id, image_media_type))
 
     async def close(self) -> None:
         if self._proc is not None:

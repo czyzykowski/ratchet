@@ -181,6 +181,10 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
           if (payload.type === 'chunk') {
             assistantText += payload.text
             setCurrentStream(assistantText)
+          } else if (payload.type === 'new_message') {
+            setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
+            assistantText = ''
+            setCurrentStream('')
           } else if (payload.type === 'done' && payload.feature) {
             setDetectedFeature(payload.feature)
           }

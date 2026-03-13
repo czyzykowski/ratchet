@@ -181,6 +181,10 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
           if (payload.type === 'chunk') {
             assistantText += payload.text
             setCurrentStream(assistantText)
+          } else if (payload.type === 'new_message') {
+            setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
+            assistantText = ''
+            setCurrentStream('')
           } else if (payload.type === 'done') {
             if (payload.spec) {
               setDetectedSpec(payload.spec)
