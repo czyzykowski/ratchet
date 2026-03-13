@@ -137,7 +137,7 @@ class ClaudeCodeInvoker:
         5. Return InvocationResult
         """
         claude_cmd = ["claude", "-p", "--allowedTools", _ALLOWED_TOOLS]
-        if (Path(context.worktree_path) / "flake.nix").exists():
+        if os.name != "nt" and (Path(context.worktree_path) / "flake.nix").exists():
             cmd = ["nix", "develop", "--command"] + claude_cmd
         else:
             cmd = claude_cmd
