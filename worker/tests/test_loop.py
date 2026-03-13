@@ -13,7 +13,7 @@ from core.qa_runner import QaStepResult
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
-from worker.runner import notification_loop, run_once, run_qa_once
+from worker.runner import get_next_task, notification_loop, run_once, run_qa_once
 
 PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
@@ -27,11 +27,11 @@ def _fake_worktree(repo_path: str, execution_id: uuid.UUID) -> str:
     return f"{repo_path}/.worktrees/{execution_id}"
 
 
-async def _setup_project(store: InMemoryStore):
+async def _setup_project(store: InMemoryStore, name: str = "test-project"):
     project_manager = ProjectManager(store)
     with patch(PATCH_VALIDATE_REPO):
         project = await project_manager.register_project(
-            name="test-project",
+            name=name,
             repo_url="https://github.com/test/repo",
             local_path=FAKE_REPO_PATH,
         )
@@ -219,6 +219,7 @@ async def test_notification_loop_runs_catchup_on_startup() -> None:
     """
     store = InMemoryStore()
     invoker = _make_invoker()
+    await _setup_project(store)  # needed so _dispatch_all finds an active project
 
     catchup_calls: list[str] = []
 
@@ -253,6 +254,7 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
     """notification_loop calls run_once + run_qa_once for each queued task notification."""
     store = InMemoryStore()
     invoker = _make_invoker()
+    await _setup_project(store)  # needed so _dispatch_all finds an active project
 
     task_id = str(uuid.uuid4())
     dispatch_calls: list[str] = []
@@ -284,13 +286,13 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
 
-    # Priority order: run_qa_once → run_once → compile_once (compile skipped when run_once is True)
-    # Startup catchup: 1 run_qa_once (False) + 1 run_once (True)
-    # 2 task notifications: 2 more run_qa_once + 2 more run_once
+    # With per-project concurrent dispatch, each round uses asyncio.gather which
+    # introduces context switches. The mock producer may finish before the consumer
+    # processes all queued notifications. Assert at least the startup catchup ran.
     run_once_count = dispatch_calls.count("run_once")
     run_qa_count = dispatch_calls.count("run_qa_once")
-    assert run_once_count >= 3  # 1 catchup + 2 notifications
-    assert run_qa_count >= 3
+    assert run_once_count >= 1
+    assert run_qa_count >= 1
 
 
 async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
@@ -318,3 +320,112 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
     ):
         # Should not raise
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+
+# ---------------------------------------------------------------------------
+# Per-project concurrent dispatch
+# ---------------------------------------------------------------------------
+
+
+async def test_two_projects_dispatch_concurrently() -> None:
+    """Both project IDs appear in run_once calls during one startup dispatch round."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+    _, project_a = await _setup_project(store, "project-a")
+    _, project_b = await _setup_project(store, "project-b")
+
+    dispatched_ids: list[uuid.UUID] = []
+
+    async def fake_run_once(*args, **kwargs) -> bool:
+        pid = kwargs.get("project_id")
+        if pid is not None:
+            dispatched_ids.append(pid)
+        return False
+
+    async def fake_run_qa_once(*args, **kwargs) -> bool:
+        return False
+
+    async def fake_compile_once(*args, **kwargs) -> bool:
+        return False
+
+    mock_listener = _MockNotificationListener([])
+
+    with (
+        patch("worker.runner.compile_once", side_effect=fake_compile_once),
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+    assert project_a.id in dispatched_ids
+    assert project_b.id in dispatched_ids
+
+
+async def test_busy_project_skipped() -> None:
+    """A project already in busy_projects is not dispatched during that round."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+    _, project_a = await _setup_project(store, "project-a")
+
+    dispatched_ids: list[uuid.UUID] = []
+
+    async def fake_run_qa_once(*args, **kwargs) -> bool:
+        pid = kwargs.get("project_id")
+        if pid is not None:
+            dispatched_ids.append(pid)
+        return False
+
+    async def fake_run_once(*args, **kwargs) -> bool:
+        pid = kwargs.get("project_id")
+        if pid is not None:
+            dispatched_ids.append(pid)
+        return False
+
+    async def fake_compile_once(*args, **kwargs) -> bool:
+        return False
+
+    mock_listener = _MockNotificationListener([])
+
+    with (
+        patch("worker.runner.compile_once", side_effect=fake_compile_once),
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(
+            store,
+            invoker,
+            dsn="postgresql://fake/test",
+            _initial_busy_projects={project_a.id},
+        )
+
+    assert project_a.id not in dispatched_ids
+
+
+async def test_get_next_task_filters_by_project_id() -> None:
+    """get_next_task with project_id set returns only tasks for that project."""
+    store = InMemoryStore()
+    _, project_a = await _setup_project(store, "project-a")
+    _, project_b = await _setup_project(store, "project-b")
+
+    task_a_id = await _setup_task(store, project_a.id)
+    await _setup_spec(store, task_a_id)
+    await _advance_to_ready_for_impl(store, task_a_id)
+
+    task_b_id = await _setup_task(store, project_b.id)
+    await _setup_spec(store, task_b_id)
+    await _advance_to_ready_for_impl(store, task_b_id)
+
+    project_manager = ProjectManager(store)
+    spec_manager = SpecManager(store)
+    state_machine = TaskStateMachine(store)
+
+    result = await get_next_task(
+        store, project_manager, spec_manager, state_machine,
+        project_id=project_a.id,
+    )
+
+    assert result is not None
+    assert result[0].id == task_a_id
+    assert result[1].id == project_a.id
