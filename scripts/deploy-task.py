@@ -120,7 +120,7 @@ async def main() -> None:
             )
             try:
                 subprocess.run(
-                    ["git", "worktree", "add", merge_worktree, target_branch],
+                    ["git", "worktree", "add", "--detach", merge_worktree, target_branch],
                     cwd=local_path,
                     check=True,
                     capture_output=True,
@@ -241,16 +241,34 @@ async def main() -> None:
                         sys.exit(1)
 
             finally:
+                # Capture the new commit SHA before removing the worktree.
+                new_sha_proc = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=merge_worktree,
+                    capture_output=True,
+                    text=True,
+                )
+                new_sha = new_sha_proc.stdout.strip()
                 subprocess.run(
                     ["git", "worktree", "remove", "--force", merge_worktree],
                     cwd=local_path,
                     capture_output=True,
                 )
 
-            # Fast-forward local_path to the newly merged develop so deploy hooks
-            # and future execution worktrees see the correct code.
+            # Advance the target branch to the new commit and sync local_path.
+            if new_sha:
+                subprocess.run(
+                    ["git", "update-ref", f"refs/heads/{target_branch}", new_sha],
+                    cwd=local_path,
+                    capture_output=True,
+                )
             subprocess.run(
                 ["git", "checkout", target_branch],
+                cwd=local_path,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "reset", "--hard", target_branch],
                 cwd=local_path,
                 capture_output=True,
             )
