@@ -1,20 +1,22 @@
 import { useState, FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { createProject } from '../api/projects'
+import { updateProject, type Project } from '../api/projects'
 
-interface NewProjectModalProps {
+interface ProjectSettingsModalProps {
+  project: Project
   open: boolean
   onClose: () => void
 }
 
-export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
+export function ProjectSettingsModal({ project, open, onClose }: ProjectSettingsModalProps) {
   const queryClient = useQueryClient()
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [configSource, setConfigSource] = useState('disk')
-  const [claudeMd, setClaudeMd] = useState('')
-  const [intentMd, setIntentMd] = useState('')
-  const [ratchetYaml, setRatchetYaml] = useState('')
+  const [name, setName] = useState(project.name)
+  const [repoUrl, setRepoUrl] = useState(project.repo_url)
+  const [localPath, setLocalPath] = useState(project.local_path)
+  const [configSource, setConfigSource] = useState(project.config_source)
+  const [claudeMd, setClaudeMd] = useState(project.claude_md ?? '')
+  const [intentMd, setIntentMd] = useState(project.intent_md ?? '')
+  const [ratchetYaml, setRatchetYaml] = useState(project.ratchet_yaml ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -29,23 +31,20 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setError(null)
     setSubmitting(true)
     try {
-      await createProject(name, path, {
+      await updateProject(project.id, {
+        name,
+        repo_url: repoUrl,
+        local_path: localPath,
         config_source: configSource,
         claude_md: configSource === 'db' ? claudeMd || null : null,
         intent_md: configSource === 'db' ? intentMd || null : null,
         ratchet_yaml: configSource === 'db' ? ratchetYaml || null : null,
       })
-      await queryClient.invalidateQueries({ queryKey: ['projects'] })
-      setName('')
-      setPath('')
-      setConfigSource('disk')
-      setClaudeMd('')
-      setIntentMd('')
-      setRatchetYaml('')
+      await queryClient.invalidateQueries({ queryKey: ['project', project.id] })
       onClose()
     } catch (err: unknown) {
       const e = err as { detail?: string; message?: string }
-      setError(e.detail ?? e.message ?? 'Failed to create project')
+      setError(e.detail ?? e.message ?? 'Failed to update project')
     } finally {
       setSubmitting(false)
     }
@@ -55,36 +54,44 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content">
         <div className="modal-header">
-          <div className="modal-title">New Project</div>
+          <div className="modal-title">Project Settings</div>
           <button className="modal-close" onClick={onClose}>&#215;</button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-field">
-            <label className="modal-label" htmlFor="project-name">Name</label>
+            <label className="modal-label" htmlFor="settings-name">Name</label>
             <input
-              id="project-name"
+              id="settings-name"
               className="form-input"
               value={name}
               onChange={e => setName(e.target.value)}
               required
-              placeholder="My Project"
             />
           </div>
           <div className="modal-field">
-            <label className="modal-label" htmlFor="project-path">Path</label>
+            <label className="modal-label" htmlFor="settings-repo-url">Repo URL</label>
             <input
-              id="project-path"
+              id="settings-repo-url"
               className="form-input"
-              value={path}
-              onChange={e => setPath(e.target.value)}
+              value={repoUrl}
+              onChange={e => setRepoUrl(e.target.value)}
               required
-              placeholder="/path/to/repo"
             />
           </div>
           <div className="modal-field">
-            <label className="modal-label" htmlFor="project-config-source">Config Source</label>
+            <label className="modal-label" htmlFor="settings-local-path">Local Path</label>
+            <input
+              id="settings-local-path"
+              className="form-input"
+              value={localPath}
+              onChange={e => setLocalPath(e.target.value)}
+              required
+            />
+          </div>
+          <div className="modal-field">
+            <label className="modal-label" htmlFor="settings-config-source">Config Source</label>
             <select
-              id="project-config-source"
+              id="settings-config-source"
               className="form-input"
               value={configSource}
               onChange={e => setConfigSource(e.target.value)}
@@ -96,9 +103,9 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
           {configSource === 'db' && (
             <>
               <div className="modal-field">
-                <label className="modal-label" htmlFor="project-claude-md">CLAUDE.md</label>
+                <label className="modal-label" htmlFor="settings-claude-md">CLAUDE.md</label>
                 <textarea
-                  id="project-claude-md"
+                  id="settings-claude-md"
                   className="form-input"
                   style={{ fontFamily: 'monospace' }}
                   rows={8}
@@ -107,9 +114,9 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
                 />
               </div>
               <div className="modal-field">
-                <label className="modal-label" htmlFor="project-intent-md">INTENT.md</label>
+                <label className="modal-label" htmlFor="settings-intent-md">INTENT.md</label>
                 <textarea
-                  id="project-intent-md"
+                  id="settings-intent-md"
                   className="form-input"
                   style={{ fontFamily: 'monospace' }}
                   rows={8}
@@ -118,9 +125,9 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
                 />
               </div>
               <div className="modal-field">
-                <label className="modal-label" htmlFor="project-ratchet-yaml">ratchet.yaml</label>
+                <label className="modal-label" htmlFor="settings-ratchet-yaml">ratchet.yaml</label>
                 <textarea
-                  id="project-ratchet-yaml"
+                  id="settings-ratchet-yaml"
                   className="form-input"
                   style={{ fontFamily: 'monospace' }}
                   rows={8}
@@ -133,7 +140,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
           {error && <div className="error-state">{error}</div>}
           <div className="modal-field">
             <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Creating...' : 'Create Project'}
+              {submitting ? 'Saving...' : 'Save Settings'}
             </button>
           </div>
         </form>

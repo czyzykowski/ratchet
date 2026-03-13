@@ -6,6 +6,7 @@ import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 import { NewTaskModal } from '../components/NewTaskModal'
 import { CreateFeatureChat } from '../components/CreateFeatureChat'
+import { ProjectSettingsModal } from '../components/ProjectSettingsModal'
 import { STATUS_COLORS } from '../utils/statusColors'
 
 const STATUS_ORDER = [
@@ -67,6 +68,7 @@ export function ProjectPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [featureChatOpen, setFeatureChatOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   useSSE((event) => {
     if (
@@ -89,6 +91,9 @@ export function ProjectPage() {
       <header className="page-header">
         <h1>{data.project.name}</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
+            Settings
+          </button>
           <button className="btn btn-secondary" onClick={() => setFeatureChatOpen(true)}>
             Add Feature
           </button>
@@ -138,6 +143,13 @@ export function ProjectPage() {
           open={taskModalOpen}
           projectId={project_id}
           onClose={() => setTaskModalOpen(false)}
+        />
+      )}
+      {data && (
+        <ProjectSettingsModal
+          project={data.project}
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
       {project_id && featureChatOpen && (

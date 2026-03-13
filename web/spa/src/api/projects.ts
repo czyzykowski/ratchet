@@ -8,6 +8,10 @@ export interface Project {
   status: string
   created_at: string
   updated_at: string
+  config_source: string
+  claude_md: string | null
+  intent_md: string | null
+  ratchet_yaml: string | null
 }
 
 export interface Task {
@@ -20,6 +24,16 @@ export interface Task {
   updated_at: string
 }
 
+export interface UpdateProjectBody {
+  name: string
+  repo_url: string
+  local_path: string
+  config_source: string
+  claude_md?: string | null
+  intent_md?: string | null
+  ratchet_yaml?: string | null
+}
+
 export async function fetchProjects(): Promise<Project[]> {
   const data = await apiFetch<{ projects: Project[] }>('/api/projects')
   return data.projects
@@ -29,11 +43,29 @@ export async function fetchProject(id: string): Promise<{ project: Project; task
   return apiFetch(`/api/projects/${id}`)
 }
 
-export async function createProject(name: string, path: string): Promise<Project> {
+export async function createProject(
+  name: string,
+  path: string,
+  options?: {
+    config_source?: string
+    claude_md?: string | null
+    intent_md?: string | null
+    ratchet_yaml?: string | null
+  }
+): Promise<Project> {
   const data = await apiFetch<{ project: Project }>('/api/projects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, path }),
+    body: JSON.stringify({ name, path, ...options }),
+  })
+  return data.project
+}
+
+export async function updateProject(id: string, body: UpdateProjectBody): Promise<Project> {
+  const data = await apiFetch<{ project: Project }>(`/api/projects/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   })
   return data.project
 }

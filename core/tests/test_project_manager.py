@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
+from core import events as ev
 from core.project_manager import OnboardingError, ProjectManager, validate_repo
 from core.store import InMemoryStore
 
@@ -283,6 +286,99 @@ async def test_archive_project_returns_event(tmp_path):
 
     assert event.event_type == "project.archived"
     assert event.payload["project_id"] == str(project.id)
+
+
+# ---------------------------------------------------------------------------
+# update_project
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_project_appends_event(tmp_path):
+    """should append project.updated event with correct payload"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(name="original", repo_url=path, local_path=path)
+
+    await manager.update_project(
+        project.id, name="updated", repo_url="/new/url", local_path="/new/path",
+        config_source="db"
+    )
+
+    events = await store.get_events(project.id, "project")
+    update_events = [e for e in events if e.event_type == ev.PROJECT_UPDATED]
+    assert len(update_events) == 1
+    assert update_events[0].payload["name"] == "updated"
+    assert update_events[0].payload["repo_url"] == "/new/url"
+    assert update_events[0].payload["local_path"] == "/new/path"
+    assert update_events[0].payload["config_source"] == "db"
+
+
+@pytest.mark.asyncio
+async def test_update_project_dual_writes_to_registry(tmp_path):
+    """should append project.updated event to registry aggregate"""
+    from uuid import UUID
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(name="original", repo_url=path, local_path=path)
+
+    await manager.update_project(
+        project.id, name="updated", repo_url=path, local_path=path
+    )
+
+    registry_id = UUID("00000000-0000-0000-0000-000000000001")
+    registry_events = await store.get_events(registry_id, "projects")
+    update_events = [e for e in registry_events if e.event_type == ev.PROJECT_UPDATED]
+    assert len(update_events) == 1
+    assert update_events[0].payload["project_id"] == str(project.id)
+
+
+@pytest.mark.asyncio
+async def test_get_project_reflects_update(tmp_path):
+    """should return updated name after update_project"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(name="before", repo_url=path, local_path=path)
+
+    await manager.update_project(
+        project.id, name="after", repo_url=path, local_path=path
+    )
+
+    fetched = await manager.get_project(project.id)
+    assert fetched is not None
+    assert fetched.name == "after"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_reflects_update(tmp_path):
+    """should return updated name in list_projects after update"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(name="before", repo_url=path, local_path=path)
+
+    await manager.update_project(
+        project.id, name="after", repo_url=path, local_path=path
+    )
+
+    result = await manager.list_projects()
+    assert len(result) == 1
+    assert result[0].name == "after"
+
+
+@pytest.mark.asyncio
+async def test_update_project_raises_for_unknown_id():
+    """should raise ValueError when project_id not found"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+
+    with pytest.raises(ValueError, match="project not found"):
+        await manager.update_project(
+            uuid4(), name="x", repo_url="/x", local_path="/x"
+        )
 
 
 @pytest.mark.asyncio

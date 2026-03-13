@@ -162,3 +162,107 @@ def test_should_return_400_when_project_creation_fails(
     assert response.status_code == 400
     data = response.json()
     assert "detail" in data
+
+
+def test_should_update_project_and_return_200(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "Original"))
+
+    response = client.patch(
+        f"/api/projects/{project_id}",
+        json={
+            "name": "Updated",
+            "repo_url": "/tmp/updated",
+            "local_path": "/tmp/updated",
+            "config_source": "disk",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["project"]["name"] == "Updated"
+    assert data["project"]["repo_url"] == "/tmp/updated"
+
+
+def test_should_return_404_on_patch_when_project_not_found(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    response = client.patch(
+        f"/api/projects/{uuid4()}",
+        json={
+            "name": "X",
+            "repo_url": "/x",
+            "local_path": "/x",
+            "config_source": "disk",
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_should_update_project_config_when_config_source_is_db(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "DB Project"))
+
+    response = client.patch(
+        f"/api/projects/{project_id}",
+        json={
+            "name": "DB Project",
+            "repo_url": "/tmp/db",
+            "local_path": "/tmp/db",
+            "config_source": "db",
+            "claude_md": "# Claude",
+            "intent_md": "# Intent",
+            "ratchet_yaml": "steps: []",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["project"]["config_source"] == "db"
+    assert data["project"]["claude_md"] == "# Claude"
+    assert data["project"]["intent_md"] == "# Intent"
+    assert data["project"]["ratchet_yaml"] == "steps: []"
+
+
+def test_should_create_project_with_config_source_db_and_file_contents(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    with patch(
+        "web.routes.api.projects.ProjectManager.register_project",
+        new_callable=AsyncMock,
+    ) as mock_register:
+        project_id = uuid4()
+        now = datetime.now(UTC)
+        mock_register.return_value = Project(
+            id=project_id,
+            name="DB Project",
+            repo_url="/tmp/db",
+            local_path="/tmp/db",
+            status="active",
+            config_source="db",
+            created_at=now,
+            updated_at=now,
+        )
+        # Seed in store so get_project works after update_project_config
+        asyncio.get_event_loop().run_until_complete(
+            _seed_project(store, project_id, "DB Project")
+        )
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "DB Project",
+                "path": "/tmp/db",
+                "config_source": "db",
+                "claude_md": "# Claude",
+                "intent_md": "# Intent",
+                "ratchet_yaml": "steps: []",
+            },
+        )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["project"]["claude_md"] == "# Claude"
+    assert data["project"]["intent_md"] == "# Intent"
+    assert data["project"]["ratchet_yaml"] == "steps: []"

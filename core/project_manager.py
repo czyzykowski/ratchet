@@ -91,6 +91,50 @@ class ProjectManager:
             updated_at=event.occurred_at,
         )
 
+    async def update_project(
+        self,
+        project_id: UUID,
+        name: str,
+        repo_url: str,
+        local_path: str,
+        config_source: str = "disk",
+    ) -> Project:
+        """Update scalar fields of an existing project.
+
+        Raises ValueError if project not found.
+        Appends PROJECT_UPDATED event (dual-written to registry).
+        Returns updated Project.
+        """
+        existing = await self.get_project(project_id)
+        if existing is None:
+            raise ValueError("project not found")
+        payload = {
+            "project_id": str(project_id),
+            "name": name,
+            "repo_url": repo_url,
+            "local_path": local_path,
+            "config_source": config_source,
+        }
+        event = await self._store.append_event(
+            aggregate_id=project_id,
+            aggregate_type="project",
+            event_type=ev.PROJECT_UPDATED,
+            payload=payload,
+        )
+        await self._store.append_event(
+            aggregate_id=_PROJECTS_REGISTRY_ID,
+            aggregate_type="projects",
+            event_type=ev.PROJECT_UPDATED,
+            payload=payload,
+        )
+        return existing.model_copy(update={
+            "name": name,
+            "repo_url": repo_url,
+            "local_path": local_path,
+            "config_source": config_source,
+            "updated_at": event.occurred_at,
+        })
+
     async def update_project_config(
         self,
         project_id: UUID,
@@ -141,6 +185,15 @@ class ProjectManager:
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
+            elif event.event_type == ev.PROJECT_UPDATED and project is not None:
+                p = event.payload
+                project = project.model_copy(update={
+                    "name": p["name"],
+                    "repo_url": p["repo_url"],
+                    "local_path": p["local_path"],
+                    "config_source": p.get("config_source", "disk"),
+                    "updated_at": event.occurred_at,
+                })
             elif event.event_type == ev.PROJECT_CONFIG_UPDATED and project is not None:
                 p = event.payload
                 project = project.model_copy(update={
@@ -175,6 +228,17 @@ class ProjectManager:
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
+            elif event.event_type == ev.PROJECT_UPDATED:
+                project_id = UUID(event.payload["project_id"])
+                if project_id in projects:
+                    p = event.payload
+                    projects[project_id] = projects[project_id].model_copy(update={
+                        "name": p["name"],
+                        "repo_url": p["repo_url"],
+                        "local_path": p["local_path"],
+                        "config_source": p.get("config_source", "disk"),
+                        "updated_at": event.occurred_at,
+                    })
             elif event.event_type == ev.PROJECT_CONFIG_UPDATED:
                 project_id = UUID(event.payload["project_id"])
                 if project_id in projects:

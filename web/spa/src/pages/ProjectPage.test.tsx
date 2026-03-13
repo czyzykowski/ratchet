@@ -10,7 +10,13 @@ vi.mock('../api/projects', () => ({
   fetchProjects: vi.fn(),
   createProject: vi.fn(),
   fetchProject: vi.fn(),
+  updateProject: vi.fn(),
   createTask: vi.fn(),
+}))
+
+vi.mock('../components/ProjectSettingsModal', () => ({
+  ProjectSettingsModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="project-settings-modal">Settings Modal</div> : null,
 }))
 
 vi.mock('../hooks/useSSE', () => ({
@@ -51,6 +57,10 @@ const mockData = {
     status: 'active',
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-02T00:00:00Z',
+    config_source: 'disk',
+    claude_md: null,
+    intent_md: null,
+    ratchet_yaml: null,
   },
   tasks: [
     {
@@ -104,5 +114,13 @@ describe('ProjectPage', () => {
     vi.mocked(projectsApi.fetchProject).mockReturnValue(new Promise(() => {}))
     renderWithProviders(<ProjectPage />, `/projects/${projectId}`)
     expect(screen.getByText(/loading project/i)).toBeInTheDocument()
+  })
+
+  it('should render Settings button and open ProjectSettingsModal on click', async () => {
+    renderWithProviders(<ProjectPage />, `/projects/${projectId}`)
+    await screen.findByText('Test Project')
+    expect(screen.queryByTestId('project-settings-modal')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /settings/i }))
+    expect(screen.getByTestId('project-settings-modal')).toBeInTheDocument()
   })
 })

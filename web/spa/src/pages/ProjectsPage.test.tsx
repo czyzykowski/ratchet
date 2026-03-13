@@ -10,6 +10,7 @@ vi.mock('../api/projects', () => ({
   fetchProjects: vi.fn(),
   createProject: vi.fn(),
   fetchProject: vi.fn(),
+  updateProject: vi.fn(),
   createTask: vi.fn(),
 }))
 
@@ -34,6 +35,10 @@ const mockProject = {
   status: 'active',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-02T00:00:00Z',
+  config_source: 'disk',
+  claude_md: null,
+  intent_md: null,
+  ratchet_yaml: null,
 }
 
 describe('ProjectsPage', () => {

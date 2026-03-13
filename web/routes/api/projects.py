@@ -1,4 +1,4 @@
-"""API: project endpoints — GET /api/projects, GET /api/projects/{id}, POST /api/projects."""
+"""API: project endpoints — list, get, create, and update projects."""
 
 from __future__ import annotations
 
@@ -18,6 +18,20 @@ router = APIRouter()
 class CreateProjectBody(BaseModel):
     name: str
     path: str
+    config_source: str = "disk"
+    claude_md: str | None = None
+    intent_md: str | None = None
+    ratchet_yaml: str | None = None
+
+
+class UpdateProjectBody(BaseModel):
+    name: str
+    repo_url: str
+    local_path: str
+    config_source: str = "disk"
+    claude_md: str | None = None
+    intent_md: str | None = None
+    ratchet_yaml: str | None = None
 
 
 @router.get("/projects")
@@ -65,8 +79,46 @@ async def create_project(body: CreateProjectBody, request: Request) -> JSONRespo
     pm = ProjectManager(store)
     try:
         project = await pm.register_project(
-            name=body.name, repo_url=body.path, local_path=body.path
+            name=body.name,
+            repo_url=body.path,
+            local_path=body.path,
+            config_source=body.config_source,
         )
     except OnboardingError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if body.config_source == "db" and any(
+        f is not None for f in (body.claude_md, body.intent_md, body.ratchet_yaml)
+    ):
+        await pm.update_project_config(
+            project.id, body.claude_md, body.intent_md, body.ratchet_yaml
+        )
+        refreshed = await pm.get_project(project.id)
+        if refreshed is not None:
+            project = refreshed
     return JSONResponse({"project": project.model_dump(mode="json")}, status_code=201)
+
+
+@router.patch("/projects/{project_id}")
+async def update_project(
+    project_id: UUID, body: UpdateProjectBody, request: Request
+) -> JSONResponse:
+    store = request.app.state.store
+    pm = ProjectManager(store)
+    existing = await pm.get_project(project_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    await pm.update_project(
+        project_id,
+        name=body.name,
+        repo_url=body.repo_url,
+        local_path=body.local_path,
+        config_source=body.config_source,
+    )
+    if body.config_source == "db":
+        await pm.update_project_config(
+            project_id, body.claude_md, body.intent_md, body.ratchet_yaml
+        )
+    updated = await pm.get_project(project_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    return JSONResponse({"project": updated.model_dump(mode="json")})
