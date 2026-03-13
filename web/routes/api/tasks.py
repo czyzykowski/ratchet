@@ -97,6 +97,15 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
     ):
         baseline_qa_failure = failure_output
 
+    # Deployment info
+    pr_info: dict[str, Any] | None = None
+    deploy_hooks: list[dict[str, Any]] | None = None
+    for event in task_events:
+        if event.event_type == ev.TASK_PR_CREATED:
+            pr_info = event.payload
+        elif event.event_type == ev.TASK_DEPLOY_HOOKS_RUN:
+            deploy_hooks = event.payload.get("steps")
+
     # Project name
     pm = ProjectManager(store)
     project = await pm.get_project(task.project_id)
@@ -111,6 +120,8 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
             "dependencies": task_dict.get("depends_on", []),
             "qa_failure": qa_failure,
             "baseline_qa_failure": baseline_qa_failure,
+            "pr_info": pr_info,
+            "deploy_hooks": deploy_hooks,
         }
     )
 

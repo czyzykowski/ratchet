@@ -135,6 +135,7 @@ export function ProjectPage() {
         )
       })}
       <TaskDetailModal
+        key={selectedTaskId ?? ''}
         taskId={selectedTaskId}
         onClose={() => setSelectedTaskId(null)}
       />

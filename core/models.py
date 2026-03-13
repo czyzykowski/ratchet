@@ -96,8 +96,11 @@ class ChatSession(BaseModel):
 
 
 class ReviewScope(BaseModel):
-    project_ids: list[UUID]
-    include_global: bool = False
+    project_ids: list[UUID] = []
+    include_global: bool
+
+
+SuggestionTarget = Literal["project_claude_md", "global_claude_md", "ratchet_yaml"]
 
 
 class ReviewRun(BaseModel):
@@ -124,16 +127,16 @@ class Suggestion(BaseModel):
     id: UUID
     review_run_id: UUID
     order: int
-    target: str
+    target: SuggestionTarget
     target_path: str
     title: str
     reasoning: str
     evidence: SuggestionEvidence
-    confidence: str
-    priority: str
+    confidence: Literal["low", "medium", "high"]
+    priority: Literal["low", "medium", "high"]
     current_content_excerpt: str
     suggested_diff: str
-    status: str = "pending"
+    status: Literal["pending", "applied", "dismissed", "skipped"] = "pending"
 
 
 @dataclass
