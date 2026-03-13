@@ -177,3 +177,13 @@ git log --oneline -3
 ```
 
 Every spec execution must end with a commit if all tasks succeeded.
+
+## Merge Convention
+
+**CRITICAL: After every merge to develop, push to remote immediately:**
+
+```bash
+git push origin develop
+```
+
+Never leave merged changes unpushed.
