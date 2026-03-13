@@ -11,6 +11,7 @@ interface CreateSpecChatProps {
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  imageId?: string
 }
 
 export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatProps) {
@@ -24,8 +25,12 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
   const [saveError, setSaveError] = useState<string | null>(null)
   const [chatError, setChatError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [pendingImageId, setPendingImageId] = useState<string | null>(null)
+  const [pendingThumbnailUrl, setPendingThumbnailUrl] = useState<string | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -39,7 +44,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
         if (history.length > 0) {
           const restored: Message[] = []
           for (const entry of history) {
-            restored.push({ role: 'user', content: entry.content })
+            restored.push({ role: 'user', content: entry.content, imageId: entry.image_id ?? undefined })
             restored.push({ role: 'assistant', content: entry.assistant })
           }
           setMessages(restored)
@@ -50,7 +55,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
     }
   }, [])
 
-  async function createSession(): Promise<{ sid: string; history: Array<{ content: string; assistant: string }> }> {
+  async function createSession(): Promise<{ sid: string; history: Array<{ content: string; assistant: string; image_id?: string | null }> }> {
     const res = await fetch('/api/spec-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -59,26 +64,99 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
     const data = await res.json()
     const sid: string = data.session_id
     setSessionId(sid)
-    const history: Array<{ content: string; assistant: string }> = (data.messages ?? []).map(
-      (m: { content: string; assistant: string }) => ({ content: m.content, assistant: m.assistant })
+    const history: Array<{ content: string; assistant: string; image_id?: string | null }> = (data.messages ?? []).map(
+      (m: { content: string; assistant: string; image_id?: string | null }) => ({
+        content: m.content,
+        assistant: m.assistant,
+        image_id: m.image_id,
+      })
     )
     return { sid, history }
   }
 
-  async function sendMessage(userInput: string, sid?: string) {
+  async function uploadImage(file: File): Promise<string | null> {
+    setUploadError(null)
+    const form = new FormData()
+    form.append('file', file)
+    try {
+      const res = await fetch('/api/chat-images', { method: 'POST', body: form })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setUploadError(body.detail ?? `Upload failed: ${res.status}`)
+        return null
+      }
+      const data = await res.json()
+      return data.image_id as string
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
+      return null
+    }
+  }
+
+  async function handleFileSelect(file: File) {
+    const url = URL.createObjectURL(file)
+    setPendingThumbnailUrl(url)
+    const id = await uploadImage(file)
+    if (id) {
+      setPendingImageId(id)
+    } else {
+      setPendingThumbnailUrl(null)
+    }
+  }
+
+  function handleAttachClick() {
+    fileInputRef.current?.click()
+  }
+
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) handleFileSelect(file)
+    e.target.value = ''
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault()
+          handleFileSelect(file)
+        }
+        break
+      }
+    }
+  }
+
+  function clearPendingImage() {
+    if (pendingThumbnailUrl) URL.revokeObjectURL(pendingThumbnailUrl)
+    setPendingImageId(null)
+    setPendingThumbnailUrl(null)
+    setUploadError(null)
+  }
+
+  async function sendMessage(userInput: string, sid?: string, imageId?: string | null) {
     const activeSessionId = sid ?? sessionId
     if (!activeSessionId) return
+
+    const sentImageId = imageId !== undefined ? imageId : pendingImageId
+    const sentThumbnailUrl = pendingThumbnailUrl
 
     setStreaming(true)
     setChatError(null)
     setCurrentStream('')
-    setMessages(prev => [...prev, { role: 'user', content: userInput }])
+    setMessages(prev => [...prev, { role: 'user', content: userInput, imageId: sentImageId ?? undefined }])
+    clearPendingImage()
 
     try {
+      const body: Record<string, unknown> = { user_input: userInput }
+      if (sentImageId) body.image_id = sentImageId
+
       const res = await fetch(`/api/spec-sessions/${activeSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_input: userInput }),
+        body: JSON.stringify(body),
       })
 
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -115,6 +193,7 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
       setCurrentStream('')
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Unknown error')
+      if (sentThumbnailUrl) URL.revokeObjectURL(sentThumbnailUrl)
     } finally {
       setStreaming(false)
       setTimeout(() => inputRef.current?.focus(), 50)
@@ -175,6 +254,13 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
           <div key={i} className={`chat-message chat-message-${msg.role}`}>
             <div className="chat-role">{msg.role === 'user' ? 'You' : 'Claude'}</div>
             <div className="chat-content">
+              {msg.imageId && (
+                <img
+                  src={`/api/chat-images/${msg.imageId}`}
+                  alt="attached"
+                  className="chat-inline-image"
+                />
+              )}
               {msg.role === 'assistant' ? <Markdown content={msg.content} /> : msg.content}
             </div>
           </div>
@@ -217,24 +303,53 @@ export function CreateSpecChat({ taskId, taskTitle, onClose }: CreateSpecChatPro
       )}
 
       {!detectedSpec && (
-        <div className="chat-input-row">
-          <textarea
-            ref={inputRef}
-            className="chat-input"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={streaming ? 'Claude is responding...' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
-            disabled={streaming}
-            rows={3}
-          />
-          <button
-            className="btn btn-primary chat-send-btn"
-            onClick={handleSend}
-            disabled={streaming || !input.trim()}
-          >
-            Send
-          </button>
+        <div className="chat-input-area">
+          {(pendingThumbnailUrl || uploadError) && (
+            <div className="chat-image-preview-row">
+              {pendingThumbnailUrl && (
+                <div className="chat-image-preview">
+                  <img src={pendingThumbnailUrl} alt="pending attachment" />
+                  <button className="chat-image-remove" onClick={clearPendingImage} title="Remove image">&#215;</button>
+                </div>
+              )}
+              {uploadError && <span className="chat-upload-error">{uploadError}</span>}
+            </div>
+          )}
+          <div className="chat-input-row">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleFileInputChange}
+            />
+            <button
+              className="btn btn-secondary chat-attachment-btn"
+              onClick={handleAttachClick}
+              disabled={streaming}
+              title="Attach image"
+            >
+              &#128206;
+            </button>
+            <textarea
+              ref={inputRef}
+              className="chat-input"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder={streaming ? 'Claude is responding...' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
+              disabled={streaming}
+              rows={3}
+            />
+            <button
+              className="btn btn-primary chat-send-btn"
+              onClick={handleSend}
+              disabled={streaming || !input.trim()}
+            >
+              Send
+            </button>
+          </div>
         </div>
       )}
     </div>

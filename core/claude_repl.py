@@ -3,19 +3,48 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
-def make_user_msg(text: str, session_id: str) -> dict[str, Any]:
+def get_chat_images_dir() -> Path:
+    """Return path to chat-images directory, creating it if needed."""
+    xdg_data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    d = Path(xdg_data_home) / "ratchet" / "chat-images"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def make_user_msg(
+    text: str,
+    session_id: str,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
+) -> dict[str, Any]:
+    if image_b64 and image_media_type:
+        content: str | list[dict[str, Any]] = [
+            {"type": "text", "text": text},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image_media_type,
+                    "data": image_b64,
+                },
+            },
+        ]
+    else:
+        content = text
     return {
         "type": "user",
         "message": {
             "role": "user",
-            "content": text,
+            "content": content,
         },
         "session_id": session_id,
         "parent_tool_use_id": None,
@@ -35,12 +64,20 @@ def make_assistant_msg(text: str, session_id: str) -> dict[str, Any]:
     }
 
 
+def _load_image_b64(image_id: str) -> str | None:
+    """Load image bytes from disk and return as base64 string, or None if not found."""
+    img_path = get_chat_images_dir() / image_id
+    if not img_path.exists():
+        return None
+    return base64.b64encode(img_path.read_bytes()).decode()
+
+
 @dataclass
 class SpecReplSession:
     task_id: str
     system_prompt: str
     cwd: str
-    history: list[tuple[str, str]] = field(default_factory=list)
+    history: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
     session_id: str = "default"
 
     def __post_init__(self) -> None:
@@ -81,12 +118,15 @@ class SpecReplSession:
         await self._proc.stdin.drain()
 
     async def _replay_history(self) -> None:
-        for user_text, assistant_text in self.history:
+        for user_text, assistant_text, image_id, image_media_type in self.history:
             if not assistant_text:
                 continue  # skip incomplete exchanges — empty assistant messages crash subprocess
             if "[Request interrupted by user]" in user_text:
                 continue  # skip interrupted markers — cause error_during_execution on replay
-            await self._send(make_user_msg(user_text, "default"))
+            image_b64: str | None = None
+            if image_id and image_media_type:
+                image_b64 = _load_image_b64(image_id)
+            await self._send(make_user_msg(user_text, "default", image_b64, image_media_type))
             await self._send(make_assistant_msg(assistant_text, "default"))
 
     async def ensure_alive(self) -> None:
@@ -104,12 +144,21 @@ class SpecReplSession:
         if sid and sid != "default":
             self.session_id = str(sid)
 
-    async def ask(self, user_input: str) -> AsyncGenerator[str, None]:
+    async def ask(
+        self,
+        user_input: str,
+        image_id: str | None = None,
+        image_media_type: str | None = None,
+    ) -> AsyncGenerator[str, None]:
         await self.ensure_alive()
         assert self._proc is not None
         assert self._proc.stdout is not None
 
-        await self._send(make_user_msg(user_input, self.session_id))
+        image_b64: str | None = None
+        if image_id and image_media_type:
+            image_b64 = _load_image_b64(image_id)
+
+        await self._send(make_user_msg(user_input, self.session_id, image_b64, image_media_type))
 
         assistant_text = ""
         saw_tool_use = False
@@ -159,7 +208,7 @@ class SpecReplSession:
                 break
 
         if assistant_text:
-            self.history.append((user_input, assistant_text))
+            self.history.append((user_input, assistant_text, image_id, image_media_type))
 
     async def close(self) -> None:
         if self._proc is not None:

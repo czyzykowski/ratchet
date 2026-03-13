@@ -19,6 +19,7 @@ from core.store import PostgresStore, Store
 from web.routes import blocked as blocked_router
 from web.routes import board as board_router
 from web.routes import worker as worker_router
+from web.routes.api import chat_images as chat_images_router
 from web.routes.api import events as api_events_router
 from web.routes.api import feature_sessions as feature_sessions_router
 from web.routes.api import spec_sessions as spec_sessions_router
@@ -103,6 +104,7 @@ app.include_router(api_router)
 app.include_router(api_events_router.router)
 app.include_router(spec_sessions_router.router, prefix="/api")
 app.include_router(feature_sessions_router.router, prefix="/api")
+app.include_router(chat_images_router.router, prefix="/api")
 
 
 _SPA_DIST = os.path.join(os.path.dirname(__file__), "spa", "dist")

@@ -16,9 +16,22 @@ from pydantic import BaseModel
 from core import events as ev
 from core.claude_repl import SpecReplSession
 from core.project_manager import ProjectManager
-from web.queries import get_chat_session_by_context
+from web.queries import get_chat_session_by_context, get_chat_session_by_id
+from web.routes.api.chat_images import get_image_media_type
 
 router = APIRouter(prefix="/feature-sessions")
+
+_INTERRUPTED = "[Request interrupted by user]"
+
+
+def _clean_history(
+    messages: list[tuple[str, str, str | None, str | None]],
+) -> list[tuple[str, str, str | None, str | None]]:
+    return [
+        (u, a, img, mt)
+        for u, a, img, mt in messages
+        if a and _INTERRUPTED not in u
+    ]
 
 
 def _build_feature_system_prompt(intent_md: str) -> str:
@@ -95,6 +108,7 @@ class CreateSessionBody(BaseModel):
 
 class MessageBody(BaseModel):
     user_input: str
+    image_id: UUID | None = None
 
 
 @router.post("")
@@ -125,12 +139,12 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
                 task_id=str(body.project_id),
                 system_prompt=system_prompt,
                 cwd=local_path,
-                history=list(existing.messages),
+                history=_clean_history(list(existing.messages)),
             )
             request.app.state.feature_sessions[session_id] = session
         messages = [
-            {"role": "user", "content": u, "assistant": a}
-            for u, a in existing.messages
+            {"role": "user", "content": u, "assistant": a, "image_id": img}
+            for u, a, img, _mt in existing.messages
         ]
         return JSONResponse({"session_id": session_id, "messages": messages})
 
@@ -169,19 +183,54 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     return JSONResponse({"session_id": session_id, "messages": []})
 
 
+async def _recover_session(session_id: str, request: Request) -> SpecReplSession | None:
+    """Re-create a feature session from DB if it was lost due to server restart."""
+    pool = request.app.state.pool
+    store = request.app.state.store
+    existing = await get_chat_session_by_id(pool, UUID(session_id))
+    if existing is None:
+        return None
+    project_id = existing.context_id
+    pm = ProjectManager(store)
+    project = await pm.get_project(project_id)
+    if project is None:
+        return None
+    local_path = str(project.local_path)
+    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+    if not intent_md_path.exists():
+        return None
+    intent_md = intent_md_path.read_text()
+    system_prompt = _build_feature_system_prompt(intent_md)
+    session = SpecReplSession(
+        task_id=str(project_id),
+        system_prompt=system_prompt,
+        cwd=local_path,
+        history=_clean_history(list(existing.messages)),
+    )
+    request.app.state.feature_sessions[session_id] = session
+    return session
+
+
 @router.post("/{session_id}/message")
 async def send_message(
     session_id: str, body: MessageBody, request: Request
 ) -> StreamingResponse:
     session: SpecReplSession | None = request.app.state.feature_sessions.get(session_id)
     if session is None:
+        session = await _recover_session(session_id, request)
+    if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     store = request.app.state.store
 
+    image_id_str: str | None = str(body.image_id) if body.image_id else None
+    image_media_type: str | None = None
+    if image_id_str:
+        image_media_type = get_image_media_type(image_id_str)
+
     async def _stream() -> AsyncGenerator[str, None]:
         full_text = ""
-        async for chunk in session.ask(body.user_input):
+        async for chunk in session.ask(body.user_input, image_id_str, image_media_type):
             full_text += chunk
             yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
 
@@ -194,6 +243,8 @@ async def send_message(
             payload={
                 "user_input": body.user_input,
                 "assistant_text": full_text,
+                "image_id": image_id_str,
+                "image_media_type": image_media_type,
             },
         )
 

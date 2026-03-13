@@ -91,7 +91,7 @@ class ChatSession(BaseModel):
     context_id: UUID
     context_type: Literal["task", "feature"]
     created_at: datetime
-    messages: list[tuple[str, str]]
+    messages: list[tuple[str, str, str | None, str | None]]
 
 
 @dataclass

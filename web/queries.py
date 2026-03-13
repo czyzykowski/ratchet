@@ -234,7 +234,13 @@ async def get_chat_session_by_context(
             rows = await cur.fetchall()
 
     messages = [
-        (r[0]["user_input"], r[0]["assistant_text"]) for r in rows
+        (
+            r[0]["user_input"],
+            r[0]["assistant_text"],
+            r[0].get("image_id"),
+            r[0].get("image_media_type"),
+        )
+        for r in rows
     ]
     return ChatSession(
         id=session_id,
@@ -278,7 +284,13 @@ async def get_chat_session_by_id(
             rows = await cur.fetchall()
 
     messages = [
-        (r[0]["user_input"], r[0]["assistant_text"]) for r in rows
+        (
+            r[0]["user_input"],
+            r[0]["assistant_text"],
+            r[0].get("image_id"),
+            r[0].get("image_media_type"),
+        )
+        for r in rows
     ]
     return ChatSession(
         id=session_id,
