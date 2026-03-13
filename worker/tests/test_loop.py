@@ -159,11 +159,9 @@ async def test_run_once_skips_when_baseline_qa_fails() -> None:
     invoker.invoke.assert_not_called()
 
     # Task status must still be ready_for_implementation
-    task_events = await store.get_events(task_id, "task")
-    from worker.runner import _build_task_from_events
-    task = _build_task_from_events(task_id, project.id, task_events)
-    assert task is not None
-    assert task.status == ev.READY_FOR_IMPLEMENTATION
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.READY_FOR_IMPLEMENTATION
 
 
 # ---------------------------------------------------------------------------
