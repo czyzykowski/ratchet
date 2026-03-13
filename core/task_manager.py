@@ -108,12 +108,13 @@ class TaskManager:
                     required_capabilities=p.get("required_capabilities", []),
                 )
             elif event.event_type == ev.TASK_STATUS_CHANGED and task is not None:
-                task = task.model_copy(
-                    update={
-                        "status": event.payload["to_status"],
-                        "updated_at": event.occurred_at,
-                    }
-                )
+                update: dict[str, object] = {
+                    "status": event.payload["to_status"],
+                    "updated_at": event.occurred_at,
+                }
+                if event.payload.get("to_status") == ev.DEPLOYED:
+                    update["merge_commit_sha"] = event.payload.get("merge_commit_sha")
+                task = task.model_copy(update=update)
             elif event.event_type == ev.TASK_SPEC_ASSIGNED and task is not None:
                 spec_id_str = event.payload.get("spec_id")
                 current_spec_id = UUID(spec_id_str) if spec_id_str else None

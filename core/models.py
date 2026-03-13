@@ -44,6 +44,7 @@ class Task(BaseModel):
     updated_at: datetime
     depends_on: list[str] = []
     required_capabilities: list[str] = []
+    merge_commit_sha: str | None = None
 
 
 class Spec(BaseModel):
