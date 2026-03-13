@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -342,33 +343,44 @@ async def deploy_task(
         return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
     if not body.skip_merge:
+        import uuid as _uuid_mod
+
         local_path = str(project.local_path)
         title = task.title
         target_branch = "develop"
 
+        # Use a temporary worktree so the main working directory is never switched.
+        merge_worktree = os.path.join(
+            local_path, ".worktrees", f"deploy-{_uuid_mod.uuid4()}"
+        )
         try:
             subprocess.run(
-                ["git", "checkout", target_branch],
+                ["git", "worktree", "add", merge_worktree, target_branch],
                 cwd=local_path,
                 check=True,
                 capture_output=True,
             )
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or b"").decode().strip()
+            raise HTTPException(status_code=400, detail=stderr or "git worktree add failed")
+
+        try:
             subprocess.run(
                 ["git", "merge", "--squash", branch_name],
-                cwd=local_path,
+                cwd=merge_worktree,
                 check=True,
                 capture_output=True,
             )
             has_staged = subprocess.run(
                 ["git", "diff", "--cached", "--quiet"],
-                cwd=local_path,
+                cwd=merge_worktree,
                 capture_output=True,
             ).returncode != 0
             if has_staged:
                 commit_msg = f"feat: {title} (task/{task_id})"
                 subprocess.run(
                     ["git", "commit", "-m", commit_msg],
-                    cwd=local_path,
+                    cwd=merge_worktree,
                     check=True,
                     capture_output=True,
                 )
@@ -386,6 +398,12 @@ async def deploy_task(
             stdout = (exc.stdout or b"").decode().strip()
             detail = stderr or stdout or f"git command failed with exit code {exc.returncode}"
             raise HTTPException(status_code=400, detail=detail)
+        finally:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", merge_worktree],
+                cwd=local_path,
+                capture_output=True,
+            )
 
     if not body.skip_merge:
         from core.qa_runner import load_deploy_config, run_deploy_steps

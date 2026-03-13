@@ -7,7 +7,7 @@ import asyncio
 import os
 import subprocess
 import sys
-from uuid import UUID
+from uuid import UUID, uuid4 as _uuid4
 
 
 def parse_args() -> argparse.Namespace:
@@ -112,118 +112,139 @@ async def main() -> None:
             local_path = project.local_path
             target_branch = args.branch
 
+            # Use a temporary worktree for the merge so the main working directory
+            # is never switched away from whatever branch it is on.
+            merge_worktree = os.path.join(
+                local_path, ".worktrees", f"deploy-{_uuid4()}"
+            )
             try:
                 subprocess.run(
-                    ["git", "checkout", target_branch],
+                    ["git", "worktree", "add", merge_worktree, target_branch],
                     cwd=local_path,
                     check=True,
                     capture_output=True,
                 )
             except subprocess.CalledProcessError as exc:
-                print(f"Error: git checkout failed: {exc.stderr.decode()}", file=sys.stderr)
+                print(
+                    f"Error: git worktree add failed: {exc.stderr.decode()}",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
             try:
-                subprocess.run(
-                    ["git", "merge", "--squash", branch_name],
-                    cwd=local_path,
-                    check=True,
-                    capture_output=True,
-                )
-            except subprocess.CalledProcessError as merge_exc:
-                merge_output = merge_exc.stderr.decode()
-                print(
-                    "Merge conflict detected, attempting Claude-assisted resolution...",
-                    file=sys.stderr,
-                )
-
-                # Get list of conflicted files
-                conflict_result = subprocess.run(
-                    ["git", "diff", "--name-only", "--diff-filter=U"],
-                    cwd=local_path,
-                    capture_output=True,
-                    text=True,
-                )
-                conflicted_files = [
-                    f for f in conflict_result.stdout.strip().splitlines() if f
-                ]
-
-                # Fetch spec content
-                from uuid import uuid4
-
-                from core.context_assembler import (
-                    ExecutionContext,
-                    build_conflict_resolution_prompt,
-                    read_intent,
-                )
-                from core.invoker import ClaudeCodeInvoker
-
-                spec_content = ""
-                if spec_id is not None:
-                    spec_events = await store.get_events(spec_id, "spec")
-                    for spec_event in spec_events:
-                        if spec_event.event_type == ev.SPEC_CREATED:
-                            spec_content = spec_event.payload.get("content", "")
-                            break
-
-                intent_content = read_intent(local_path)
-                prompt = build_conflict_resolution_prompt(
-                    intent_content=intent_content,
-                    spec_content=spec_content,
-                    conflicted_files=conflicted_files,
-                    merge_output=merge_output,
-                )
-
-                resolution_execution_id = uuid4()
-                context = ExecutionContext(
-                    execution_id=resolution_execution_id,
-                    task_id=task_id,
-                    spec_id=spec_id or task_id,
-                    worktree_path=local_path,
-                    prompt=prompt,
-                )
-                result = ClaudeCodeInvoker().invoke(context)
-
-                if result.status == "completed":
-                    print("Conflict resolution succeeded, continuing deployment.", file=sys.stderr)
-                else:
-                    subprocess.run(
-                        ["git", "merge", "--abort"],
-                        cwd=local_path,
-                        capture_output=True,
-                    )
-                    failure_reason = (
-                        f"Merge conflict: {merge_output}\n"
-                        f"Conflict resolution failed: {result.failure_reason}"
-                    )
-                    print(f"Error: {failure_reason}", file=sys.stderr)
-                    try:
-                        await state_machine.transition(
-                            task_id,
-                            ev.BLOCKED,
-                            extra_payload={"failure_reason": failure_reason},
-                        )
-                    except InvalidTransitionError as exc:
-                        print(f"Error transitioning to blocked: {exc}", file=sys.stderr)
-                    sys.exit(1)
-
-            has_staged = subprocess.run(
-                ["git", "diff", "--cached", "--quiet"],
-                cwd=local_path,
-                capture_output=True,
-            ).returncode != 0
-            if has_staged:
-                commit_msg = f"feat: {title} (task/{task_id})"
                 try:
                     subprocess.run(
-                        ["git", "commit", "-m", commit_msg],
-                        cwd=local_path,
+                        ["git", "merge", "--squash", branch_name],
+                        cwd=merge_worktree,
                         check=True,
                         capture_output=True,
                     )
-                except subprocess.CalledProcessError as exc:
-                    print(f"Error: git commit failed: {exc.stderr.decode()}", file=sys.stderr)
-                    sys.exit(1)
+                except subprocess.CalledProcessError as merge_exc:
+                    merge_output = merge_exc.stderr.decode()
+                    print(
+                        "Merge conflict detected, attempting Claude-assisted resolution...",
+                        file=sys.stderr,
+                    )
+
+                    # Get list of conflicted files
+                    conflict_result = subprocess.run(
+                        ["git", "diff", "--name-only", "--diff-filter=U"],
+                        cwd=merge_worktree,
+                        capture_output=True,
+                        text=True,
+                    )
+                    conflicted_files = [
+                        f for f in conflict_result.stdout.strip().splitlines() if f
+                    ]
+
+                    from core.context_assembler import (
+                        ExecutionContext,
+                        build_conflict_resolution_prompt,
+                        read_intent,
+                    )
+                    from core.invoker import ClaudeCodeInvoker
+
+                    spec_content = ""
+                    if spec_id is not None:
+                        spec_events = await store.get_events(spec_id, "spec")
+                        for spec_event in spec_events:
+                            if spec_event.event_type == ev.SPEC_CREATED:
+                                spec_content = spec_event.payload.get("content", "")
+                                break
+
+                    intent_content = read_intent(local_path)
+                    prompt = build_conflict_resolution_prompt(
+                        intent_content=intent_content,
+                        spec_content=spec_content,
+                        conflicted_files=conflicted_files,
+                        merge_output=merge_output,
+                    )
+
+                    resolution_execution_id = _uuid4()
+                    context = ExecutionContext(
+                        execution_id=resolution_execution_id,
+                        task_id=task_id,
+                        spec_id=spec_id or task_id,
+                        worktree_path=merge_worktree,
+                        prompt=prompt,
+                    )
+                    result = ClaudeCodeInvoker().invoke(context)
+
+                    if result.status == "completed":
+                        print(
+                            "Conflict resolution succeeded, continuing deployment.",
+                            file=sys.stderr,
+                        )
+                    else:
+                        subprocess.run(
+                            ["git", "merge", "--abort"],
+                            cwd=merge_worktree,
+                            capture_output=True,
+                        )
+                        failure_reason = (
+                            f"Merge conflict: {merge_output}\n"
+                            f"Conflict resolution failed: {result.failure_reason}"
+                        )
+                        print(f"Error: {failure_reason}", file=sys.stderr)
+                        try:
+                            await state_machine.transition(
+                                task_id,
+                                ev.BLOCKED,
+                                extra_payload={"failure_reason": failure_reason},
+                            )
+                        except InvalidTransitionError as exc:
+                            print(
+                                f"Error transitioning to blocked: {exc}", file=sys.stderr
+                            )
+                        sys.exit(1)
+
+                has_staged = subprocess.run(
+                    ["git", "diff", "--cached", "--quiet"],
+                    cwd=merge_worktree,
+                    capture_output=True,
+                ).returncode != 0
+                if has_staged:
+                    commit_msg = f"feat: {title} (task/{task_id})"
+                    try:
+                        subprocess.run(
+                            ["git", "commit", "-m", commit_msg],
+                            cwd=merge_worktree,
+                            check=True,
+                            capture_output=True,
+                        )
+                    except subprocess.CalledProcessError as exc:
+                        print(
+                            f"Error: git commit failed: {exc.stderr.decode()}",
+                            file=sys.stderr,
+                        )
+                        sys.exit(1)
+
+            finally:
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", merge_worktree],
+                    cwd=local_path,
+                    capture_output=True,
+                )
 
             try:
                 subprocess.run(
