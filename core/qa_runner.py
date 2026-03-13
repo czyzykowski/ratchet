@@ -10,6 +10,24 @@ from typing import Any
 import yaml
 
 
+def _run_command(command: str, cwd: str) -> subprocess.CompletedProcess[str]:
+    """Run a shell command in cwd, wrapped in nix develop if flake.nix is present."""
+    if (Path(cwd) / "flake.nix").exists():
+        return subprocess.run(
+            ["nix", "develop", "--command", "bash", "-c", command],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+    return subprocess.run(
+        command,
+        shell=True,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+
+
 @dataclass
 class QaStep:
     name: str
@@ -89,13 +107,7 @@ def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     """
     results: list[QaStepResult] = []
     for step in config.steps:
-        proc = subprocess.run(
-            step.command,
-            shell=True,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-        )
+        proc = _run_command(step.command, cwd)
         output = proc.stdout + proc.stderr
         result = QaStepResult(
             step_name=step.name,
@@ -158,13 +170,7 @@ def run_deploy_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     """
     results: list[QaStepResult] = []
     for step in config.steps:
-        proc = subprocess.run(
-            step.command,
-            shell=True,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-        )
+        proc = _run_command(step.command, cwd)
         output = proc.stdout + proc.stderr
         results.append(
             QaStepResult(
