@@ -136,7 +136,11 @@ class ClaudeCodeInvoker:
         4. Call parse_output(output, returncode) to determine status
         5. Return InvocationResult
         """
-        cmd = ["claude", "-p", "--allowedTools", _ALLOWED_TOOLS]
+        claude_cmd = ["claude", "-p", "--allowedTools", _ALLOWED_TOOLS]
+        if (Path(context.worktree_path) / "flake.nix").exists():
+            cmd = ["nix", "develop", "--command"] + claude_cmd
+        else:
+            cmd = claude_cmd
 
         # Strip CLAUDECODE so nested sessions don't fail when worker runs inside Claude Code
         env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
