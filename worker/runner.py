@@ -585,6 +585,93 @@ async def run_qa_once(
     return True
 
 
+def _gh_command(args: list[str], project_local_path: str) -> _subprocess.CompletedProcess[str]:
+    """Run a gh command, wrapped in nix develop if flake.nix is present."""
+    if (Path(project_local_path) / "flake.nix").exists():
+        return _subprocess.run(
+            ["nix", "develop", "--command", "gh"] + args,
+            cwd=project_local_path,
+            capture_output=True,
+            text=True,
+        )
+    return _subprocess.run(
+        ["gh"] + args,
+        cwd=project_local_path,
+        capture_output=True,
+        text=True,
+    )
+
+
+async def poll_pr_merges(store: Store, project_local_path: str) -> None:
+    """Poll GitHub for merged PRs and transition tasks to deployed.
+
+    Finds all tasks in ready_for_deployment that have a TASK_PR_CREATED event,
+    checks each PR's state via gh CLI, and transitions merged PRs to deployed.
+    """
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    active_projects = await project_manager.list_projects()
+
+    for project in active_projects:
+        project_task_events = await store.get_events(project.id, "project_tasks")
+
+        task_ids_seen: set[UUID] = set()
+        task_ids_ordered: list[UUID] = []
+        for event in project_task_events:
+            tid_str = event.payload.get("task_id")
+            if tid_str:
+                tid = UUID(tid_str)
+                if tid not in task_ids_seen:
+                    task_ids_seen.add(tid)
+                    task_ids_ordered.append(tid)
+
+        cwd = project.local_path if project.local_path else project_local_path
+
+        for task_id in task_ids_ordered:
+            task = await task_manager.get_task(task_id)
+            if task is None or task.status != ev.READY_FOR_DEPLOYMENT:
+                continue
+
+            task_events = await store.get_events(task_id, "task")
+            pr_number: int | None = None
+            for event in reversed(task_events):
+                if event.event_type == ev.TASK_PR_CREATED:
+                    pr_number = event.payload.get("pr_number")
+                    break
+
+            if pr_number is None:
+                continue
+
+            _pr_num = int(pr_number)
+            _cwd = str(cwd)
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: _gh_command(["pr", "view", str(_pr_num), "--json", "state"], _cwd),
+            )
+            if proc.returncode != 0:
+                logger.warning(
+                    "gh pr view failed for task=%s pr=%s: %s",
+                    task_id,
+                    pr_number,
+                    proc.stderr.strip(),
+                )
+                continue
+
+            try:
+                import json as _json
+                state_data = _json.loads(proc.stdout)
+                pr_state = state_data.get("state", "")
+            except Exception:
+                logger.warning("Failed to parse gh pr view output for task=%s", task_id)
+                continue
+
+            if pr_state == "MERGED":
+                logger.info("PR %s merged — transitioning task=%s to deployed", pr_number, task_id)
+                await state_machine.transition(task_id, ev.DEPLOYED)
+
+
 async def compile_once(store: Store) -> bool:
     """Single-pass HLS compilation.
 
@@ -638,6 +725,14 @@ async def notification_loop(
             logger.info("Worker: heartbeat — queuing catchup pass")
             await queue.put(("heartbeat", "", ""))
 
+    async def _pr_poll_loop() -> None:
+        while True:
+            await asyncio.sleep(300)
+            try:
+                await poll_pr_merges(store, os.getcwd())
+            except Exception:
+                logger.warning("poll_pr_merges failed", exc_info=True)
+
     async def _notification_producer(listener: NotificationListener) -> None:
         async for event_tuple in listener.listen():
             await queue.put(event_tuple)
@@ -680,13 +775,14 @@ async def notification_loop(
         producer_task = asyncio.create_task(_notification_producer(listener))
         heartbeat_task = asyncio.create_task(_heartbeat_producer())
         consumer_task = asyncio.create_task(_run_loop())
+        pr_poll_task = asyncio.create_task(_pr_poll_loop())
         try:
             done, pending = await asyncio.wait(
-                [producer_task, heartbeat_task, consumer_task],
+                [producer_task, heartbeat_task, consumer_task, pr_poll_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
         except asyncio.CancelledError:
-            pending = {producer_task, consumer_task}
+            pending = {producer_task, consumer_task, pr_poll_task}
             done = set()
         finally:
             for task in pending:
