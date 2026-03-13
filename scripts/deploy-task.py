@@ -7,7 +7,8 @@ import asyncio
 import os
 import subprocess
 import sys
-from uuid import UUID, uuid4 as _uuid4
+from uuid import UUID
+from uuid import uuid4 as _uuid4
 
 
 def parse_args() -> argparse.Namespace:
