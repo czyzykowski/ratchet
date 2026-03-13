@@ -722,7 +722,9 @@ async def notification_loop(
     """
     queue: asyncio.Queue[tuple[str, ...]] = asyncio.Queue()
     active = False
-    busy_projects: set[UUID] = _initial_busy_projects if _initial_busy_projects is not None else set()
+    busy_projects: set[UUID] = (
+        _initial_busy_projects if _initial_busy_projects is not None else set()
+    )
 
     async def _dispatch_for_project(pid: UUID) -> None:
         """Run QA then impl for a single project. Always removes pid from busy_projects."""
