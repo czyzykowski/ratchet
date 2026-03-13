@@ -94,6 +94,47 @@ class ChatSession(BaseModel):
     messages: list[tuple[str, str, str | None, str | None]]
 
 
+class ReviewScope(BaseModel):
+    project_ids: list[UUID]
+    include_global: bool = False
+
+
+class ReviewRun(BaseModel):
+    id: UUID
+    scope: ReviewScope
+    started_at: datetime
+    completed_at: datetime | None
+    suggestion_count: int = 0
+    applied_count: int = 0
+    dismissed_count: int = 0
+    previous_run_id: UUID | None = None
+
+
+class SuggestionEvidence(BaseModel):
+    task_ids: list[UUID] = []
+    execution_ids: list[UUID] = []
+    trace_excerpts: list[str] = []
+    failure_reasons: list[str] = []
+    spec_refinement_counts: dict[str, int] = {}
+    git_log_excerpts: list[str] = []
+
+
+class Suggestion(BaseModel):
+    id: UUID
+    review_run_id: UUID
+    order: int
+    target: str
+    target_path: str
+    title: str
+    reasoning: str
+    evidence: SuggestionEvidence
+    confidence: str
+    priority: str
+    current_content_excerpt: str
+    suggested_diff: str
+    status: str = "pending"
+
+
 @dataclass
 class QAExchange:
     question_index: int
