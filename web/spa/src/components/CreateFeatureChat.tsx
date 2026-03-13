@@ -179,7 +179,7 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
         {streaming && currentStream && (
           <div className="chat-message chat-message-assistant">
             <div className="chat-role">Claude</div>
-            <div className="chat-content">{currentStream}</div>
+            <div className="chat-content"><Markdown content={currentStream} isAnimating={true} /></div>
           </div>
         )}
 

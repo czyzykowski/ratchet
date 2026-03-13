@@ -1,15 +1,16 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Streamdown } from 'streamdown'
+import 'streamdown/styles.css'
 import './Markdown.css'
 
 interface MarkdownProps {
   content: string
+  isAnimating?: boolean
 }
 
-export function Markdown({ content }: MarkdownProps) {
+export function Markdown({ content, isAnimating }: MarkdownProps) {
   return (
     <div className="md-prose">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <Streamdown isAnimating={isAnimating ?? false}>{content}</Streamdown>
     </div>
   )
 }
