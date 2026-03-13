@@ -2,8 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- Board tab and Focus tab pipeline strip no longer render the `spec_qa` column/stage; the status remains functional in the backend and API
+
 ### Fixed
 - Web UI deploy endpoint now runs deploy hooks (SPA build was being skipped on UI-triggered deploys)
+- `test_task_fields` expected set updated to include `merge_commit_sha`; migration `c1d2e3f4a5b6` adds `merge_commit_sha` column to `current_tasks` view
 
 ### Added
 - PR-based deployment mode: `deployment: {mode: pr, base_branch: develop}` in `ratchet.yaml` causes the deploy endpoint to push the execution branch and open a GitHub PR instead of squash-merging locally

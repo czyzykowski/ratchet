@@ -56,7 +56,7 @@ export function FocusPage() {
     ATTENTION_STATUSES.includes(t.status) ||
     (t.status === 'ready_for_implementation' && t.baseline_qa_failure != null)
   )
-  const pipelineColumns = board?.columns ?? []
+  const pipelineColumns = (board?.columns ?? []).filter(col => col.status !== 'spec_qa')
 
   return (
     <div className="focus-page">

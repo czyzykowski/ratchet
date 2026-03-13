@@ -57,6 +57,14 @@ HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
 CHAT_SESSION_CREATED = "chat_session.created"
 CHAT_SESSION_MESSAGE_ADDED = "chat_session.message_added"
 
+# Review events
+REVIEW_RUN_STARTED = "review_run.started"
+REVIEW_RUN_COMPLETED = "review_run.completed"
+REVIEW_SUGGESTION_CREATED = "review_suggestion.created"
+REVIEW_SUGGESTION_APPLIED = "review_suggestion.applied"
+REVIEW_SUGGESTION_DISMISSED = "review_suggestion.dismissed"
+REVIEW_SUGGESTION_SKIPPED = "review_suggestion.skipped"
+
 # Feature status constants (derived, not stored)
 FEATURE_DRAFT = "draft"
 FEATURE_GENERATED = "generated"

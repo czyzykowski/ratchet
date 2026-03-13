@@ -22,7 +22,7 @@ export function BoardPage() {
       {error && <div className="error-state">Failed to load board</div>}
       {data && (
         <div className="board-columns">
-          {data.columns.map(column => (
+          {data.columns.filter(col => col.status !== 'spec_qa').map(column => (
             <section key={column.status} className="board-column">
               <h2 className="column-header">
                 {column.label} ({column.tasks.length})
