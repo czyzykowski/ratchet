@@ -294,6 +294,53 @@ async def deploy_task(
     if branch_name is None:
         raise HTTPException(status_code=400, detail="No execution branch found for this task")
 
+    from core.qa_runner import load_deployment_config
+
+    ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
+    deployment_config = load_deployment_config(str(project.local_path), ratchet_yaml)
+
+    if deployment_config.mode == "pr":
+        local_path = str(project.local_path)
+        base_branch = deployment_config.base_branch
+        try:
+            subprocess.run(
+                ["git", "push", "origin", branch_name],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+            )
+            pr_title = f"feat: {task.title} (task/{task_id})"
+            pr_result = subprocess.run(
+                [
+                    "gh", "pr", "create",
+                    "--base", base_branch,
+                    "--title", pr_title,
+                    "--body", "",
+                ],
+                cwd=local_path,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            stdout = (exc.stdout or "").strip()
+            detail = stderr or stdout or f"command failed with exit code {exc.returncode}"
+            raise HTTPException(status_code=400, detail=detail)
+
+        pr_url = pr_result.stdout.strip().splitlines()[-1].strip()
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
+
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_PR_CREATED,
+            payload={"pr_url": pr_url, "pr_number": pr_number, "branch": branch_name},
+        )
+
+        task = await task_manager.get_task(task_id)
+        return JSONResponse({"task": task.model_dump(mode="json") if task else None})
+
     if not body.skip_merge:
         local_path = str(project.local_path)
         title = task.title

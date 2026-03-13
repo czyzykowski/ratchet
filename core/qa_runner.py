@@ -41,6 +41,41 @@ class QaConfig:
 
 
 @dataclass
+class DeploymentConfig:
+    mode: str  # "local" | "pr"
+    base_branch: str = "develop"
+
+
+def load_deployment_config(
+    local_path: str, ratchet_yaml: str | None = None
+) -> DeploymentConfig:
+    """Read <local_path>/ratchet.yaml and return DeploymentConfig.
+
+    Returns DeploymentConfig(mode="local", base_branch="develop") when section is absent.
+    When ratchet_yaml is not None, parses that string directly instead of reading from disk.
+    """
+    if ratchet_yaml is not None:
+        data: Any = yaml.safe_load(ratchet_yaml)
+    else:
+        config_path = Path(local_path) / "ratchet.yaml"
+        if not config_path.exists():
+            return DeploymentConfig(mode="local", base_branch="develop")
+        with config_path.open() as f:
+            data = yaml.safe_load(f)
+
+    if not isinstance(data, dict) or "deployment" not in data:
+        return DeploymentConfig(mode="local", base_branch="develop")
+
+    deployment_section = data["deployment"]
+    if not isinstance(deployment_section, dict):
+        return DeploymentConfig(mode="local", base_branch="develop")
+
+    mode = str(deployment_section.get("mode", "local"))
+    base_branch = str(deployment_section.get("base_branch", "develop"))
+    return DeploymentConfig(mode=mode, base_branch=base_branch)
+
+
+@dataclass
 class QaStepResult:
     step_name: str
     command: str

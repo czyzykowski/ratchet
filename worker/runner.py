@@ -41,6 +41,7 @@ async def get_next_task(
     spec_manager: SpecManager,
     state_machine: TaskStateMachine,
     local_capabilities: list[str] = [],
+    project_id: UUID | None = None,
 ) -> tuple[Task, Project, Spec] | None:
     """Find oldest ready_for_implementation task with active project and assigned spec.
 
@@ -55,6 +56,8 @@ async def get_next_task(
     6. Return candidate with oldest task.created_at, or None if empty
     """
     active_projects = await project_manager.list_projects()
+    if project_id is not None:
+        active_projects = [p for p in active_projects if p.id == project_id]
     task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
@@ -161,6 +164,7 @@ async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
     local_capabilities: list[str] = [],
+    project_id: UUID | None = None,
 ) -> bool:
     """Single-pass task execution.
 
@@ -175,7 +179,8 @@ async def run_once(
     state_machine = TaskStateMachine(store)
 
     result = await get_next_task(
-        store, project_manager, spec_manager, state_machine, local_capabilities
+        store, project_manager, spec_manager, state_machine, local_capabilities,
+        project_id=project_id,
     )
     if result is None:
         logger.info("No tasks ready for implementation.")
@@ -350,12 +355,15 @@ async def get_next_qa_task(
     project_manager: ProjectManager,
     spec_manager: SpecManager,
     state_machine: TaskStateMachine,
+    project_id: UUID | None = None,
 ) -> tuple[Task, Project, Spec] | None:
     """Find oldest ready_for_qa task with active project and assigned spec.
 
     Returns (task, project, spec) tuple or None if nothing ready.
     """
     active_projects = await project_manager.list_projects()
+    if project_id is not None:
+        active_projects = [p for p in active_projects if p.id == project_id]
     task_manager = TaskManager(store)
     candidates: list[tuple[Task, Project, Spec]] = []
 
@@ -456,6 +464,7 @@ def _get_qa_fix_attempts(task_events: list[Any]) -> int:
 async def run_qa_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
+    project_id: UUID | None = None,
 ) -> bool:
     """Single-pass QA execution.
 
@@ -470,7 +479,9 @@ async def run_qa_once(
     state_machine = TaskStateMachine(store)
 
     # Step 1: find next QA task
-    result = await get_next_qa_task(store, project_manager, spec_manager, state_machine)
+    result = await get_next_qa_task(
+        store, project_manager, spec_manager, state_machine, project_id=project_id
+    )
     if result is None:
         logger.info("No QA tasks ready.")
         return False
@@ -585,6 +596,93 @@ async def run_qa_once(
     return True
 
 
+def _gh_command(args: list[str], project_local_path: str) -> _subprocess.CompletedProcess[str]:
+    """Run a gh command, wrapped in nix develop if flake.nix is present."""
+    if (Path(project_local_path) / "flake.nix").exists():
+        return _subprocess.run(
+            ["nix", "develop", "--command", "gh"] + args,
+            cwd=project_local_path,
+            capture_output=True,
+            text=True,
+        )
+    return _subprocess.run(
+        ["gh"] + args,
+        cwd=project_local_path,
+        capture_output=True,
+        text=True,
+    )
+
+
+async def poll_pr_merges(store: Store, project_local_path: str) -> None:
+    """Poll GitHub for merged PRs and transition tasks to deployed.
+
+    Finds all tasks in ready_for_deployment that have a TASK_PR_CREATED event,
+    checks each PR's state via gh CLI, and transitions merged PRs to deployed.
+    """
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    active_projects = await project_manager.list_projects()
+
+    for project in active_projects:
+        project_task_events = await store.get_events(project.id, "project_tasks")
+
+        task_ids_seen: set[UUID] = set()
+        task_ids_ordered: list[UUID] = []
+        for event in project_task_events:
+            tid_str = event.payload.get("task_id")
+            if tid_str:
+                tid = UUID(tid_str)
+                if tid not in task_ids_seen:
+                    task_ids_seen.add(tid)
+                    task_ids_ordered.append(tid)
+
+        cwd = project.local_path if project.local_path else project_local_path
+
+        for task_id in task_ids_ordered:
+            task = await task_manager.get_task(task_id)
+            if task is None or task.status != ev.READY_FOR_DEPLOYMENT:
+                continue
+
+            task_events = await store.get_events(task_id, "task")
+            pr_number: int | None = None
+            for event in reversed(task_events):
+                if event.event_type == ev.TASK_PR_CREATED:
+                    pr_number = event.payload.get("pr_number")
+                    break
+
+            if pr_number is None:
+                continue
+
+            _pr_num = int(pr_number)
+            _cwd = str(cwd)
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: _gh_command(["pr", "view", str(_pr_num), "--json", "state"], _cwd),
+            )
+            if proc.returncode != 0:
+                logger.warning(
+                    "gh pr view failed for task=%s pr=%s: %s",
+                    task_id,
+                    pr_number,
+                    proc.stderr.strip(),
+                )
+                continue
+
+            try:
+                import json as _json
+                state_data = _json.loads(proc.stdout)
+                pr_state = state_data.get("state", "")
+            except Exception:
+                logger.warning("Failed to parse gh pr view output for task=%s", task_id)
+                continue
+
+            if pr_state == "MERGED":
+                logger.info("PR %s merged — transitioning task=%s to deployed", pr_number, task_id)
+                await state_machine.transition(task_id, ev.DEPLOYED)
+
+
 async def compile_once(store: Store) -> bool:
     """Single-pass HLS compilation.
 
@@ -608,6 +706,7 @@ async def notification_loop(
     dsn: str,
     max_workers: int = 1,
     local_capabilities: list[str] = [],
+    _initial_busy_projects: set[UUID] | None = None,
 ) -> None:
     """React to Postgres LISTEN/NOTIFY events for task status changes and compilation triggers.
 
@@ -616,27 +715,52 @@ async def notification_loop(
     3. Queues notifications received during execution using asyncio.Queue.
     4. Processes queued items after each task completes.
     5. Compilation trigger events route to compile_once only.
-    6. Task status events route to run_once + run_qa_once.
+    6. Task status events route to per-project run_qa_once + run_once, then compile_once once.
 
-    With max_workers=1, only one task runs at a time; additional notifications
-    are queued and processed sequentially after each task completes.
+    Each active project gets its own concurrent dispatch slot. busy_projects tracks
+    which projects are currently executing to prevent concurrent dispatch for the same project.
     """
     queue: asyncio.Queue[tuple[str, ...]] = asyncio.Queue()
     active = False
+    busy_projects: set[UUID] = (
+        _initial_busy_projects if _initial_busy_projects is not None else set()
+    )
 
-    async def _dispatch_one() -> None:
-        """Run one pass: QA first, then implementation, then compilation."""
-        did_qa = await run_qa_once(store, invoker)
-        if not did_qa:
-            did_impl = await run_once(store, invoker, local_capabilities)
-            if not did_impl:
-                await compile_once(store)
+    async def _dispatch_for_project(pid: UUID) -> None:
+        """Run QA then impl for a single project. Always removes pid from busy_projects."""
+        try:
+            did_qa = await run_qa_once(store, invoker, project_id=pid)
+            if not did_qa:
+                await run_once(store, invoker, local_capabilities, project_id=pid)
+        finally:
+            busy_projects.discard(pid)
+
+    async def _dispatch_all() -> None:
+        """Dispatch one pass per non-busy active project, then compile once."""
+        project_manager = ProjectManager(store)
+        active_projects = await project_manager.list_projects()
+        tasks = []
+        for project in active_projects:
+            if project.id not in busy_projects:
+                busy_projects.add(project.id)
+                tasks.append(asyncio.create_task(_dispatch_for_project(project.id)))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await compile_once(store)
 
     async def _heartbeat_producer() -> None:
         while True:
             await asyncio.sleep(600)
             logger.info("Worker: heartbeat — queuing catchup pass")
             await queue.put(("heartbeat", "", ""))
+
+    async def _pr_poll_loop() -> None:
+        while True:
+            await asyncio.sleep(300)
+            try:
+                await poll_pr_merges(store, os.getcwd())
+            except Exception:
+                logger.warning("poll_pr_merges failed", exc_info=True)
 
     async def _notification_producer(listener: NotificationListener) -> None:
         async for event_tuple in listener.listen():
@@ -646,7 +770,7 @@ async def notification_loop(
         nonlocal active
         # Startup catchup
         logger.info("Worker: running startup catchup")
-        await _dispatch_one()
+        await _dispatch_all()
         try:
             await store.refresh_views()
         except Exception:
@@ -667,7 +791,7 @@ async def notification_loop(
                 )
             active = True
             try:
-                await _dispatch_one()
+                await _dispatch_all()
             finally:
                 active = False
                 queue.task_done()
@@ -680,13 +804,14 @@ async def notification_loop(
         producer_task = asyncio.create_task(_notification_producer(listener))
         heartbeat_task = asyncio.create_task(_heartbeat_producer())
         consumer_task = asyncio.create_task(_run_loop())
+        pr_poll_task = asyncio.create_task(_pr_poll_loop())
         try:
             done, pending = await asyncio.wait(
-                [producer_task, heartbeat_task, consumer_task],
+                [producer_task, heartbeat_task, consumer_task, pr_poll_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
         except asyncio.CancelledError:
-            pending = {producer_task, consumer_task}
+            pending = {producer_task, consumer_task, pr_poll_task}
             done = set()
         finally:
             for task in pending:

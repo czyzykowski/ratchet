@@ -6,6 +6,10 @@
 - Web UI deploy endpoint now runs deploy hooks (SPA build was being skipped on UI-triggered deploys)
 
 ### Added
+- PR-based deployment mode: `deployment: {mode: pr, base_branch: develop}` in `ratchet.yaml` causes the deploy endpoint to push the execution branch and open a GitHub PR instead of squash-merging locally
+- `DeploymentConfig` dataclass and `load_deployment_config()` in `core/qa_runner.py`; returns `DeploymentConfig(mode="local")` when section is absent
+- `TASK_PR_CREATED` event constant in `core/events.py` with payload `{pr_url, pr_number, branch}`
+- `poll_pr_merges()` in `worker/runner.py` polls GitHub every 300 seconds and transitions merged PRs from `ready_for_deployment` to `deployed`
 - JobDispatcher in orchestrator/dispatcher.py with dispatch_pending, _dispatch_one, and dispatch_loop
 - `remote_worker/` package: `ClaudeAuthError`, `verify_claude_auth()`, `RemoteWorkerClient` with WebSocket reconnect loop; `python -m remote_worker --orchestrator URL --capabilities ...` CLI
 - `AssignTaskMessage.git_bundle_b64: str` and `ExecutionCompletedMessage.patch: str` fields in `core/remote_protocol.py`

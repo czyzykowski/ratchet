@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from unittest.mock import MagicMock, patch
@@ -215,10 +216,13 @@ class _MockNotificationListener:
 async def test_notification_loop_runs_catchup_on_startup() -> None:
     """notification_loop calls run_qa_once, run_once, and compile_once on startup.
 
-    All three return False so all run during catchup.
+    All three return False so all run during catchup (requires at least one project).
     """
     store = InMemoryStore()
     invoker = _make_invoker()
+
+    # Register a project so per-project dispatch fires run_qa_once and run_once
+    _, project = await _setup_project(store)
 
     catchup_calls: list[str] = []
 
@@ -250,12 +254,20 @@ async def test_notification_loop_runs_catchup_on_startup() -> None:
 
 
 async def test_notification_loop_dispatches_queued_notifications() -> None:
-    """notification_loop calls run_once + run_qa_once for each queued task notification."""
+    """notification_loop dispatches per-project when notifications arrive.
+
+    Uses a persistent listener (doesn't exit on its own) and a background task so we
+    can observe N dispatch rounds before cancelling the loop.
+    """
     store = InMemoryStore()
     invoker = _make_invoker()
 
+    # Register a project so per-project dispatch fires
+    _, project = await _setup_project(store)
+
     task_id = str(uuid.uuid4())
     dispatch_calls: list[str] = []
+    enough = asyncio.Event()
 
     async def fake_compile_once(*args, **kwargs) -> bool:
         dispatch_calls.append("compile_once")
@@ -267,14 +279,23 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
 
     async def fake_run_qa_once(*args, **kwargs) -> bool:
         dispatch_calls.append("run_qa_once")
+        if dispatch_calls.count("run_qa_once") >= 2:
+            enough.set()
         return False
 
-    # Two task notifications: one impl, one QA (3-tuples)
+    class _PersistentListener(_MockNotificationListener):
+        """Yields notifications then stays alive until cancelled."""
+        async def listen(self) -> AsyncGenerator[tuple[str, str, str], None]:
+            for item in self._notifications:
+                yield item
+            while True:
+                await asyncio.sleep(10)
+
     notifications = [
         ("task", task_id, ev.READY_FOR_IMPLEMENTATION),
         ("task", task_id, ev.READY_FOR_QA),
     ]
-    mock_listener = _MockNotificationListener(notifications)
+    mock_listener = _PersistentListener(notifications)
 
     with (
         patch("worker.runner.compile_once", side_effect=fake_compile_once),
@@ -282,15 +303,21 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
         patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
-        await notification_loop(store, invoker, dsn="postgresql://fake/test")
+        loop_task = asyncio.create_task(
+            notification_loop(store, invoker, dsn="postgresql://fake/test")
+        )
+        try:
+            await asyncio.wait_for(enough.wait(), timeout=5.0)
+        finally:
+            loop_task.cancel()
+            try:
+                await loop_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
-    # Priority order: run_qa_once → run_once → compile_once (compile skipped when run_once is True)
-    # Startup catchup: 1 run_qa_once (False) + 1 run_once (True)
-    # 2 task notifications: 2 more run_qa_once + 2 more run_once
-    run_once_count = dispatch_calls.count("run_once")
-    run_qa_count = dispatch_calls.count("run_qa_once")
-    assert run_once_count >= 3  # 1 catchup + 2 notifications
-    assert run_qa_count >= 3
+    # Startup + at least one notification round
+    assert dispatch_calls.count("run_qa_once") >= 2
+    assert dispatch_calls.count("run_once") >= 2
 
 
 async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
@@ -318,3 +345,87 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
     ):
         # Should not raise
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+
+# ---------------------------------------------------------------------------
+# Per-project concurrent dispatch
+# ---------------------------------------------------------------------------
+
+
+async def _setup_project_named(store: InMemoryStore, name: str, path: str) -> tuple:
+    """Register a named project at a given path."""
+    project_manager = ProjectManager(store)
+    with patch(PATCH_VALIDATE_REPO):
+        project = await project_manager.register_project(
+            name=name,
+            repo_url=f"https://github.com/test/{name}",
+            local_path=path,
+        )
+    return project_manager, project
+
+
+async def test_two_projects_dispatch_concurrently() -> None:
+    """Two projects each with a ready_for_implementation task both get dispatched in one round."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+
+    _, project_a = await _setup_project_named(store, "project-a", "/fake/a")
+    _, project_b = await _setup_project_named(store, "project-b", "/fake/b")
+
+    dispatched_project_ids: list[uuid.UUID | None] = []
+
+    async def fake_run_qa_once(store, invoker=None, project_id=None):
+        dispatched_project_ids.append(project_id)
+        return False
+
+    async def fake_run_once(store, invoker=None, local_capabilities=[], project_id=None):
+        return False
+
+    mock_listener = _MockNotificationListener([])
+
+    with (
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.compile_once", return_value=False),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(store, invoker, dsn="postgresql://fake/test")
+
+    # Both projects should have been dispatched in the startup catchup round
+    assert project_a.id in dispatched_project_ids
+    assert project_b.id in dispatched_project_ids
+
+
+async def test_busy_project_skipped() -> None:
+    """Project already in busy_projects is not dispatched during that round."""
+    store = InMemoryStore()
+    invoker = _make_invoker()
+
+    _, project_a = await _setup_project_named(store, "project-a", "/fake/a")
+
+    dispatched_project_ids: list[uuid.UUID | None] = []
+
+    async def fake_run_qa_once(store, invoker=None, project_id=None):
+        dispatched_project_ids.append(project_id)
+        return False
+
+    async def fake_run_once(store, invoker=None, local_capabilities=[], project_id=None):
+        return False
+
+    mock_listener = _MockNotificationListener([])
+
+    # Pre-seed busy_projects with project_a's ID — it should be skipped during dispatch
+    pre_busy: set[uuid.UUID] = {project_a.id}
+
+    with (
+        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch("worker.runner.run_once", side_effect=fake_run_once),
+        patch("worker.runner.compile_once", return_value=False),
+        patch("worker.runner.NotificationListener", return_value=mock_listener),
+    ):
+        await notification_loop(
+            store, invoker, dsn="postgresql://fake/test", _initial_busy_projects=pre_busy
+        )
+
+    # project_a was busy — must not appear in dispatched calls
+    assert project_a.id not in dispatched_project_ids

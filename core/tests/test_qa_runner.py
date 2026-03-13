@@ -7,10 +7,12 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from core.qa_runner import (
+    DeploymentConfig,
     QaConfig,
     QaStep,
     check_baseline_qa,
     load_deploy_config,
+    load_deployment_config,
     load_qa_config,
     parse_review_output,
     run_deploy_steps,
@@ -408,3 +410,58 @@ def test_run_qa_steps_combines_stdout_and_stderr() -> None:
 
     assert "stdout line" in results[0].output
     assert "stderr line" in results[0].output
+
+
+# ---------------------------------------------------------------------------
+# load_deployment_config
+# ---------------------------------------------------------------------------
+
+
+def test_load_deployment_config_absent_section_returns_local_default(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text("qa:\n  steps:\n    test: pytest\n")
+    config = load_deployment_config(str(tmp_path))
+    assert config == DeploymentConfig(mode="local", base_branch="develop")
+
+
+def test_load_deployment_config_missing_file_returns_local_default(tmp_path: Path) -> None:
+    config = load_deployment_config(str(tmp_path))
+    assert config == DeploymentConfig(mode="local", base_branch="develop")
+
+
+def test_load_deployment_config_pr_mode_with_explicit_base_branch(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        deployment:
+          mode: pr
+          base_branch: main
+        """)
+    )
+    config = load_deployment_config(str(tmp_path))
+    assert config == DeploymentConfig(mode="pr", base_branch="main")
+
+
+def test_load_deployment_config_pr_mode_defaults_base_branch_to_develop(tmp_path: Path) -> None:
+    (tmp_path / "ratchet.yaml").write_text(
+        textwrap.dedent("""\
+        deployment:
+          mode: pr
+        """)
+    )
+    config = load_deployment_config(str(tmp_path))
+    assert config == DeploymentConfig(mode="pr", base_branch="develop")
+
+
+def test_load_deployment_config_from_ratchet_yaml_string() -> None:
+    yaml_str = textwrap.dedent("""\
+    deployment:
+      mode: pr
+      base_branch: main
+    """)
+    config = load_deployment_config("/unused/path", ratchet_yaml=yaml_str)
+    assert config == DeploymentConfig(mode="pr", base_branch="main")
+
+
+def test_load_deployment_config_absent_section_from_ratchet_yaml_string() -> None:
+    yaml_str = "qa:\n  steps:\n    test: pytest\n"
+    config = load_deployment_config("/unused/path", ratchet_yaml=yaml_str)
+    assert config == DeploymentConfig(mode="local", base_branch="develop")

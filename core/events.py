@@ -18,6 +18,8 @@ TASK_BASELINE_QA_RETRY = "task.baseline_qa_retry"
 TASK_FORCE_EXECUTE = "task.force_execute"
 TASK_DEPLOY_HOOKS_RUN = "task.deploy_hooks_run"
 TASK_WORKER_DISCONNECTED = "task.worker_disconnected"
+TASK_PR_CREATED = "task.pr_created"
+# TASK_PR_CREATED payload: {pr_url: str, pr_number: int, branch: str}
 
 # Spec events
 SPEC_CREATED = "spec.created"
