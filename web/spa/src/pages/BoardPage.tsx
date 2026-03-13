@@ -39,6 +39,7 @@ export function BoardPage() {
         </div>
       )}
       <TaskDetailModal
+        key={selectedTaskId ?? ''}
         taskId={selectedTaskId}
         onClose={() => setSelectedTaskId(null)}
       />

@@ -40,6 +40,7 @@ def test_task_fields() -> None:
         "updated_at",
         "depends_on",
         "required_capabilities",
+        "merge_commit_sha",
     }
     assert set(Task.model_fields) == expected
 

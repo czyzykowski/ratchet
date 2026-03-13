@@ -137,6 +137,7 @@ export function FocusPage() {
       </div>
 
       <TaskDetailModal
+        key={selectedTaskId ?? ''}
         taskId={selectedTaskId}
         onClose={() => setSelectedTaskId(null)}
       />

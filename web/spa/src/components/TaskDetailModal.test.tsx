@@ -61,6 +61,88 @@ function renderModal(taskResponse: ReturnType<typeof makeTaskResponse>) {
   )
 }
 
+describe('TaskDetailModal state reset on taskId change', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('should reset deploy panel state when taskId changes', async () => {
+    const deployTaskId = 'task-deploy-111'
+    const otherTaskId = 'task-other-222'
+
+    const deployTaskResponse = {
+      task: {
+        id: deployTaskId,
+        title: 'Deployable Task',
+        status: 'ready_for_deployment',
+        project_id: 'proj-1',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: null,
+        current_spec_id: null,
+        refinement_count: 0,
+        depends_on: [],
+      },
+      project_name: 'Test Project',
+      specs: [],
+      executions: [],
+      dependencies: [],
+      qa_failure: null,
+      baseline_qa_failure: null,
+    }
+
+    const otherTaskResponse = {
+      task: {
+        id: otherTaskId,
+        title: 'Spec Task',
+        status: 'ready_for_spec',
+        project_id: 'proj-1',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: null,
+        current_spec_id: null,
+        refinement_count: 0,
+        depends_on: [],
+      },
+      project_name: 'Test Project',
+      specs: [],
+      executions: [],
+      dependencies: [],
+      qa_failure: null,
+      baseline_qa_failure: null,
+    }
+
+    vi.mocked(qaApi.fetchTaskQA).mockResolvedValue({ history: [], pending: null })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      const response = url.includes(deployTaskId) ? deployTaskResponse : otherTaskResponse
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(response) })
+    }))
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    function Wrapper({ currentTaskId }: { currentTaskId: string }) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <TaskDetailModal key={currentTaskId} taskId={currentTaskId} onClose={vi.fn()} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
+    }
+
+    const { rerender } = render(<Wrapper currentTaskId={deployTaskId} />)
+
+    await screen.findByText('Deployable Task')
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy' }))
+    expect(screen.getByRole('button', { name: 'Confirm Deploy' })).toBeInTheDocument()
+
+    rerender(<Wrapper currentTaskId={otherTaskId} />)
+
+    await screen.findByText('Spec Task')
+    expect(screen.queryByRole('button', { name: 'Confirm Deploy' })).not.toBeInTheDocument()
+  })
+})
+
 describe('TaskDetailModal Q&A panel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
