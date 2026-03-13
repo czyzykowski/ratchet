@@ -270,14 +270,21 @@ async def compile_all(store: Store) -> int:
 
     for project in projects:
         local_path = project.local_path
-        intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-        if not intent_md_path.exists():
-            logger.warning(
-                "INTENT.md not found at %s; skipping project %s", intent_md_path, project.name
-            )
-            continue
-
-        intent_md = intent_md_path.read_text()
+        if project.config_source == "db":
+            if not project.intent_md:
+                logger.warning(
+                    "intent_md not set in DB for project %s; skipping", project.name
+                )
+                continue
+            intent_md = project.intent_md
+        else:
+            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+            if not intent_md_path.exists():
+                logger.warning(
+                    "INTENT.md not found at %s; skipping project %s", intent_md_path, project.name
+                )
+                continue
+            intent_md = intent_md_path.read_text()
         features = await fm.list_features(project.id)
 
         for feature in features:
