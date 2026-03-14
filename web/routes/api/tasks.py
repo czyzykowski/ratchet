@@ -376,12 +376,81 @@ async def merge_task(
             raise HTTPException(status_code=400, detail=stderr or "git worktree add failed")
 
         try:
-            subprocess.run(
-                ["git", "merge", "--squash", branch_name],
-                cwd=merge_worktree,
-                check=True,
-                capture_output=True,
-            )
+            try:
+                subprocess.run(
+                    ["git", "merge", "--squash", branch_name],
+                    cwd=merge_worktree,
+                    check=True,
+                    capture_output=True,
+                )
+            except subprocess.CalledProcessError as merge_exc:
+                merge_output = (merge_exc.stderr or b"").decode()
+
+                conflict_result = subprocess.run(
+                    ["git", "diff", "--name-only", "--diff-filter=U"],
+                    cwd=merge_worktree,
+                    capture_output=True,
+                    text=True,
+                )
+                conflicted_files = [
+                    f for f in conflict_result.stdout.strip().splitlines() if f
+                ]
+
+                from uuid import uuid4 as _uuid4
+
+                from core.context_assembler import (
+                    ExecutionContext,
+                    build_conflict_resolution_prompt,
+                    read_intent,
+                )
+                from core.invoker import ClaudeCodeInvoker
+
+                spec_id: UUID | None = None
+                spec_content = ""
+                task_events = await store.get_events(task_id, "task")
+                for tevt in reversed(task_events):
+                    if tevt.event_type == ev.TASK_SPEC_ASSIGNED:
+                        sid = tevt.payload.get("spec_id")
+                        if sid:
+                            spec_id = UUID(sid)
+                        break
+                if spec_id is not None:
+                    spec_events = await store.get_events(spec_id, "spec")
+                    for sevt in spec_events:
+                        if sevt.event_type == ev.SPEC_CREATED:
+                            spec_content = sevt.payload.get("content", "")
+                            break
+
+                intent_content = read_intent(local_path)
+                prompt = build_conflict_resolution_prompt(
+                    intent_content=intent_content,
+                    spec_content=spec_content,
+                    conflicted_files=conflicted_files,
+                    merge_output=merge_output,
+                )
+
+                resolution_execution_id = _uuid4()
+                context = ExecutionContext(
+                    execution_id=resolution_execution_id,
+                    task_id=task_id,
+                    spec_id=spec_id or task_id,
+                    worktree_path=merge_worktree,
+                    prompt=prompt,
+                )
+                result = ClaudeCodeInvoker().invoke(context)
+
+                if result.status != "completed":
+                    subprocess.run(
+                        ["git", "merge", "--abort"],
+                        cwd=merge_worktree,
+                        capture_output=True,
+                    )
+                    detail = (
+                        f"Merge conflict: {merge_output}\n"
+                        f"Conflict resolution failed: {result.failure_reason}"
+                    )
+                    raise HTTPException(status_code=409, detail=detail)
+
             has_staged = subprocess.run(
                 ["git", "diff", "--cached", "--quiet"],
                 cwd=merge_worktree,
@@ -404,6 +473,8 @@ async def merge_task(
                 )
             except subprocess.CalledProcessError:
                 pass
+        except HTTPException:
+            raise
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or b"").decode().strip()
             stdout = (exc.stdout or b"").decode().strip()
