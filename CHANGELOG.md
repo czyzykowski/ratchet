@@ -10,6 +10,7 @@
 - `test_task_fields` expected set updated to include `merge_commit_sha`; migration `c1d2e3f4a5b6` adds `merge_commit_sha` column to `current_tasks` view
 
 ### Added
+- scripts/run-review.py: CLI entry point for the Retrospective Insight Reviewer
 - PR-based deployment mode: `deployment: {mode: pr, base_branch: develop}` in `ratchet.yaml` causes the deploy endpoint to push the execution branch and open a GitHub PR instead of squash-merging locally
 - `DeploymentConfig` dataclass and `load_deployment_config()` in `core/qa_runner.py`; returns `DeploymentConfig(mode="local")` when section is absent
 - `TASK_PR_CREATED` event constant in `core/events.py` with payload `{pr_url, pr_number, branch}`
