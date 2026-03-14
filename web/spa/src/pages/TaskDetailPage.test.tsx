@@ -89,4 +89,20 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('heading', { name: 'My Task Title' })
     expect(screen.getByText('completed')).toBeInTheDocument()
   })
+
+  it('should render Archive button when task is not abandoned', async () => {
+    renderWithProviders()
+    await screen.findByRole('heading', { name: 'My Task Title' })
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument()
+  })
+
+  it('should not render Archive button when task is abandoned', async () => {
+    vi.mocked(client.apiFetch).mockResolvedValue({
+      ...mockData,
+      task: { ...mockData.task, status: 'abandoned' },
+    })
+    renderWithProviders()
+    await screen.findByRole('heading', { name: 'My Task Title' })
+    expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
+  })
 })

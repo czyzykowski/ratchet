@@ -85,6 +85,13 @@ export function TaskDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['task', task_id] })
   }
 
+  async function handleArchive() {
+    if (!task_id) return
+    if (!confirm('Archive this task?')) return
+    await fetch(`/api/tasks/${task_id}/archive`, { method: 'POST' })
+    queryClient.invalidateQueries({ queryKey: ['task', task_id] })
+  }
+
   if (isLoading) return <div className="loading-state">Loading task...</div>
   if (error) return <div className="error-state">Failed to load task</div>
   if (!data) return <div className="error-state">Task not found</div>
@@ -254,6 +261,9 @@ export function TaskDetailPage() {
         )}
         {task.status === 'ready_for_deployment' && (
           <button className="btn btn-primary" onClick={handleDeploy}>Deploy</button>
+        )}
+        {task.status !== 'abandoned' && (
+          <button className="btn btn-danger" onClick={handleArchive}>Archive</button>
         )}
       </div>
     </div>

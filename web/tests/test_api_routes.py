@@ -369,6 +369,46 @@ def test_should_return_json_from_post_run_next_when_task_found(
     assert data["task_id"] == str(task_id)
 
 
+# --- Archive task endpoint tests ---
+
+def test_should_archive_task_when_post_archive_called(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Task to Archive", ev.READY_FOR_SPEC)
+    )
+
+    response = client.post(f"/api/tasks/{task_id}/archive")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task"]["status"] == ev.ABANDONED
+
+
+def test_should_return_404_when_archiving_unknown_task(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    unknown_id = uuid4()
+    response = client.post(f"/api/tasks/{unknown_id}/archive")
+    assert response.status_code == 404
+
+
+def test_should_return_400_when_archiving_already_abandoned_task(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Already Abandoned", ev.ABANDONED)
+    )
+
+    response = client.post(f"/api/tasks/{task_id}/archive")
+    assert response.status_code == 400
+
+
 # --- Legacy tests kept for backward compatibility ---
 
 def test_should_return_200_with_projects_list(
