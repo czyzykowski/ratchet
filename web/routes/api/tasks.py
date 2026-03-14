@@ -472,6 +472,32 @@ async def deploy_task(
     return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
 
+class ArchiveTaskBody(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/tasks/{task_id}/archive")
+async def archive_task(
+    task_id: UUID, request: Request, body: ArchiveTaskBody = ArchiveTaskBody()
+) -> JSONResponse:
+    store = request.app.state.store
+    state_machine = TaskStateMachine(store)
+    task_manager = TaskManager(store)
+
+    current_status = await state_machine.get_current_status(task_id)
+    if current_status is None:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    extra_payload = {"reason": body.reason} if body.reason else None
+    try:
+        await state_machine.transition(task_id, ev.ABANDONED, extra_payload=extra_payload)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    task = await task_manager.get_task(task_id)
+    return JSONResponse({"task": task.model_dump(mode="json") if task else None})
+
+
 @router.post("/tasks/{task_id}/retry-baseline-qa")
 async def retry_baseline_qa(task_id: UUID, request: Request) -> JSONResponse:
     store = request.app.state.store

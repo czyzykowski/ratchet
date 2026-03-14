@@ -48,6 +48,7 @@ export async function createProject(
   path: string,
   options?: {
     config_source?: string
+    repo_url?: string
     claude_md?: string | null
     intent_md?: string | null
     ratchet_yaml?: string | null
