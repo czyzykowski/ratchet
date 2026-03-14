@@ -5,7 +5,7 @@ export const STATUS_COLORS: Record<string, string> = {
   in_progress: '#f59e0b',
   blocked: '#ef4444',
   ready_for_qa: '#06b6d4',
-  ready_for_deployment: '#10b981',
-  deployed: '#22c55e',
+  ready_for_merge: '#10b981',
+  merged: '#22c55e',
   abandoned: '#374151',
 }

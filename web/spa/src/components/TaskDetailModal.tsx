@@ -190,7 +190,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     setDeploying(true)
     setDeployError(null)
     try {
-      const res = await fetch(`/api/tasks/${taskId}/deploy`, {
+      const res = await fetch(`/api/tasks/${taskId}/merge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ skip_merge: skipMerge }),
@@ -251,7 +251,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
   const isBlocked = data?.task.status === 'blocked'
   const isReadyForSpec = data?.task.status === 'ready_for_spec'
-  const isReadyForDeployment = data?.task.status === 'ready_for_deployment'
+  const isReadyForDeployment = data?.task.status === 'ready_for_merge'
 
   if (showChat && data) {
     return (

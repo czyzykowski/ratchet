@@ -74,7 +74,7 @@ describe('TaskDetailModal state reset on taskId change', () => {
       task: {
         id: deployTaskId,
         title: 'Deployable Task',
-        status: 'ready_for_deployment',
+        status: 'ready_for_merge',
         project_id: 'proj-1',
         created_at: '2024-01-01T00:00:00Z',
         updated_at: null,

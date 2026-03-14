@@ -16,8 +16,8 @@ const STATUS_ORDER = [
   'in_progress',
   'blocked',
   'ready_for_qa',
-  'ready_for_deployment',
-  'deployed',
+  'ready_for_merge',
+  'merged',
 ]
 
 const STATUS_LABELS: Record<string, string> = {
@@ -27,8 +27,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In Progress',
   blocked: 'Blocked',
   ready_for_qa: 'Ready for QA',
-  ready_for_deployment: 'Ready for Deployment',
-  deployed: 'Deployed',
+  ready_for_merge: 'Ready for Merge',
+  merged: 'Merged',
 }
 
 function formatRelativeTime(isoString: string | null | undefined): string {
