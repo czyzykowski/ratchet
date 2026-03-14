@@ -5,7 +5,7 @@ import { useActivity } from '../hooks/useActivity'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 
-const ATTENTION_STATUSES = ['ready_for_spec', 'blocked', 'ready_for_deployment', 'waiting_for_input']
+const ATTENTION_STATUSES = ['ready_for_spec', 'blocked', 'ready_for_merge', 'waiting_for_input']
 
 const STATUS_LABELS: Record<string, string> = {
   ready_for_spec: 'Ready for Spec',
@@ -14,8 +14,8 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In Progress',
   blocked: 'Blocked',
   ready_for_qa: 'Ready for QA',
-  ready_for_deployment: 'Ready to Deploy',
-  deployed: 'Deployed',
+  ready_for_merge: 'Ready to Merge',
+  merged: 'Merged',
   abandoned: 'Abandoned',
   waiting_for_input: 'Waiting for Input',
 }
@@ -95,12 +95,12 @@ export function FocusPage() {
               <span className="attention-title">{task.title}</span>
               <span className="attention-meta">{task.project_name}</span>
               <span className="attention-meta">{formatRelativeTime(task.updated_at)}</span>
-              {task.status === 'ready_for_deployment' && (
+              {task.status === 'ready_for_merge' && (
                 <button
                   className="btn btn-primary btn-sm"
                   onClick={e => openDeployModal(e, task.id)}
                 >
-                  Deploy
+                  Merge
                 </button>
               )}
             </div>

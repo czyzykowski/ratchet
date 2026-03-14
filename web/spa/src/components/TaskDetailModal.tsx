@@ -503,7 +503,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 )}
                 {isReadyForDeployment && (
                   <button className="btn btn-primary" onClick={openDeployForm}>
-                    Deploy
+                    Merge
                   </button>
                 )}
               </div>
@@ -513,7 +513,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
 
         {data && showDeploy && (
           <div className="reset-form">
-            <div className="reset-form-header">Deploy Task</div>
+            <div className="reset-form-header">Merge Task</div>
 
             <label className="reset-checkbox-label">
               <input
@@ -521,7 +521,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 checked={skipMerge}
                 onChange={e => setSkipMerge(e.target.checked)}
               />
-              Skip merge (mark as deployed without running git merge)
+              Skip merge (mark as merged without running git merge)
             </label>
 
             {deployError && (
@@ -533,7 +533,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={confirmDeploy} disabled={deploying}>
-                {deploying ? 'Deploying...' : 'Confirm Deploy'}
+                {deploying ? 'Merging...' : 'Confirm Merge'}
               </button>
             </div>
           </div>
