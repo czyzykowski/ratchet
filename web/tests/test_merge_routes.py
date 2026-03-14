@@ -1,4 +1,4 @@
-"""Unit tests for POST /api/tasks/{id}/deploy."""
+"""Unit tests for POST /api/tasks/{id}/merge."""
 
 from __future__ import annotations
 
@@ -101,20 +101,20 @@ async def _seed_project(
 
 
 @pytest.mark.asyncio
-async def test_deploy_wrong_status_returns_400(
+async def test_merge_wrong_status_returns_400(
     store: InMemoryStore, client: TestClient
 ) -> None:
     task_id = uuid4()
     project_id = uuid4()
     await _setup_task(store, task_id, project_id, "My Task", ev.IN_PROGRESS)
 
-    response = client.post(f"/tasks/{task_id}/deploy", json={"skip_merge": True})
+    response = client.post(f"/tasks/{task_id}/merge", json={"skip_merge": True})
 
     assert response.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_deploy_skip_merge_transitions_to_deployed(
+async def test_merge_skip_merge_transitions_to_merged(
     store: InMemoryStore, client: TestClient
 ) -> None:
     task_id = uuid4()
@@ -124,7 +124,7 @@ async def test_deploy_skip_merge_transitions_to_deployed(
     )
     await _seed_project(store, project_id)
 
-    response = client.post(f"/tasks/{task_id}/deploy", json={"skip_merge": True})
+    response = client.post(f"/tasks/{task_id}/merge", json={"skip_merge": True})
 
     assert response.status_code == 200
     data = response.json()
@@ -132,7 +132,7 @@ async def test_deploy_skip_merge_transitions_to_deployed(
 
 
 @pytest.mark.asyncio
-async def test_deploy_git_failure_returns_400(
+async def test_merge_git_failure_returns_400(
     store: InMemoryStore, client: TestClient
 ) -> None:
     task_id = uuid4()
@@ -145,7 +145,7 @@ async def test_deploy_git_failure_returns_400(
     git_error = subprocess.CalledProcessError(1, ["git", "checkout"], stderr=b"branch not found")
 
     with patch("web.routes.api.tasks.subprocess.run", side_effect=git_error):
-        response = client.post(f"/tasks/{task_id}/deploy", json={"skip_merge": False})
+        response = client.post(f"/tasks/{task_id}/merge", json={"skip_merge": False})
 
     assert response.status_code == 400
     assert "branch not found" in response.json()["detail"]

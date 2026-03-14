@@ -132,15 +132,15 @@ def test_should_return_board_json_with_columns_in_status_order(
     assert blocked["tasks"][0]["title"] == "Task 2"
 
 
-def test_should_exclude_deployed_and_abandoned_tasks_from_board(
+def test_should_exclude_merged_and_abandoned_tasks_from_board(
     client: TestClient, store: InMemoryStore
 ) -> None:
     project_id = uuid4()
-    deployed_id = uuid4()
+    merged_id = uuid4()
     abandoned_id = uuid4()
     asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
     asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, deployed_id, project_id, "Deployed Task", ev.DEPLOYED)
+        _seed_task(store, merged_id, project_id, "Merged Task", ev.DEPLOYED)
     )
     asyncio.get_event_loop().run_until_complete(
         _seed_task(store, abandoned_id, project_id, "Abandoned Task", ev.ABANDONED)
@@ -151,7 +151,7 @@ def test_should_exclude_deployed_and_abandoned_tasks_from_board(
     data = response.json()
 
     all_task_ids = [t["id"] for col in data["columns"] for t in col["tasks"]]
-    assert str(deployed_id) not in all_task_ids
+    assert str(merged_id) not in all_task_ids
     assert str(abandoned_id) not in all_task_ids
 
 

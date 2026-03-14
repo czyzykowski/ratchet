@@ -273,7 +273,7 @@ def test_should_deploy_task(client: TestClient, store: InMemoryStore) -> None:
 
     with patch("web.routes.api.tasks.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
-        response = client.post(f"/api/tasks/{task_id}/deploy")
+        response = client.post(f"/api/tasks/{task_id}/merge")
 
     assert response.status_code == 200
     data = response.json()

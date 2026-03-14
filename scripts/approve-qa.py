@@ -1,4 +1,4 @@
-"""Advance task from ready_for_qa to ready_for_deployment."""
+"""Advance task from ready_for_qa to ready_for_merge."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from uuid import UUID
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Approve QA for a task, advancing it to ready_for_deployment."
+        description="Approve QA for a task, advancing it to ready_for_merge."
     )
     parser.add_argument("--task-id", required=True, help="Task UUID")
     return parser.parse_args()
@@ -67,7 +67,7 @@ async def main() -> None:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        print("Task advanced to ready_for_deployment")
+        print("Task advanced to ready_for_merge")
     finally:
         await close_pool()
 

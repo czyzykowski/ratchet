@@ -264,13 +264,13 @@ async def reset_task(task_id: UUID, request: Request) -> JSONResponse:
     return JSONResponse({"task": task.model_dump(mode="json") if task else None})
 
 
-class DeployRequest(BaseModel):
+class MergeRequest(BaseModel):
     skip_merge: bool = False
 
 
-@router.post("/tasks/{task_id}/deploy")
-async def deploy_task(
-    task_id: UUID, request: Request, body: DeployRequest = DeployRequest()
+@router.post("/tasks/{task_id}/merge")
+async def merge_task(
+    task_id: UUID, request: Request, body: MergeRequest = MergeRequest()
 ) -> JSONResponse:
     store = request.app.state.store
     state_machine = TaskStateMachine(store)
@@ -283,7 +283,7 @@ async def deploy_task(
     if current_status != ev.READY_FOR_DEPLOYMENT:
         raise HTTPException(
             status_code=400,
-            detail=f"Task {task_id} is not ready for deployment",
+            detail=f"Task {task_id} is not ready for merge",
         )
 
     task = await task_manager.get_task(task_id)
@@ -442,12 +442,12 @@ async def deploy_task(
         )
 
     if not body.skip_merge:
-        from core.qa_runner import load_deploy_config, run_deploy_steps
+        from core.qa_runner import load_merge_config, run_merge_steps
 
-        deploy_config = load_deploy_config(str(project.local_path))
+        deploy_config = load_merge_config(str(project.local_path))
         if deploy_config and deploy_config.steps:
             hook_results = await asyncio.get_event_loop().run_in_executor(
-                None, run_deploy_steps, deploy_config, str(project.local_path)
+                None, run_merge_steps, deploy_config, str(project.local_path)
             )
             await store.append_event(
                 aggregate_id=task_id,

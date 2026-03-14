@@ -493,7 +493,7 @@ async def run_qa_once(
     config = load_qa_config(project.local_path, qa_ratchet_yaml)
     if config is None:
         logger.info(
-            "No QA config found for task=%s, transitioning to ready_for_deployment", task.id
+            "No QA config found for task=%s, transitioning to ready_for_merge", task.id
         )
         await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
         return True

@@ -156,11 +156,11 @@ def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
     return results
 
 
-def load_deploy_config(local_path: str) -> QaConfig | None:
-    """Read <local_path>/ratchet.yaml and return QaConfig for deploy section, or None if absent.
+def load_merge_config(local_path: str) -> QaConfig | None:
+    """Read <local_path>/ratchet.yaml and return QaConfig for merge section, or None if absent.
 
     Normalizes both plain string and {command: ...} step forms.
-    Ignores max_fix_attempts if present (not applicable to deploy hooks).
+    Ignores max_fix_attempts if present (not applicable to merge hooks).
     """
     config_path = Path(local_path) / "ratchet.yaml"
     if not config_path.exists():
@@ -169,10 +169,10 @@ def load_deploy_config(local_path: str) -> QaConfig | None:
     with config_path.open() as f:
         data: Any = yaml.safe_load(f)
 
-    if not isinstance(data, dict) or "deploy" not in data:
+    if not isinstance(data, dict) or "merge" not in data:
         return None
 
-    deploy_section = data["deploy"]
+    deploy_section = data["merge"]
     if not isinstance(deploy_section, dict):
         return None
 
@@ -198,8 +198,8 @@ def load_deploy_config(local_path: str) -> QaConfig | None:
     return QaConfig(steps=steps)
 
 
-def run_deploy_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
-    """Run all deploy steps via subprocess, never stopping early on failure.
+def run_merge_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
+    """Run all merge steps via subprocess, never stopping early on failure.
 
     Returns list of QaStepResult for every step regardless of return code.
     """

@@ -105,7 +105,7 @@ def test_new_task_form_excludes_terminal_statuses(client: TestClient) -> None:
     all_tasks = [
         _make_task("Active Task", "ready_for_spec"),
         _make_task("In Progress Task", "ready_for_implementation"),
-        _make_task("Deployed Task", "deployed"),
+        _make_task("Merged Task", "merged"),
         _make_task("Abandoned Task", "abandoned"),
     ]
 
@@ -134,5 +134,5 @@ def test_new_task_form_excludes_terminal_statuses(client: TestClient) -> None:
     assert response.status_code == 200
     assert "Active Task" in response.text
     assert "In Progress Task" in response.text
-    assert "Deployed Task" not in response.text
+    assert "Merged Task" not in response.text
     assert "Abandoned Task" not in response.text
