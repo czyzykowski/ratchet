@@ -6,10 +6,10 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-
-from core.models_config import CHAT_MODEL
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
+
+from core.models_config import CHAT_MODEL
 
 if TYPE_CHECKING:
     from core.feature_manager import FeatureManager

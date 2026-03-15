@@ -5,10 +5,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from pathlib import Path
 from statistics import mean
 from uuid import uuid4
-
-from pathlib import Path
 
 from core.models import ReviewRun, Suggestion, SuggestionEvidence
 from core.models_config import WORKER_MODEL

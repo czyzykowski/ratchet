@@ -15,7 +15,6 @@ from subprocess import PIPE
 from uuid import UUID
 
 from core.context_assembler import ExecutionContext
-
 from core.models_config import WORKER_MODEL
 
 _ALLOWED_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"

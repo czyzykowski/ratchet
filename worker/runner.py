@@ -12,11 +12,11 @@ from uuid import UUID, uuid4
 
 from core import events as ev
 from core import qa_manager
-from core.models_config import WORKER_MODEL
 from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
 from core.models import Project, Spec, Task
+from core.models_config import WORKER_MODEL
 from core.project_manager import ProjectManager
 from core.qa_runner import (
     build_review_prompt,
