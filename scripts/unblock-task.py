@@ -1,4 +1,7 @@
-"""Unblock a task by transitioning it directly back to ready_for_implementation."""
+"""Unblock a task by transitioning it directly back to ready_for_implementation.
+
+Also supports clearing a pending baseline QA failure so the worker will retry.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +17,11 @@ def parse_args() -> argparse.Namespace:
         description="Unblock a task, transitioning it back to ready_for_implementation."
     )
     parser.add_argument("--task-id", required=True, help="Task UUID to unblock")
+    parser.add_argument(
+        "--retry-baseline",
+        action="store_true",
+        help="Clear pending baseline QA failure so worker will retry baseline check",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +56,16 @@ async def main() -> None:
 
         print(f"Task:   {task.title}")
         print(f"Status: {task.status}")
+
+        if args.retry_baseline:
+            await store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_BASELINE_QA_RETRY,
+                payload={"reason": "manual retry via unblock-task.py"},
+            )
+            print(f"Task {task_id}: baseline QA retry event added — worker will retry.")
+            return
 
         if task.status == ev.READY_FOR_IMPLEMENTATION:
             print("Task is already ready_for_implementation.")
