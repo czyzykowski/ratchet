@@ -305,7 +305,20 @@ async def run_once(
 
     if not skip_baseline:
         ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
-        baseline_failures = check_baseline_qa(project.local_path, ratchet_yaml)
+        try:
+            baseline_worktree = _create_baseline_worktree(project.local_path)
+        except QAWorktreeError as exc:
+            logger.warning(
+                "Baseline QA worktree creation failed for project=%s: %s — skipping baseline check",
+                project.name,
+                exc,
+            )
+            baseline_failures = []
+        else:
+            try:
+                baseline_failures = check_baseline_qa(baseline_worktree, ratchet_yaml)
+            finally:
+                _remove_qa_worktree(project.local_path, baseline_worktree)
         if baseline_failures:
             combined = "\n\n".join(
                 f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
@@ -479,6 +492,41 @@ def _find_existing_worktree(project_path: str, branch: str) -> str | None:
             if reported == f"refs/heads/{branch}" or reported == branch:
                 return current_path
     return None
+
+
+def _create_baseline_worktree(project_path: str) -> str:
+    """Create a temporary worktree on HEAD for baseline QA.
+
+    Runs detached from HEAD so it reflects the current clean branch state.
+    Symlinks .venv and web/spa/node_modules from the project root so QA steps work.
+    Returns the worktree path. Caller must clean up via _remove_qa_worktree().
+    Raises QAWorktreeError if worktree creation fails.
+    """
+    import uuid as _uuid
+
+    baseline_id = str(_uuid.uuid4())[:8]
+    wt_path = os.path.join(project_path, ".worktrees", f"baseline-{baseline_id}")
+    result = _subprocess.run(
+        ["git", "worktree", "add", "--detach", wt_path],
+        cwd=project_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise QAWorktreeError(
+            f"git worktree add (baseline) failed: {result.stderr.strip()}"
+        )
+    # Symlink .venv so Python QA steps work
+    venv_src = os.path.join(project_path, ".venv")
+    venv_dst = os.path.join(wt_path, ".venv")
+    if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
+        os.symlink(venv_src, venv_dst)
+    # Symlink web/spa/node_modules so npm build steps work
+    spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
+    spa_nm_dst = os.path.join(wt_path, "web", "spa", "node_modules")
+    if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
+        os.symlink(spa_nm_src, spa_nm_dst)
+    return wt_path
 
 
 def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, bool]:
