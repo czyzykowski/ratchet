@@ -366,3 +366,43 @@ async def test_dependency_eligibility_with_deps_not_compiled() -> None:
     # hls2 depends on hls1, which is not compiled, so it should not be eligible
     assert spec2.compiled is False
     assert hls1.id in spec2.dependencies
+
+
+# ---------------------------------------------------------------------------
+# session_id round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_store_session_id_in_event_payload_when_provided() -> None:
+    """should store session_id in event payload when provided"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc", session_id=session_id)
+    assert feature.session_id == session_id
+    feature_events = await store.get_events(feature.id, "feature")
+    assert feature_events[0].payload["session_id"] == str(session_id)
+
+
+@pytest.mark.asyncio
+async def test_should_return_session_id_on_get_feature_when_stored() -> None:
+    """should return session_id on get_feature when stored"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc", session_id=session_id)
+    retrieved = await fm.get_feature(feature.id)
+    assert retrieved is not None
+    assert retrieved.session_id == session_id
+
+
+@pytest.mark.asyncio
+async def test_should_return_none_for_session_id_when_not_provided() -> None:
+    """should return None for session_id when not provided"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    retrieved = await fm.get_feature(feature.id)
+    assert retrieved is not None
+    assert retrieved.session_id is None

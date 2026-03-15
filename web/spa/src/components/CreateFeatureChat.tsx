@@ -5,6 +5,7 @@ import { Markdown } from './Markdown'
 interface CreateFeatureChatProps {
   projectId: string
   onClose: () => void
+  sessionId?: string
 }
 
 interface Message {
@@ -20,7 +21,7 @@ interface FeaturePreview {
   raw: string
 }
 
-export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps) {
+export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessionId }: CreateFeatureChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -43,7 +44,8 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
   }, [messages, currentStream])
 
   useEffect(() => {
-    createSession().then(({ history }) => {
+    const load = initialSessionId ? loadSession(initialSessionId) : createSession()
+    load.then(({ history }) => {
       if (history.length > 0) {
         const restored: Message[] = []
         for (const entry of history) {
@@ -60,10 +62,24 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
     const res = await fetch('/api/feature-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: projectId }),
+      body: JSON.stringify({ project_id: projectId, force_new: true }),
     })
     const data = await res.json()
     const sid: string = data.session_id
+    setSessionId(sid)
+    const history: Array<{ content: string; assistant: string; image_id?: string | null }> = (data.messages ?? []).map(
+      (m: { content: string; assistant: string; image_id?: string | null }) => ({
+        content: m.content,
+        assistant: m.assistant,
+        image_id: m.image_id,
+      })
+    )
+    return { sid, history }
+  }
+
+  async function loadSession(sid: string): Promise<{ sid: string; history: Array<{ content: string; assistant: string; image_id?: string | null }> }> {
+    const res = await fetch(`/api/feature-sessions/${sid}`)
+    const data = await res.json()
     setSessionId(sid)
     const history: Array<{ content: string; assistant: string; image_id?: string | null }> = (data.messages ?? []).map(
       (m: { content: string; assistant: string; image_id?: string | null }) => ({
@@ -221,10 +237,15 @@ export function CreateFeatureChat({ projectId, onClose }: CreateFeatureChatProps
     setSaving(true)
     setSaveError(null)
     try {
+      const saveBody: Record<string, unknown> = {
+        project_id: projectId,
+        feature_block: detectedFeature.raw,
+      }
+      if (sessionId) saveBody.session_id = sessionId
       const res = await fetch('/api/features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, feature_block: detectedFeature.raw }),
+        body: JSON.stringify(saveBody),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))

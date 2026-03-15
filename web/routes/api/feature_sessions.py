@@ -104,6 +104,7 @@ def _extract_feature_preview(text: str) -> dict[str, Any] | None:
 
 class CreateSessionBody(BaseModel):
     project_id: UUID
+    force_new: bool = False
 
 
 class MessageBody(BaseModel):
@@ -117,36 +118,38 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     pool = request.app.state.pool
 
     # Return existing session if one already exists for this feature/project.
-    existing = await get_chat_session_by_context(pool, body.project_id)
-    if existing is not None:
-        session_id = str(existing.id)
-        if session_id not in request.app.state.feature_sessions:
-            pm = ProjectManager(store)
-            project = await pm.get_project(body.project_id)
-            if project is None:
-                raise HTTPException(
-                    status_code=404, detail=f"Project {body.project_id} not found"
+    if not body.force_new:
+        existing = await get_chat_session_by_context(pool, body.project_id)
+        if existing is not None:
+            session_id = str(existing.id)
+            if session_id not in request.app.state.feature_sessions:
+                pm = ProjectManager(store)
+                project = await pm.get_project(body.project_id)
+                if project is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Project {body.project_id} not found",
+                    )
+                local_path = str(project.local_path)
+                intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+                if not intent_md_path.exists():
+                    raise HTTPException(
+                        status_code=400, detail="INTENT.md not found in project"
+                    )
+                intent_md = intent_md_path.read_text()
+                system_prompt = _build_feature_system_prompt(intent_md)
+                session = SpecReplSession(
+                    task_id=str(body.project_id),
+                    system_prompt=system_prompt,
+                    cwd=local_path,
+                    history=_clean_history(list(existing.messages)),
                 )
-            local_path = str(project.local_path)
-            intent_md_path = Path(local_path) / "docs" / "INTENT.md"
-            if not intent_md_path.exists():
-                raise HTTPException(
-                    status_code=400, detail="INTENT.md not found in project"
-                )
-            intent_md = intent_md_path.read_text()
-            system_prompt = _build_feature_system_prompt(intent_md)
-            session = SpecReplSession(
-                task_id=str(body.project_id),
-                system_prompt=system_prompt,
-                cwd=local_path,
-                history=_clean_history(list(existing.messages)),
-            )
-            request.app.state.feature_sessions[session_id] = session
-        messages = [
-            {"role": "user", "content": u, "assistant": a, "image_id": img}
-            for u, a, img, _mt in existing.messages
-        ]
-        return JSONResponse({"session_id": session_id, "messages": messages})
+                request.app.state.feature_sessions[session_id] = session
+            messages = [
+                {"role": "user", "content": u, "assistant": a, "image_id": img}
+                for u, a, img, _mt in existing.messages
+            ]
+            return JSONResponse({"session_id": session_id, "messages": messages})
 
     pm = ProjectManager(store)
     project = await pm.get_project(body.project_id)
@@ -262,6 +265,19 @@ async def send_message(
         yield f"data: {json.dumps({'type': 'done', 'feature': feature_preview})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+@router.get("/{session_id}")
+async def get_session(session_id: str, request: Request) -> JSONResponse:
+    pool = request.app.state.pool
+    existing = await get_chat_session_by_id(pool, UUID(session_id))
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    messages = [
+        {"role": "user", "content": u, "assistant": a, "image_id": img}
+        for u, a, img, _mt in existing.messages
+    ]
+    return JSONResponse({"session_id": session_id, "messages": messages})
 
 
 @router.delete("/{session_id}")

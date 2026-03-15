@@ -21,6 +21,7 @@ class FeatureManager:
         project_id: UUID,
         title: str,
         description: str,
+        session_id: UUID | None = None,
     ) -> Feature:
         """Create a new feature.
 
@@ -34,6 +35,7 @@ class FeatureManager:
             "project_id": str(project_id),
             "title": title,
             "description": description,
+            "session_id": str(session_id) if session_id else None,
         }
         event = await self._store.append_event(
             aggregate_id=feature_id,
@@ -53,6 +55,7 @@ class FeatureManager:
             project_id=project_id,
             title=title,
             description=description,
+            session_id=session_id,
             created_at=event.occurred_at,
             updated_at=event.occurred_at,
         )
@@ -63,11 +66,13 @@ class FeatureManager:
         for event in feature_events:
             if event.event_type == ev.FEATURE_CREATED:
                 p = event.payload
+                sid_str = p.get("session_id")
                 return Feature(
                     id=UUID(p["feature_id"]),
                     project_id=UUID(p["project_id"]),
                     title=p["title"],
                     description=p["description"],
+                    session_id=UUID(sid_str) if sid_str else None,
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
@@ -81,11 +86,13 @@ class FeatureManager:
             if event.event_type == ev.FEATURE_CREATED:
                 p = event.payload
                 fid = UUID(p["feature_id"])
+                sid_str = p.get("session_id")
                 features[fid] = Feature(
                     id=fid,
                     project_id=UUID(p["project_id"]),
                     title=p["title"],
                     description=p["description"],
+                    session_id=UUID(sid_str) if sid_str else None,
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
