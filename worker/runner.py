@@ -24,6 +24,7 @@ from core.qa_runner import (
     get_git_diff,
     load_qa_config,
     parse_review_output,
+    run_auto_fixes,
     run_qa_steps,
 )
 from core.spec_manager import SpecManager
@@ -665,6 +666,7 @@ async def run_qa_once(
         return True
 
     try:
+        run_auto_fixes(config, qa_path)
         step_results = run_qa_steps(config, qa_path)
     finally:
         if qa_worktree_owned:

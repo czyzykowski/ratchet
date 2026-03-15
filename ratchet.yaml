@@ -1,5 +1,7 @@
 qa:
   max_fix_attempts: 3
+  auto_fix:
+    - "ruff check --fix ."
   steps:
     test: ".venv/bin/python -m pytest core/tests/ web/tests/ orchestrator/tests/ remote_worker/tests/ -v"
     lint: "ruff check ."

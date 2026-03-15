@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,7 @@ class QaStep:
 class QaConfig:
     steps: list[QaStep]
     max_fix_attempts: int = 3
+    auto_fix: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclass
@@ -132,7 +134,39 @@ def load_qa_config(local_path: str, ratchet_yaml: str | None = None) -> QaConfig
                 command = item.get("command", "")
                 steps.append(QaStep(name=name, command=command))
 
-    return QaConfig(steps=steps, max_fix_attempts=max_fix_attempts)
+    raw_auto_fix = qa_section.get("auto_fix", [])
+    auto_fix: list[str] = [str(cmd) for cmd in raw_auto_fix if cmd]
+
+    return QaConfig(steps=steps, max_fix_attempts=max_fix_attempts, auto_fix=auto_fix)
+
+
+def run_auto_fixes(config: QaConfig, cwd: str) -> bool:
+    """Run auto-fix commands from config.auto_fix, commit any changes.
+
+    Runs each command in cwd (wrapped in nix develop if flake.nix present).
+    After all commands, commits any modified files with a standard message.
+    Returns True if any files were changed and committed, False otherwise.
+    """
+    if not config.auto_fix:
+        return False
+
+    for command in config.auto_fix:
+        _run_command(command, cwd)
+
+    # Check if any files were modified
+    result = subprocess.run(
+        ["git", "diff", "--quiet"],
+        cwd=cwd,
+    )
+    if result.returncode == 0:
+        return False  # nothing changed
+
+    subprocess.run(
+        ["git", "commit", "-am", "fix: auto-fix lint/format issues"],
+        cwd=cwd,
+        capture_output=True,
+    )
+    return True
 
 
 def run_qa_steps(config: QaConfig, cwd: str) -> list[QaStepResult]:
