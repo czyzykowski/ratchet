@@ -6,10 +6,17 @@ import asyncio
 import base64
 import json
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+class _QueueDone:
+    """Sentinel value marking end of an ask_detached queue."""
+
+
+_QUEUE_DONE = _QueueDone()
 
 
 def get_chat_images_dir() -> Path:
@@ -82,6 +89,7 @@ class SpecReplSession:
 
     def __post_init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None
+        self._in_flight_task: asyncio.Task[None] | None = None
 
     async def _spawn(self) -> None:
         limit = 10 * 1024 * 1024  # 10 MB — Claude can output large JSON lines
@@ -224,6 +232,38 @@ class SpecReplSession:
 
         if full_text:
             self.history.append((user_input, full_text, image_id, image_media_type))
+
+    async def ask_detached(
+        self,
+        user_input: str,
+        on_complete: Callable[[str], Awaitable[None]],
+        image_id: str | None = None,
+        image_media_type: str | None = None,
+    ) -> asyncio.Queue[Any]:
+        """Run ask() as a non-cancellable background task feeding a queue.
+
+        If a previous ask is still in-flight, waits for it to finish first.
+        The returned queue yields str chunks, None for new-message boundaries,
+        and a _QUEUE_DONE sentinel when the response is complete.
+        on_complete(full_text) is called after generation regardless of whether
+        the queue is being read (i.e. immune to SSE client disconnects).
+        """
+        if self._in_flight_task is not None and not self._in_flight_task.done():
+            await self._in_flight_task
+
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        async def _run() -> None:
+            full_text = ""
+            async for chunk in self.ask(user_input, image_id, image_media_type):
+                await queue.put(chunk)
+                if chunk is not None:
+                    full_text += chunk
+            await queue.put(_QUEUE_DONE)
+            await on_complete(full_text)
+
+        self._in_flight_task = asyncio.create_task(_run())
+        return queue
 
     async def close(self) -> None:
         if self._proc is not None:

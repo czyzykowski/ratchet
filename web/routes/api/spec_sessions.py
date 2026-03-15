@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from core import events as ev
-from core.claude_repl import SpecReplSession
+from core.claude_repl import SpecReplSession, _QueueDone
 from core.project_manager import ProjectManager
 from core.task_manager import TaskManager
 from web.queries import get_chat_session_by_context, get_chat_session_by_id
@@ -185,20 +185,7 @@ async def send_message(
     if image_id_str:
         image_media_type = get_image_media_type(image_id_str)
 
-    async def _stream() -> AsyncGenerator[str, None]:
-        full_text = ""
-        async for chunk in session.ask(body.user_input, image_id_str, image_media_type):
-            if chunk is None:
-                yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
-            else:
-                full_text += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
-
-        spec_content: str | None = None
-        if "## SPEC READY" in full_text:
-            idx = full_text.find("## SPEC READY")
-            spec_content = full_text[idx + len("## SPEC READY"):].strip()
-
+    async def _on_complete(full_text: str) -> None:
         await store.append_event(
             aggregate_id=UUID(session_id),
             aggregate_type="chat_session",
@@ -210,6 +197,27 @@ async def send_message(
                 "image_media_type": image_media_type,
             },
         )
+
+    queue = await session.ask_detached(
+        body.user_input, _on_complete, image_id_str, image_media_type
+    )
+
+    async def _stream() -> AsyncGenerator[str, None]:
+        full_text = ""
+        while True:
+            chunk = await queue.get()
+            if isinstance(chunk, _QueueDone):
+                break
+            if chunk is None:
+                yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
+            else:
+                full_text += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+
+        spec_content: str | None = None
+        if "## SPEC READY" in full_text:
+            idx = full_text.find("## SPEC READY")
+            spec_content = full_text[idx + len("## SPEC READY"):].strip()
 
         yield f"data: {json.dumps({'type': 'done', 'spec': spec_content})}\n\n"
 

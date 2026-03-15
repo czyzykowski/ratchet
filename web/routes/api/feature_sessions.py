@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from core import events as ev
-from core.claude_repl import SpecReplSession
+from core.claude_repl import SpecReplSession, _QueueDone
 from core.project_manager import ProjectManager
 from web.queries import get_chat_session_by_context, get_chat_session_by_id
 from web.routes.api.chat_images import get_image_media_type
@@ -228,17 +228,7 @@ async def send_message(
     if image_id_str:
         image_media_type = get_image_media_type(image_id_str)
 
-    async def _stream() -> AsyncGenerator[str, None]:
-        full_text = ""
-        async for chunk in session.ask(body.user_input, image_id_str, image_media_type):
-            if chunk is None:
-                yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
-            else:
-                full_text += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
-
-        feature_preview = _extract_feature_preview(full_text)
-
+    async def _on_complete(full_text: str) -> None:
         await store.append_event(
             aggregate_id=UUID(session_id),
             aggregate_type="chat_session",
@@ -250,6 +240,24 @@ async def send_message(
                 "image_media_type": image_media_type,
             },
         )
+
+    queue = await session.ask_detached(
+        body.user_input, _on_complete, image_id_str, image_media_type
+    )
+
+    async def _stream() -> AsyncGenerator[str, None]:
+        full_text = ""
+        while True:
+            chunk = await queue.get()
+            if isinstance(chunk, _QueueDone):
+                break
+            if chunk is None:
+                yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
+            else:
+                full_text += chunk
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+
+        feature_preview = _extract_feature_preview(full_text)
 
         yield f"data: {json.dumps({'type': 'done', 'feature': feature_preview})}\n\n"
 
