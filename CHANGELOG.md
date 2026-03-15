@@ -7,12 +7,14 @@
 - `ExecutionTrace` Pydantic model in `core/models.py`
 - `Store.save_trace()` and `Store.get_trace()` protocol methods; implemented in `InMemoryStore` and `PostgresStore`
 - `scripts/migrate-traces.py`: one-off migration of existing `.md` trace files into `execution_traces` table
+- `FEATURE_IDEA = "idea"` and `FEATURE_IN_CLARIFICATION = "in_clarification"` feature status constants in `core/events.py`
 
 ### Changed
 - `ClaudeCodeInvoker` now accepts `store: Store` (required); traces saved to DB instead of filesystem
 - `InvocationResult.trace_path` replaced with `trace_id: UUID`
 - `web/routes/api/executions.py` reads traces via `store.get_trace()` instead of filesystem
 - `core/review_collector.py` reads traces via `store.get_trace()` instead of filesystem
+- Renamed `FEATURE_DRAFT` to `FEATURE_DEFINED = "defined"` in `core/events.py`; `FeatureManager.get_feature_status()` now returns `"defined"` where it previously returned `"draft"`
 - Board tab and Focus tab pipeline strip no longer render the `spec_qa` column/stage; the status remains functional in the backend and API
 
 ### Fixed

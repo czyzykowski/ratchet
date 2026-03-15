@@ -196,9 +196,11 @@ class FeatureManager:
     async def get_feature_status(self, feature_id: UUID) -> str:
         """Derive feature status from its high-level specs and their task statuses.
 
-        Returns one of: draft, generated, in_progress, done.
+        Returns one of: idea, in_clarification, defined, generated, in_progress, done.
 
-        - draft: no high-level specs, or none are compiled
+        - idea: feature created but no clarification started (future logic)
+        - in_clarification: feature being clarified with stakeholders (future logic)
+        - defined: no high-level specs, or none are compiled
         - generated: all compiled specs have tasks in early statuses
         - in_progress: ≥1 task past ready_for_implementation
         - done: all tasks deployed
@@ -207,7 +209,7 @@ class FeatureManager:
         compiled = [s for s in specs if s.compiled]
 
         if not compiled:
-            return ev.FEATURE_DRAFT
+            return ev.FEATURE_DEFINED
 
         # Fetch task statuses for all compiled specs
         task_statuses: list[str] = []
@@ -224,7 +226,7 @@ class FeatureManager:
             task_statuses.append(status)
 
         if not task_statuses:
-            return ev.FEATURE_DRAFT
+            return ev.FEATURE_DEFINED
 
         advanced_statuses = {ev.IN_PROGRESS, ev.BLOCKED, ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT}
 

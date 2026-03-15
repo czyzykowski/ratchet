@@ -67,7 +67,9 @@ REVIEW_SUGGESTION_DISMISSED = "review_suggestion.dismissed"
 REVIEW_SUGGESTION_SKIPPED = "review_suggestion.skipped"
 
 # Feature status constants (derived, not stored)
-FEATURE_DRAFT = "draft"
+FEATURE_IDEA = "idea"
+FEATURE_IN_CLARIFICATION = "in_clarification"
+FEATURE_DEFINED = "defined"
 FEATURE_GENERATED = "generated"
 FEATURE_IN_PROGRESS = "in_progress"
 FEATURE_DONE = "done"

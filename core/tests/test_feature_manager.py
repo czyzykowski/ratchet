@@ -283,24 +283,39 @@ async def test_mark_compiled_only_affects_targeted_spec() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_feature_status_draft_when_no_specs() -> None:
-    """should return draft when feature has no high-level specs"""
+async def test_get_feature_status_defined_when_no_specs() -> None:
+    """should return defined when feature has no high-level specs"""
     fm, _ = _make_fm()
     project_id = uuid.uuid4()
     feature = await fm.create_feature(project_id, "Feature", "desc")
     status = await fm.get_feature_status(feature.id)
-    assert status == ev.FEATURE_DRAFT
+    assert status == ev.FEATURE_DEFINED
 
 
 @pytest.mark.asyncio
-async def test_get_feature_status_draft_when_no_compiled_specs() -> None:
-    """should return draft when specs exist but none are compiled"""
+async def test_get_feature_status_defined_when_no_compiled_specs() -> None:
+    """should return defined when specs exist but none are compiled"""
     fm, _ = _make_fm()
     project_id = uuid.uuid4()
     feature = await fm.create_feature(project_id, "Feature", "desc")
     await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
     status = await fm.get_feature_status(feature.id)
-    assert status == ev.FEATURE_DRAFT
+    assert status == ev.FEATURE_DEFINED
+
+
+def test_feature_status_constants_exist() -> None:
+    """should verify all six feature status constants exist with correct string values"""
+    assert ev.FEATURE_IDEA == "idea"
+    assert ev.FEATURE_IN_CLARIFICATION == "in_clarification"
+    assert ev.FEATURE_DEFINED == "defined"
+    assert ev.FEATURE_GENERATED == "generated"
+    assert ev.FEATURE_IN_PROGRESS == "in_progress"
+    assert ev.FEATURE_DONE == "done"
+
+
+def test_feature_draft_constant_removed() -> None:
+    """should verify FEATURE_DRAFT constant no longer exists"""
+    assert not hasattr(ev, "FEATURE_DRAFT")
 
 
 @pytest.mark.asyncio
