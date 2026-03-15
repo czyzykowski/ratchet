@@ -11,6 +11,7 @@ from uuid import uuid4
 from pathlib import Path
 
 from core.models import ReviewRun, Suggestion, SuggestionEvidence
+from core.models_config import WORKER_MODEL
 from core.review_collector import CollectedData
 
 
@@ -34,7 +35,7 @@ class ReviewEngine:
     ) -> list[Suggestion]:
         prompt = self._build_prompt(data, previous_run_summary)
 
-        base_cmd = ["claude", "-p", prompt, "--model", "claude-sonnet-4-6", "--allowedTools", ""]
+        base_cmd = ["claude", "-p", prompt, "--model", WORKER_MODEL, "--allowedTools", ""]
         if os.environ.get("USE_NIX_DEVELOP"):
             cmd = ["nix", "develop", "--command"] + base_cmd
         else:

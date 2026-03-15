@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from core import events as ev
 from core import qa_manager
+from core.models_config import WORKER_MODEL
 from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
@@ -626,7 +627,7 @@ async def run_qa_once(
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
     review_proc = _subprocess.run(
-        ["claude", "-p", "--model", "claude-sonnet-4-6", "--allowedTools", "Bash,Read,Glob,Grep"],
+        ["claude", "-p", "--model", WORKER_MODEL, "--allowedTools", "Bash,Read,Glob,Grep"],
         input=review_prompt,
         cwd=project.local_path,
         capture_output=True,

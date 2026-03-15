@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.models_config import CHAT_MODEL
+
 
 class _QueueDone:
     """Sentinel value marking end of an ask_detached queue."""
@@ -86,7 +88,7 @@ class SpecReplSession:
     cwd: str
     history: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
     session_id: str = "default"
-    model: str = "claude-opus-4-6"
+    model: str = field(default=CHAT_MODEL)
 
     def __post_init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None

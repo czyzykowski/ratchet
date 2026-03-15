@@ -6,6 +6,8 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+
+from core.models_config import CHAT_MODEL
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -24,7 +26,7 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
         print(prompt, file=sys.stderr)
         print("--- END PROMPT ---\n", file=sys.stderr)
 
-    cmd = ["claude", "-p", prompt, "--model", "claude-opus-4-6", "--allowedTools", "Read,Glob,Bash"]
+    cmd = ["claude", "-p", prompt, "--model", CHAT_MODEL, "--allowedTools", "Read,Glob,Bash"]
     proc = subprocess.Popen(
         cmd,
         cwd=local_path,

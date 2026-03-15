@@ -16,8 +16,10 @@ from uuid import UUID
 
 from core.context_assembler import ExecutionContext
 
+from core.models_config import WORKER_MODEL
+
 _ALLOWED_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
-_MODEL = "claude-sonnet-4-6"
+_MODEL = WORKER_MODEL
 
 
 @dataclass
