@@ -24,7 +24,7 @@ async def _main_async() -> None:
     from worker.runner import run_qa_once
 
     store = PostgresStore()
-    invoker = ClaudeCodeInvoker()
+    invoker = ClaudeCodeInvoker(store=store)
     try:
         await run_qa_once(store, invoker)
     finally:

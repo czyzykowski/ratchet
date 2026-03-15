@@ -93,7 +93,7 @@ def _make_invoker(status: str = "completed") -> MagicMock:
         execution_id=uuid.uuid4(),
         status=status,
         failure_reason=None,
-        trace_path="/tmp/trace.md",
+        trace_id=uuid.uuid4(),
     )
     return invoker
 

@@ -437,7 +437,7 @@ async def merge_task(
                     worktree_path=merge_worktree,
                     prompt=prompt,
                 )
-                result = ClaudeCodeInvoker().invoke(context)
+                result = ClaudeCodeInvoker(store=store).invoke(context)
 
                 if result.status != "completed":
                     subprocess.run(

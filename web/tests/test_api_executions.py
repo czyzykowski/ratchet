@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -13,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core import events as ev
+from core.models import ExecutionTrace
 from core.store import InMemoryStore
 from web.routes.api.router import api_router
 
@@ -68,13 +68,18 @@ def test_should_return_execution_detail_with_trace(
     asyncio.get_event_loop().run_until_complete(
         _seed_execution(store, execution_id, task_id, spec_id)
     )
+    store.save_trace(
+        ExecutionTrace(
+            execution_id=execution_id,
+            task_id=task_id,
+            spec_id=spec_id,
+            content="# Trace content",
+            started_at=datetime(2024, 1, 1, tzinfo=UTC),
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        )
+    )
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        trace_path = Path(tmp_dir) / f"{execution_id}.md"
-        trace_path.write_text("# Trace content")
-
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmp_dir):
-            response = client.get(f"/api/executions/{execution_id}")
+    response = client.get(f"/api/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()
@@ -93,9 +98,7 @@ def test_should_return_execution_detail_with_null_trace_when_trace_file_missing(
         _seed_execution(store, execution_id, task_id, spec_id)
     )
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmp_dir):
-            response = client.get(f"/api/executions/{execution_id}")
+    response = client.get(f"/api/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()

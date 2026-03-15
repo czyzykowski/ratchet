@@ -158,11 +158,12 @@ def _assign_json(assign_msg: AssignTaskMessage) -> str:
 def _make_invocation_result(
     status: str = "completed", failure_reason: str | None = None
 ) -> InvocationResult:
+    eid = uuid4()
     return InvocationResult(
-        execution_id=uuid4(),
+        execution_id=eid,
         status=status,
         failure_reason=failure_reason,
-        trace_path="/tmp/trace.md",
+        trace_id=eid,
     )
 
 
