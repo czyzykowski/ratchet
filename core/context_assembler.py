@@ -20,11 +20,6 @@ Before starting:
 2. Follow the spec below exactly.
 3. Verify every item in the Success Criteria before reporting completion.
 
-**CRITICAL — Git workflow override:** You are already on the correct execution branch.
-Do NOT create feature branches, do NOT open pull requests, do NOT push to remote.
-Commit your changes directly to the current branch using `git add -A && git commit`.
-The PR-based workflow described in CLAUDE.md does NOT apply in this automated context.
-
 ---"""
 
 _KNOWLEDGE_PLACEHOLDER = """\
