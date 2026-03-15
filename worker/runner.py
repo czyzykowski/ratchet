@@ -76,8 +76,19 @@ async def get_next_task(
                     task_ids_seen.add(tid)
                     task_ids_ordered.append(tid)
 
+        # Skip this project entirely if it already has a task in progress.
+        has_in_progress = False
+        project_tasks: list[tuple[UUID, Any]] = []
         for task_id in task_ids_ordered:
             task = await task_manager.get_task(task_id)
+            if task is not None and task.status == ev.IN_PROGRESS:
+                has_in_progress = True
+                break
+            project_tasks.append((task_id, task))
+        if has_in_progress:
+            continue
+
+        for task_id, task in project_tasks:
             actionable = (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT)
             if task is None or task.status not in actionable:
                 continue
