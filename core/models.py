@@ -60,6 +60,7 @@ class Feature(BaseModel):
     project_id: UUID
     title: str
     description: str
+    session_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
