@@ -28,6 +28,7 @@ SPEC_CREATED = "spec.created"
 EXECUTION_STARTED = "execution.started"
 EXECUTION_COMPLETED = "execution.completed"
 EXECUTION_FAILED = "execution.failed"
+EXECUTION_TRACE_RECORDED = "execution.trace_recorded"
 
 # Q&A events
 TASK_INPUT_REQUESTED = "task_input_requested"

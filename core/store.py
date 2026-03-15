@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID, uuid4
 
-from core.models import Event
+from core import events as ev
+from core.models import Event, ExecutionTrace
 
 if TYPE_CHECKING:
     from psycopg_pool import AsyncConnectionPool
@@ -31,6 +33,10 @@ class Store(Protocol):
 
     async def refresh_views(self) -> None: ...
 
+    def save_trace(self, trace: ExecutionTrace) -> None: ...
+
+    async def get_trace(self, execution_id: UUID) -> ExecutionTrace | None: ...
+
 
 class InMemoryStore:
     """In-memory event store for testing. Each instance is fully isolated."""
@@ -38,6 +44,7 @@ class InMemoryStore:
     def __init__(self) -> None:
         self._events: list[Event] = []
         self._seq: int = 0
+        self._traces: dict[UUID, ExecutionTrace] = {}
 
     async def append_event(
         self,
@@ -73,6 +80,12 @@ class InMemoryStore:
 
     async def refresh_views(self) -> None:
         pass  # no-op: no materialized views in memory
+
+    def save_trace(self, trace: ExecutionTrace) -> None:
+        self._traces[trace.execution_id] = trace
+
+    async def get_trace(self, execution_id: UUID) -> ExecutionTrace | None:
+        return self._traces.get(execution_id)
 
 
 class PostgresStore:
@@ -178,3 +191,70 @@ class PostgresStore:
         pool = await self._get_pool()
         async with pool.connection() as conn:
             await conn.execute("SELECT refresh_all_views()")
+
+    def save_trace(self, trace: ExecutionTrace) -> None:
+        """Insert trace into execution_traces and append EXECUTION_TRACE_RECORDED event (sync)."""
+        import psycopg  # lazy import — avoids psycopg at test collection time
+
+        url = os.environ.get("DATABASE_URL", "")
+        url = url.replace("postgresql+psycopg://", "postgresql://")
+        with psycopg.connect(url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO execution_traces
+                        (execution_id, task_id, spec_id, content, started_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (execution_id) DO NOTHING
+                    """,
+                    (
+                        str(trace.execution_id),
+                        str(trace.task_id),
+                        str(trace.spec_id),
+                        trace.content,
+                        trace.started_at,
+                    ),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO events (aggregate_id, aggregate_type, event_type, payload)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (
+                        str(trace.execution_id),
+                        "execution",
+                        ev.EXECUTION_TRACE_RECORDED,
+                        json.dumps(
+                            {
+                                "execution_id": str(trace.execution_id),
+                                "task_id": str(trace.task_id),
+                                "spec_id": str(trace.spec_id),
+                            }
+                        ),
+                    ),
+                )
+            conn.commit()
+
+    async def get_trace(self, execution_id: UUID) -> ExecutionTrace | None:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT execution_id, task_id, spec_id, content, started_at, created_at
+                    FROM execution_traces
+                    WHERE execution_id = %s
+                    """,
+                    (str(execution_id),),
+                )
+                row = await cur.fetchone()
+        if row is None:
+            return None
+        return ExecutionTrace(
+            execution_id=row[0],
+            task_id=row[1],
+            spec_id=row[2],
+            content=row[3],
+            started_at=row[4],
+            created_at=row[5],
+        )

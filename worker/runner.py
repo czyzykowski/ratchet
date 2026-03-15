@@ -506,12 +506,15 @@ def _create_baseline_worktree(project_path: str) -> str:
 
     baseline_id = str(_uuid.uuid4())[:8]
     wt_path = os.path.join(project_path, ".worktrees", f"baseline-{baseline_id}")
-    result = _subprocess.run(
-        ["git", "worktree", "add", "--detach", wt_path],
-        cwd=project_path,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = _subprocess.run(
+            ["git", "worktree", "add", "--detach", wt_path],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise QAWorktreeError(f"git worktree add (baseline) failed: {exc}") from exc
     if result.returncode != 0:
         raise QAWorktreeError(
             f"git worktree add (baseline) failed: {result.stderr.strip()}"
