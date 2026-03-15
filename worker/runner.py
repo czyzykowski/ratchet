@@ -459,12 +459,36 @@ class QAWorktreeError(Exception):
     """Raised when a QA worktree cannot be created."""
 
 
-def _create_qa_worktree(project_path: str, execution_branch: str) -> str:
+def _find_existing_worktree(project_path: str, branch: str) -> str | None:
+    """Return the path of an existing worktree checked out on branch, or None."""
+    result = _subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=project_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    current_path: str | None = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = line[len("worktree "):]
+        elif line.startswith("branch ") and current_path:
+            # git reports branch as refs/heads/<name>
+            reported = line[len("branch "):]
+            if reported == f"refs/heads/{branch}" or reported == branch:
+                return current_path
+    return None
+
+
+def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, bool]:
     """Create a temporary worktree on the execution branch for QA testing.
 
     Symlinks .venv from the project root so relative .venv/bin/python commands work.
-    Returns the worktree path on success.
-    Raises QAWorktreeError on failure — never falls back to project_path.
+    Returns (worktree_path, owned) where owned=True means we created it and must
+    remove it afterwards. owned=False means we reused an existing worktree (e.g. the
+    execution worktree that was never cleaned up) and must NOT remove it.
+    Raises QAWorktreeError if worktree creation fails and no existing worktree found.
     """
     import uuid as _uuid
 
@@ -477,6 +501,15 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> str:
         text=True,
     )
     if result.returncode != 0:
+        # Branch may already be checked out in the execution worktree — reuse it.
+        existing = _find_existing_worktree(project_path, execution_branch)
+        if existing:
+            logger.info(
+                "Reusing existing worktree at %s for branch %s",
+                existing,
+                execution_branch,
+            )
+            return existing, False
         raise QAWorktreeError(
             f"git worktree add failed for branch {execution_branch!r}:"
             f" {result.stderr.strip()}"
@@ -485,7 +518,7 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> str:
     venv_dst = os.path.join(qa_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
-    return qa_path
+    return qa_path, True
 
 
 def _remove_qa_worktree(project_path: str, qa_path: str) -> None:
@@ -569,7 +602,7 @@ async def run_qa_once(
         return True
 
     try:
-        qa_path = _create_qa_worktree(project.local_path, execution_branch)
+        qa_path, qa_worktree_owned = _create_qa_worktree(project.local_path, execution_branch)
     except QAWorktreeError as exc:
         failure_reason = f"QA worktree creation failed: {exc}"
         logger.error("task=%s: %s", task.id, failure_reason)
@@ -581,7 +614,8 @@ async def run_qa_once(
     try:
         step_results = run_qa_steps(config, qa_path)
     finally:
-        _remove_qa_worktree(project.local_path, qa_path)
+        if qa_worktree_owned:
+            _remove_qa_worktree(project.local_path, qa_path)
 
     failed_steps = [r for r in step_results if r.returncode != 0]
 
