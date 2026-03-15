@@ -582,6 +582,10 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
     venv_dst = os.path.join(qa_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
+    nm_src = os.path.join(project_path, "node_modules")
+    nm_dst = os.path.join(qa_path, "node_modules")
+    if os.path.exists(nm_src) and not os.path.lexists(nm_dst):
+        os.symlink(nm_src, nm_dst)
     env_src = os.path.join(project_path, ".env")
     env_dst = os.path.join(qa_path, ".env")
     if os.path.exists(env_src) and not os.path.lexists(env_dst):
