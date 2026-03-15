@@ -1,13 +1,16 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import { Markdown } from '../components/Markdown'
+import { CreateFeatureChat } from '../components/CreateFeatureChat'
 
 interface Feature {
   id: string
   project_id: string
   title: string
   description: string
+  session_id: string | null
 }
 
 interface HighLevelSpec {
@@ -28,6 +31,8 @@ interface FeatureDetailResponse {
 
 export function FeatureDetailPage() {
   const { feature_id } = useParams<{ feature_id: string }>()
+  const queryClient = useQueryClient()
+  const [modalMode, setModalMode] = useState<'view-chat' | 'new-feature' | null>(null)
   const { data, isLoading, error } = useQuery<FeatureDetailResponse>({
     queryKey: ['feature', feature_id],
     queryFn: () => apiFetch<FeatureDetailResponse>(`/api/features/${feature_id}`),
@@ -41,12 +46,43 @@ export function FeatureDetailPage() {
   const { feature, specs } = data
   const sortedSpecs = [...specs].sort((a, b) => a.order - b.order)
 
+  function handleModalClose() {
+    setModalMode(null)
+    queryClient.invalidateQueries({ queryKey: ['feature', feature_id] })
+    queryClient.invalidateQueries({ queryKey: ['features'] })
+  }
+
   return (
     <div className="page">
       <header className="page-header">
         <h1>{feature.title}</h1>
-        <Link to="/features" className="btn btn-secondary">← Features</Link>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {feature.session_id && (
+            <button className="btn btn-secondary" onClick={() => setModalMode('view-chat')}>
+              View Chat
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={() => setModalMode('new-feature')}>
+            New Feature
+          </button>
+          <Link to="/features" className="btn btn-secondary">← Features</Link>
+        </div>
       </header>
+
+      {modalMode === 'view-chat' && feature.session_id && (
+        <CreateFeatureChat
+          projectId={feature.project_id}
+          sessionId={feature.session_id}
+          onClose={handleModalClose}
+        />
+      )}
+
+      {modalMode === 'new-feature' && (
+        <CreateFeatureChat
+          projectId={feature.project_id}
+          onClose={handleModalClose}
+        />
+      )}
 
       {feature.description && (
         <div className="modal-field">

@@ -120,3 +120,60 @@ def test_should_return_404_when_feature_not_found(
 ) -> None:
     response = client.get(f"/api/features/{uuid4()}")
     assert response.status_code == 404
+
+
+_FEATURE_BLOCK = """# Feature: My Feature
+
+## Description
+A description.
+
+## High-Level Specs
+### 1. Spec One
+**Order:** 1
+**Dependencies:** none
+**Content:**
+Some content here.
+"""
+
+
+def test_should_store_session_id_when_provided_to_post_features(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    session_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    response = client.post(
+        "/api/features",
+        json={
+            "project_id": str(project_id),
+            "feature_block": _FEATURE_BLOCK,
+            "session_id": str(session_id),
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["feature"]["session_id"] == str(session_id)
+
+
+def test_should_reflect_session_id_in_get_feature_response(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    session_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    post_resp = client.post(
+        "/api/features",
+        json={
+            "project_id": str(project_id),
+            "feature_block": _FEATURE_BLOCK,
+            "session_id": str(session_id),
+        },
+    )
+    assert post_resp.status_code == 201
+    feature_id = post_resp.json()["feature"]["id"]
+
+    get_resp = client.get(f"/api/features/{feature_id}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["feature"]["session_id"] == str(session_id)

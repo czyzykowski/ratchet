@@ -104,6 +104,7 @@ def _extract_feature_preview(text: str) -> dict[str, Any] | None:
 
 class CreateSessionBody(BaseModel):
     project_id: UUID
+    force_new: bool = False
 
 
 class MessageBody(BaseModel):
@@ -117,7 +118,7 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     pool = request.app.state.pool
 
     # Return existing session if one already exists for this feature/project.
-    existing = await get_chat_session_by_context(pool, body.project_id)
+    existing = None if body.force_new else await get_chat_session_by_context(pool, body.project_id)
     if existing is not None:
         session_id = str(existing.id)
         if session_id not in request.app.state.feature_sessions:
@@ -181,6 +182,20 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     )
 
     return JSONResponse({"session_id": session_id, "messages": []})
+
+
+@router.get("/{session_id}")
+async def get_session(session_id: str, request: Request) -> JSONResponse:
+    """Return message history for a specific historic feature session."""
+    pool = request.app.state.pool
+    existing = await get_chat_session_by_id(pool, UUID(session_id))
+    if existing is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    messages = [
+        {"role": "user", "content": u, "assistant": a, "image_id": img}
+        for u, a, img, _mt in existing.messages
+    ]
+    return JSONResponse({"session_id": session_id, "messages": messages})
 
 
 async def _recover_session(session_id: str, request: Request) -> SpecReplSession | None:

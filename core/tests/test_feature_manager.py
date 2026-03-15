@@ -123,6 +123,46 @@ async def test_list_features_only_returns_features_for_requested_project() -> No
 
 
 # ---------------------------------------------------------------------------
+# session_id round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_should_store_session_id_in_event_payload_when_provided() -> None:
+    """should store session_id in event payload when provided"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "F", "desc", session_id=session_id)
+    assert feature.session_id == session_id
+    feature_events = await store.get_events(feature.id, "feature")
+    assert feature_events[0].payload["session_id"] == str(session_id)
+
+
+@pytest.mark.asyncio
+async def test_should_return_session_id_on_get_feature_when_stored() -> None:
+    """should return session_id on get_feature when stored"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    created = await fm.create_feature(project_id, "F", "desc", session_id=session_id)
+    found = await fm.get_feature(created.id)
+    assert found is not None
+    assert found.session_id == session_id
+
+
+@pytest.mark.asyncio
+async def test_should_return_none_for_session_id_when_not_provided() -> None:
+    """should return None for session_id when not provided"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    created = await fm.create_feature(project_id, "F", "desc")
+    found = await fm.get_feature(created.id)
+    assert found is not None
+    assert found.session_id is None
+
+
+# ---------------------------------------------------------------------------
 # add_high_level_spec
 # ---------------------------------------------------------------------------
 

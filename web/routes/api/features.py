@@ -20,6 +20,7 @@ router = APIRouter()
 class CreateFeatureBody(BaseModel):
     project_id: UUID
     feature_block: str  # raw text from ## FEATURE READY block
+    session_id: UUID | None = None
 
 
 def _parse_feature_block(block: str) -> tuple[str, str, list[dict[str, Any]]]:
@@ -73,7 +74,9 @@ async def create_feature(body: CreateFeatureBody, request: Request) -> JSONRespo
         raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
 
     title, description, specs = _parse_feature_block(body.feature_block)
-    feature = await fm.create_feature(body.project_id, title, description)
+    feature = await fm.create_feature(
+        body.project_id, title, description, session_id=body.session_id
+    )
 
     hls_by_order: dict[int, HighLevelSpec] = {}
     for spec_def in sorted(specs, key=lambda s: s["order"]):
