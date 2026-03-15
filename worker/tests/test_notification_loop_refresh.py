@@ -15,12 +15,13 @@ from worker.runner import notification_loop
 
 
 def _make_invoker() -> MagicMock:
+    eid = uuid.uuid4()
     invoker = MagicMock()
     invoker.invoke.return_value = InvocationResult(
-        execution_id=uuid.uuid4(),
+        execution_id=eid,
         status="completed",
         failure_reason=None,
-        trace_path="/tmp/trace.md",
+        trace_id=eid,
     )
     return invoker
 

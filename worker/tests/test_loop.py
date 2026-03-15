@@ -19,6 +19,8 @@ PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
+PATCH_BASELINE_WORKTREE = "worker.runner._create_baseline_worktree"
+PATCH_REMOVE_QA_WORKTREE = "worker.runner._remove_qa_worktree"
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -88,12 +90,13 @@ async def _advance_to_ready_for_qa(store: InMemoryStore, task_id: uuid.UUID) -> 
 
 
 def _make_invoker(status: str = "completed") -> MagicMock:
+    eid = uuid.uuid4()
     invoker = MagicMock()
     invoker.invoke.return_value = InvocationResult(
-        execution_id=uuid.uuid4(),
+        execution_id=eid,
         status=status,
         failure_reason=None,
-        trace_path="/tmp/trace.md",
+        trace_id=eid,
     )
     return invoker
 
@@ -125,6 +128,8 @@ async def test_run_once_returns_true_when_task_found() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_BASELINE_WORKTREE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_QA_WORKTREE),
     ):
         mock_prepare.side_effect = _fake_worktree
         result = await run_once(store, invoker)
@@ -152,7 +157,11 @@ async def test_run_once_skips_when_baseline_qa_fails() -> None:
         output="E501 line too long",
     )
 
-    with patch("worker.runner.check_baseline_qa", return_value=[fake_failure]):
+    with (
+        patch(PATCH_BASELINE_WORKTREE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_QA_WORKTREE),
+        patch("worker.runner.check_baseline_qa", return_value=[fake_failure]),
+    ):
         result = await run_once(store, invoker)
 
     assert result is False

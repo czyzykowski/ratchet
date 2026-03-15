@@ -18,6 +18,7 @@ from core.invoker import (
     get_traces_dir,
     parse_output,
 )
+from core.store import InMemoryStore
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -142,9 +143,10 @@ class TestGetTracesDir:
 # ---------------------------------------------------------------------------
 
 class TestClaudeCodeInvoker:
-    def test_invoke_completed(self, tmp_path):
+    def test_invoke_completed(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
             "subprocess.Popen",
@@ -157,9 +159,10 @@ class TestClaudeCodeInvoker:
         assert result.failure_reason is None
         assert result.execution_id == ctx.execution_id
 
-    def test_invoke_blocked_failed(self, tmp_path):
+    def test_invoke_blocked_failed(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
         output = "BLOCKED: missing TEST_DATABASE_URL\n\nfurther info"
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout=output)):
@@ -168,9 +171,10 @@ class TestClaudeCodeInvoker:
         assert result.status == "failed"
         assert "missing TEST_DATABASE_URL" in result.failure_reason
 
-    def test_invoke_crashed(self, tmp_path):
+    def test_invoke_crashed(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
             "subprocess.Popen",
@@ -181,9 +185,10 @@ class TestClaudeCodeInvoker:
         assert result.status == "crashed"
         assert "code 1" in result.failure_reason
 
-    def test_invoke_no_marker_exit_zero(self, tmp_path):
+    def test_invoke_no_marker_exit_zero(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout="I did some stuff")):
             result = invoker.invoke(ctx)
@@ -191,79 +196,83 @@ class TestClaudeCodeInvoker:
         assert result.status == "failed"
         assert result.failure_reason == "no completion marker found in output"
 
-    def test_trace_file_written(self, tmp_path):
+    def test_trace_saved_to_store(self):
+        import asyncio
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
-            result = invoker.invoke(ctx)
+            invoker.invoke(ctx)
 
-        trace = Path(result.trace_path)
-        assert trace.exists()
-        content = trace.read_text()
-        assert str(ctx.execution_id) in content
-        assert "COMPLETED: done" in content
+        trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
+        assert trace is not None
+        assert str(ctx.execution_id) in trace.content
+        assert "COMPLETED: done" in trace.content
 
-    def test_trace_file_path_matches_result(self, tmp_path):
+    def test_trace_saved_on_crash(self):
+        import asyncio
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
-
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: ok")):
-            result = invoker.invoke(ctx)
-
-        expected_path = tmp_path / f"{ctx.execution_id}.md"
-        assert result.trace_path == str(expected_path.resolve())
-
-    def test_trace_file_written_on_crash(self, tmp_path):
-        ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
             "subprocess.Popen",
             return_value=_fake_popen(stdout="boom", returncode=2),
         ):
-            result = invoker.invoke(ctx)
+            invoker.invoke(ctx)
 
-        assert Path(result.trace_path).exists()
+        trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
+        assert trace is not None
 
-    def test_trace_file_written_on_blocked(self, tmp_path):
+    def test_trace_saved_on_blocked(self):
+        import asyncio
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout="BLOCKED: something")):
-            result = invoker.invoke(ctx)
+            invoker.invoke(ctx)
 
-        assert Path(result.trace_path).exists()
+        trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
+        assert trace is not None
 
-    def test_trace_contains_header_fields(self, tmp_path):
+    def test_trace_contains_header_fields(self):
+        import asyncio
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
-            result = invoker.invoke(ctx)
+            invoker.invoke(ctx)
 
-        content = Path(result.trace_path).read_text()
-        assert f"# Execution Trace: {ctx.execution_id}" in content
-        assert f"# Task: {ctx.task_id}" in content
-        assert f"# Spec: {ctx.spec_id}" in content
-        assert "# Started:" in content
+        trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
+        assert trace is not None
+        assert f"# Execution Trace: {ctx.execution_id}" in trace.content
+        assert f"# Task: {ctx.task_id}" in trace.content
+        assert f"# Spec: {ctx.spec_id}" in trace.content
+        assert "# Started:" in trace.content
 
-    def test_trace_contains_stderr(self, tmp_path):
+    def test_trace_contains_stderr(self):
+        import asyncio
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
             "subprocess.Popen",
             return_value=_fake_popen(stdout="COMPLETED: ok", stderr="warning: something"),
         ):
-            result = invoker.invoke(ctx)
+            invoker.invoke(ctx)
 
-        content = Path(result.trace_path).read_text()
-        assert "warning: something" in content
+        trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
+        assert trace is not None
+        assert "warning: something" in trace.content
 
-    def test_execution_id_in_result(self, tmp_path):
+    def test_execution_id_in_result(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
             result = invoker.invoke(ctx)
@@ -272,7 +281,8 @@ class TestClaudeCodeInvoker:
 
     def test_subprocess_called_with_correct_args(self, tmp_path):
         ctx = _make_context(worktree_path=str(tmp_path))
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
             "subprocess.Popen",
@@ -292,20 +302,10 @@ class TestClaudeCodeInvoker:
         assert call_args.kwargs["stderr"] == subprocess.PIPE
         assert call_args.kwargs["text"] is True
 
-    def test_traces_dir_created_if_missing(self, tmp_path):
-        new_dir = str(tmp_path / "nested" / "traces")
-        ClaudeCodeInvoker(traces_dir=new_dir)
-        assert Path(new_dir).is_dir()
-
-    def test_uses_get_traces_dir_when_none(self, tmp_path):
-        custom = str(tmp_path / "auto_traces")
-        with patch.dict(os.environ, {"RATCHET_TRACES_DIR": custom}, clear=False):
-            invoker = ClaudeCodeInvoker(traces_dir=None)
-        assert invoker.traces_dir == str(Path(custom).resolve())
-
-    def test_failure_reason_from_blocked_report(self, tmp_path):
+    def test_failure_reason_from_blocked_report(self):
         ctx = _make_context()
-        invoker = ClaudeCodeInvoker(traces_dir=str(tmp_path))
+        store = InMemoryStore()
+        invoker = ClaudeCodeInvoker(store=store)
         output = (
             "Starting execution\n"
             "BLOCKED: missing TEST_DATABASE_URL\n"
