@@ -562,6 +562,16 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
                 existing,
                 execution_branch,
             )
+            # Ensure symlinks exist in the reused worktree (execution worktree
+            # may not have them if it was created before this fix).
+            venv_src = os.path.join(project_path, ".venv")
+            venv_dst = os.path.join(existing, ".venv")
+            if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
+                os.symlink(venv_src, venv_dst)
+            spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
+            spa_nm_dst = os.path.join(existing, "web", "spa", "node_modules")
+            if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
+                os.symlink(spa_nm_src, spa_nm_dst)
             return existing, False
         raise QAWorktreeError(
             f"git worktree add failed for branch {execution_branch!r}:"
@@ -571,6 +581,11 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
     venv_dst = os.path.join(qa_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
+    # Symlink web/spa/node_modules so npm build steps work
+    spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
+    spa_nm_dst = os.path.join(qa_path, "web", "spa", "node_modules")
+    if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
+        os.symlink(spa_nm_src, spa_nm_dst)
     return qa_path, True
 
 
