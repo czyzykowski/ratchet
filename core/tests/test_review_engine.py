@@ -39,6 +39,7 @@ def collected_data() -> CollectedData:
         project_claude_md={},
         global_claude_md="",
         ratchet_yaml_content=None,
+        completion_instructions_content="## Completion Instructions\nCOMPLETED or BLOCKED",
     )
 
 

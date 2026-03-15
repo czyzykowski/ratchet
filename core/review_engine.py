@@ -8,8 +8,15 @@ import subprocess
 from statistics import mean
 from uuid import uuid4
 
+from pathlib import Path
+
 from core.models import ReviewRun, Suggestion, SuggestionEvidence
 from core.review_collector import CollectedData
+
+
+def _completion_instructions_path() -> str:
+    """Return absolute path to context_assembler.py."""
+    return str(Path(__file__).parent / "context_assembler.py")
 
 
 class ReviewAnalysisError(Exception):
@@ -135,6 +142,17 @@ class ReviewEngine:
             lines.append(data.ratchet_yaml_content)
             lines.append("")
 
+        # 5b. Completion instructions (from core/context_assembler.py)
+        lines.append("## Completion Instructions (injected into every agent execution)")
+        lines.append(
+            "The following text is appended verbatim to every task prompt sent to Claude Code."
+            " Suggestions targeting this content should use"
+            ' target="completion_instructions" and'
+            f' target_path="{_completion_instructions_path()}".'
+        )
+        lines.append(data.completion_instructions_content)
+        lines.append("")
+
         # 6. QA failures grouped by type (most recent 20)
         lines.append("## QA Failures (most recent 20)")
         groups: dict[str, list[dict[str, object]]] = {
@@ -218,7 +236,8 @@ class ReviewEngine:
             "where each element has exactly these keys:"
         )
         lines.append(
-            '"target" (one of "project_claude_md", "global_claude_md", "ratchet_yaml"),'
+            '"target" (one of "project_claude_md", "global_claude_md", "ratchet_yaml",'
+            ' "completion_instructions"),'
         )
         lines.append('"target_path" (absolute path string),')
         lines.append('"title", "reasoning",')

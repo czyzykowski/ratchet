@@ -100,7 +100,7 @@ class ReviewScope(BaseModel):
     include_global: bool
 
 
-SuggestionTarget = Literal["project_claude_md", "global_claude_md", "ratchet_yaml"]
+SuggestionTarget = Literal["project_claude_md", "global_claude_md", "ratchet_yaml", "completion_instructions"]
 
 
 class ReviewRun(BaseModel):

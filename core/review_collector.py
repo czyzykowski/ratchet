@@ -30,6 +30,7 @@ class CollectedData:
     project_claude_md: dict[UUID, str]  # project_id → content or ""
     global_claude_md: str  # "" if missing or scope.include_global=False
     ratchet_yaml_content: str | None  # None if file missing
+    completion_instructions_content: str  # _COMPLETION_INSTRUCTIONS from context_assembler
 
 
 class ReviewDataCollector:
@@ -202,6 +203,10 @@ class ReviewDataCollector:
         except FileNotFoundError:
             ratchet_yaml_content = None
 
+        # 12. Completion instructions from context_assembler
+        from core.context_assembler import _COMPLETION_INSTRUCTIONS
+        completion_instructions_content = _COMPLETION_INSTRUCTIONS
+
         return CollectedData(
             tasks=all_tasks,
             specs_by_task=specs_by_task,
@@ -213,6 +218,7 @@ class ReviewDataCollector:
             project_claude_md=project_claude_md,
             global_claude_md=global_claude_md,
             ratchet_yaml_content=ratchet_yaml_content,
+            completion_instructions_content=completion_instructions_content,
         )
 
 
