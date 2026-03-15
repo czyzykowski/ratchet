@@ -48,6 +48,23 @@ async def main() -> None:
 
         print("=== RATCHET BOARD ===")
 
+        # Show tasks with pending baseline QA failures (from events, no live re-run)
+        from worker.runner import _has_pending_baseline_qa_failure
+        baseline_blocked: list[str] = []
+        for task in all_tasks:
+            if task["status"] not in (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT):
+                continue
+            task_id = task["id"]
+            tevents = task_events_cache.get(task_id, [])
+            if _has_pending_baseline_qa_failure(tevents):
+                project_name = project_by_id.get(task["project_id"])
+                proj_label = project_name.name if project_name else "unknown"
+                baseline_blocked.append(f"  {proj_label} — {task['title'][:60]}")
+        if baseline_blocked:
+            print("\n⚠  BASELINE QA BLOCKED (worker skipping these tasks):")
+            for line in baseline_blocked:
+                print(line)
+
         if args.abandoned:
             abandoned_tasks = [t for t in all_tasks if t["status"] == ev.ABANDONED]
             if not abandoned_tasks:
