@@ -2,7 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- `ExecutionTrace` model in `core/models.py` with fields `execution_id`, `task_id`, `spec_id`, `content`, `started_at`, `created_at`
+- `EXECUTION_TRACE_RECORDED` event constant in `core/events.py`
+- `save_trace()`/`get_trace()` methods on `Store` protocol, `InMemoryStore`, and `PostgresStore`
+- Alembic migration `a0b1c2d3e4f5` adds `execution_traces` table to PostgreSQL
+- `scripts/migrate-traces.py` one-off script to migrate existing `.md` trace files into the database
+
 ### Changed
+- `InvocationResult.trace_path: str` replaced with `trace_id: UUID`; `ClaudeCodeInvoker` now accepts `store: Store` instead of `traces_dir`
+- Execution traces stored in the database via `store.save_trace()` instead of written to `~/.local/share/ratchet/traces/`
+- `GET /api/executions/{id}` reads trace content from `store.get_trace()` instead of filesystem
 - Board tab and Focus tab pipeline strip no longer render the `spec_qa` column/stage; the status remains functional in the backend and API
 
 ### Fixed

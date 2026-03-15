@@ -162,7 +162,7 @@ def _make_invocation_result(
         execution_id=uuid4(),
         status=status,
         failure_reason=failure_reason,
-        trace_path="/tmp/trace.md",
+        trace_id=uuid4(),
     )
 
 

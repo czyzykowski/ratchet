@@ -19,6 +19,9 @@ from worker.runner import get_next_task, run_once
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
+PATCH_CHECK_BASELINE = "worker.runner.check_baseline_qa"
+PATCH_CREATE_BASELINE = "worker.runner._create_baseline_worktree"
+PATCH_REMOVE_BASELINE = "worker.runner._remove_qa_worktree"
 
 FAKE_REPO_PATH = "/fake/repo"
 FAKE_WORKTREE_PATH = "/fake/repo/.worktrees/exec"
@@ -101,7 +104,7 @@ def _make_invoker(status: str, failure_reason: str | None = None) -> MagicMock:
         execution_id=uuid.uuid4(),
         status=status,
         failure_reason=failure_reason,
-        trace_path="/tmp/trace.md",
+        trace_id=uuid.uuid4(),
     )
     return invoker
 
@@ -188,6 +191,9 @@ async def test_successful_execution_transitions_task_to_ready_for_qa() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = _fake_worktree
         await run_once(store, invoker)
@@ -210,6 +216,9 @@ async def test_successful_execution_calls_complete_execution() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = _fake_worktree
         await run_once(store, invoker)
@@ -233,6 +242,9 @@ async def test_successful_execution_logs_completion(caplog: pytest.LogCaptureFix
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
         caplog.at_level(logging.INFO, logger="worker.runner"),
     ):
         mock_prepare.side_effect = _fake_worktree
@@ -259,6 +271,9 @@ async def test_failed_invocation_transitions_task_to_blocked() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = _fake_worktree
         await run_once(store, invoker)
@@ -281,6 +296,9 @@ async def test_failed_invocation_calls_fail_execution_with_reason() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = _fake_worktree
         await run_once(store, invoker)
@@ -304,6 +322,9 @@ async def test_crashed_invocation_transitions_task_to_blocked() -> None:
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
         patch(PATCH_READ_INTENT, return_value="# Intent"),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = _fake_worktree
         await run_once(store, invoker)
@@ -330,6 +351,9 @@ async def test_env_prep_failure_transitions_task_to_blocked() -> None:
     with (
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = OSError("git worktree add failed")
         await run_once(store, invoker)
@@ -351,6 +375,9 @@ async def test_env_prep_failure_does_not_invoke_claude() -> None:
     with (
         patch(PATCH_PREPARE) as mock_prepare,
         patch(PATCH_CLEANUP),
+        patch(PATCH_CHECK_BASELINE, return_value=[]),
+        patch(PATCH_CREATE_BASELINE, return_value="/fake/baseline"),
+        patch(PATCH_REMOVE_BASELINE),
     ):
         mock_prepare.side_effect = OSError("git worktree add failed")
         await run_once(store, invoker)
