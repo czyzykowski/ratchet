@@ -6,6 +6,7 @@ qa:
     test: ".venv/bin/python -m pytest core/tests/ web/tests/ orchestrator/tests/ remote_worker/tests/ -v"
     lint: "ruff check ."
     typecheck: "mypy core/ worker/ web/ orchestrator/ remote_worker/"
+    install-spa: "npm ci --prefix web/spa"
     build-spa: "npm --prefix web/spa run build"
     typecheck-spa: "npm --prefix web/spa run typecheck"
 
