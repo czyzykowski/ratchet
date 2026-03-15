@@ -35,6 +35,50 @@ logger = logging.getLogger(__name__)
 
 
 
+async def recover_orphaned_tasks(store: Store) -> int:
+    """At startup, reset in_progress tasks to ready_for_implementation.
+
+    Orphans are tasks left stuck in_progress by a previous worker crash or restart.
+    Returns the count of tasks reset.
+    """
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    active_projects = await project_manager.list_projects()
+    reset_count = 0
+
+    for project in active_projects:
+        project_task_events = await store.get_events(project.id, "project_tasks")
+        task_ids_seen: set[UUID] = set()
+        for event in project_task_events:
+            tid_str = event.payload.get("task_id")
+            if not tid_str:
+                continue
+            tid = UUID(tid_str)
+            if tid in task_ids_seen:
+                continue
+            task_ids_seen.add(tid)
+            task = await task_manager.get_task(tid)
+            if task is not None and task.status == ev.IN_PROGRESS:
+                logger.warning(
+                    "Orphaned in_progress task at startup: task=%s project=%s"
+                    " — resetting to ready_for_implementation",
+                    tid,
+                    project.name,
+                )
+                await state_machine.transition(
+                    tid,
+                    ev.READY_FOR_IMPLEMENTATION,
+                    extra_payload={"reason": "worker restart: orphan recovery"},
+                )
+                reset_count += 1
+
+    if reset_count:
+        logger.info("Orphan recovery: reset %d task(s) to ready_for_implementation", reset_count)
+    return reset_count
+
+
 async def get_next_task(
     store: Store,
     project_manager: ProjectManager,
@@ -787,6 +831,8 @@ async def notification_loop(
 
     async def _run_loop() -> None:
         nonlocal active
+        # Startup orphan recovery — must run before dispatch
+        await recover_orphaned_tasks(store)
         # Startup catchup
         logger.info("Worker: running startup catchup")
         await _dispatch_all()

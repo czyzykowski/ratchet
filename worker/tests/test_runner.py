@@ -600,3 +600,84 @@ async def test_task_with_unmatched_capabilities_is_skipped() -> None:
         store, project_manager, spec_manager, state_machine, local_capabilities=[]
     )
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Orphan recovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_tasks_resets_in_progress_to_ready(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from worker.runner import recover_orphaned_tasks
+
+    store = InMemoryStore()
+    project_manager, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id, initial_status=ev.READY_FOR_SPEC)
+    await _advance_task_to_ready(store, task_id)
+
+    # Manually transition to in_progress to simulate orphan
+    state_machine = TaskStateMachine(store)
+    await state_machine.transition(task_id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+
+    with caplog.at_level(logging.WARNING):
+        count = await recover_orphaned_tasks(store)
+
+    assert count == 1
+    current_status = await state_machine.get_current_status(task_id)
+    assert current_status == ev.READY_FOR_IMPLEMENTATION
+    assert "Orphaned in_progress task at startup" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_tasks_ignores_non_in_progress() -> None:
+    from worker.runner import recover_orphaned_tasks
+
+    store = InMemoryStore()
+    project_manager, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id, initial_status=ev.READY_FOR_SPEC)
+    await _advance_task_to_ready(store, task_id)
+
+    state_machine = TaskStateMachine(store)
+    count = await recover_orphaned_tasks(store)
+
+    assert count == 0
+    current_status = await state_machine.get_current_status(task_id)
+    assert current_status == ev.READY_FOR_IMPLEMENTATION
+
+
+@pytest.mark.asyncio
+async def test_recover_orphaned_tasks_handles_multiple_projects() -> None:
+    from worker.runner import recover_orphaned_tasks
+
+    store = InMemoryStore()
+
+    # Project A: one orphaned task
+    project_manager = ProjectManager(store)
+    with patch("core.project_manager.validate_repo"):
+        project_a = await project_manager.register_project(
+            name="project-a", repo_url="https://github.com/a", local_path="/a"
+        )
+        project_b = await project_manager.register_project(
+            name="project-b", repo_url="https://github.com/b", local_path="/b"
+        )
+
+    task_a = await _setup_task(store, project_a.id, initial_status=ev.READY_FOR_SPEC)
+    task_b = await _setup_task(store, project_b.id, initial_status=ev.READY_FOR_SPEC)
+
+    state_machine = TaskStateMachine(store)
+    await state_machine.transition(task_a, ev.SPEC_QA)
+    await state_machine.transition(task_a, ev.READY_FOR_IMPLEMENTATION)
+    await state_machine.transition(task_a, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+
+    await state_machine.transition(task_b, ev.SPEC_QA)
+    await state_machine.transition(task_b, ev.READY_FOR_IMPLEMENTATION)
+    # task_b stays ready_for_implementation
+
+    count = await recover_orphaned_tasks(store)
+
+    assert count == 1
+    assert await state_machine.get_current_status(task_a) == ev.READY_FOR_IMPLEMENTATION
+    assert await state_machine.get_current_status(task_b) == ev.READY_FOR_IMPLEMENTATION
