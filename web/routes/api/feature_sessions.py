@@ -181,6 +181,18 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
         },
     )
 
+    await store.append_event(
+        aggregate_id=body.project_id,
+        aggregate_type="feature",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_id": session_id,
+            "session_type": "feature",
+            "context_id": str(body.project_id),
+            "context_type": "feature",
+        },
+    )
+
     return JSONResponse({"session_id": session_id, "messages": []})
 
 

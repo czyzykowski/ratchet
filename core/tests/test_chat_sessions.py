@@ -64,6 +64,50 @@ async def test_chat_session_message_added_event_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_feature_chat_session_dual_write_to_feature_aggregate() -> None:
+    store = InMemoryStore()
+    session_id = uuid4()
+    feature_id = uuid4()
+
+    await store.append_event(
+        aggregate_id=session_id,
+        aggregate_type="chat_session",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_type": "feature",
+            "context_id": str(feature_id),
+            "context_type": "feature",
+        },
+    )
+
+    await store.append_event(
+        aggregate_id=feature_id,
+        aggregate_type="feature",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_id": str(session_id),
+            "session_type": "feature",
+            "context_id": str(feature_id),
+            "context_type": "feature",
+        },
+    )
+
+    session_events = await store.get_events(session_id, "chat_session")
+    assert len(session_events) == 1
+    assert session_events[0].event_type == ev.CHAT_SESSION_CREATED
+
+    feature_events = await store.get_events(feature_id, "feature")
+    assert len(feature_events) == 1
+    assert feature_events[0].event_type == ev.CHAT_SESSION_CREATED
+
+    feature_payload = feature_events[0].payload
+    assert feature_payload["session_id"] == str(session_id)
+    assert feature_payload["context_id"] == str(feature_id)
+    assert feature_payload["context_type"] == "feature"
+    assert feature_payload["session_type"] == "feature"
+
+
+@pytest.mark.asyncio
 async def test_get_chat_session_by_context_returns_none_when_no_session_exists() -> None:
     store = InMemoryStore()
     session_id = uuid4()
