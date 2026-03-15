@@ -533,6 +533,11 @@ def _create_baseline_worktree(project_path: str) -> str:
     spa_nm_dst = os.path.join(wt_path, "web", "spa", "node_modules")
     if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
         os.symlink(spa_nm_src, spa_nm_dst)
+    # Symlink .env so tools that load env vars at module init (e.g. deno dotenv) work
+    env_src = os.path.join(project_path, ".env")
+    env_dst = os.path.join(wt_path, ".env")
+    if os.path.exists(env_src) and not os.path.lexists(env_dst):
+        os.symlink(env_src, env_dst)
     return wt_path
 
 
@@ -573,6 +578,10 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
     venv_dst = os.path.join(qa_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
+    env_src = os.path.join(project_path, ".env")
+    env_dst = os.path.join(qa_path, ".env")
+    if os.path.exists(env_src) and not os.path.lexists(env_dst):
+        os.symlink(env_src, env_dst)
     return qa_path, True
 
 
