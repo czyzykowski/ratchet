@@ -146,7 +146,8 @@ class RemoteWorkerClient:
                 prompt=prompt,
             )
 
-            invoker = ClaudeCodeInvoker()
+            from core.store import PostgresStore
+            invoker = ClaudeCodeInvoker(store=PostgresStore())
             result = invoker.invoke(context)
 
             if self._cancel_flag:

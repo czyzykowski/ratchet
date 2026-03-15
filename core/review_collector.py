@@ -11,7 +11,6 @@ from uuid import UUID
 
 from core import events as ev
 from core.execution_manager import _build_execution
-from core.invoker import get_traces_dir
 from core.models import Event, Execution, Project, ReviewScope, Spec, Task
 from core.store import Store
 
@@ -46,8 +45,6 @@ class ReviewDataCollector:
         status_histories: dict[UUID, list[Event]] = {}
         git_log: dict[UUID, str] = {}
         project_claude_md: dict[UUID, str] = {}
-
-        traces_dir = get_traces_dir()
 
         for project in projects:
             # 1. Find task IDs
@@ -114,14 +111,13 @@ class ReviewDataCollector:
                     if execution is not None:
                         task_executions.append(execution)
 
-                        # 6. Trace files
-                        trace_path = Path(traces_dir) / f"{execution_id}.md"
-                        try:
-                            content = trace_path.read_text()
-                            trace_contents[execution_id] = content[:8000]
-                        except FileNotFoundError:
+                        # 6. Traces from DB
+                        trace = await self._store.get_trace(execution_id)
+                        if trace is not None:
+                            trace_contents[execution_id] = trace.content[:8000]
+                        else:
                             logger.warning(
-                                "Trace file not found for execution %s", execution_id
+                                "Trace not found for execution %s", execution_id
                             )
 
                         # 7. QA failures from EXECUTION_FAILED events

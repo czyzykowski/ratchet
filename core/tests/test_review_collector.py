@@ -155,12 +155,11 @@ async def test_should_skip_missing_trace_files_gracefully_without_raising(
     spec_id = uuid4()
     execution_id = await _seed_execution(store, task_id, spec_id)
 
-    # No trace file written — should not raise
+    # No trace saved to store — should not raise
     collector = ReviewDataCollector(store)
     scope = ReviewScope(project_ids=[project.id], include_global=False)
 
-    with patch("core.review_collector.get_traces_dir", return_value=str(tmp_path)):
-        result = await collector.collect(scope, [project])
+    result = await collector.collect(scope, [project])
 
     assert execution_id not in result.trace_contents
 
@@ -222,22 +221,30 @@ async def test_should_collect_qa_failures_from_execution_failed_events(
 
 @pytest.mark.asyncio
 async def test_should_truncate_trace_content_to_8000_chars(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+    from core.models import ExecutionTrace
+
     store = InMemoryStore()
     project = _make_project(tmp_path)
     task_id = await _seed_task(store, project.id)
     spec_id = uuid4()
     execution_id = await _seed_execution(store, task_id, spec_id)
 
-    traces_dir = tmp_path / "traces"
-    traces_dir.mkdir()
-    trace_file = traces_dir / f"{execution_id}.md"
-    trace_file.write_text("x" * 9000)
+    # Save a trace with 9000 chars directly to the store
+    now = datetime.now(UTC)
+    store.save_trace(ExecutionTrace(
+        execution_id=execution_id,
+        task_id=task_id,
+        spec_id=spec_id,
+        content="x" * 9000,
+        started_at=now,
+        created_at=now,
+    ))
 
     collector = ReviewDataCollector(store)
     scope = ReviewScope(project_ids=[project.id], include_global=False)
 
-    with patch("core.review_collector.get_traces_dir", return_value=str(traces_dir)):
-        result = await collector.collect(scope, [project])
+    result = await collector.collect(scope, [project])
 
     assert len(result.trace_contents[execution_id]) == 8000
 

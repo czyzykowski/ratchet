@@ -142,6 +142,15 @@ class Suggestion(BaseModel):
     status: Literal["pending", "applied", "dismissed", "skipped"] = "pending"
 
 
+class ExecutionTrace(BaseModel):
+    execution_id: UUID
+    task_id: UUID
+    spec_id: UUID
+    content: str
+    started_at: datetime
+    created_at: datetime
+
+
 @dataclass
 class QAExchange:
     question_index: int
