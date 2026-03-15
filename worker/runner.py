@@ -626,7 +626,7 @@ async def run_qa_once(
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
     review_proc = _subprocess.run(
-        ["claude", "-p", "--allowedTools", "Bash,Read,Glob,Grep"],
+        ["claude", "-p", "--model", "claude-sonnet-4-6", "--allowedTools", "Bash,Read,Glob,Grep"],
         input=review_prompt,
         cwd=project.local_path,
         capture_output=True,

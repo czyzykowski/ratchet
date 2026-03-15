@@ -24,7 +24,7 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
         print(prompt, file=sys.stderr)
         print("--- END PROMPT ---\n", file=sys.stderr)
 
-    cmd = ["claude", "-p", prompt, "--allowedTools", "Read,Glob,Bash"]
+    cmd = ["claude", "-p", prompt, "--model", "claude-sonnet-4-6", "--allowedTools", "Read,Glob,Bash"]
     proc = subprocess.Popen(
         cmd,
         cwd=local_path,

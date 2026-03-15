@@ -86,6 +86,7 @@ class SpecReplSession:
     cwd: str
     history: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
     session_id: str = "default"
+    model: str = "claude-opus-4-6"
 
     def __post_init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None
@@ -105,6 +106,8 @@ class SpecReplSession:
             "--include-partial-messages",
             "--allowedTools",
             "Read,Glob,WebSearch,Bash",
+            "--model",
+            self.model,
             "--system-prompt",
             self.system_prompt,
             cwd=self.cwd,

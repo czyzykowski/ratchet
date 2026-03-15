@@ -17,6 +17,7 @@ from uuid import UUID
 from core.context_assembler import ExecutionContext
 
 _ALLOWED_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
+_MODEL = "claude-sonnet-4-6"
 
 
 @dataclass
@@ -136,7 +137,7 @@ class ClaudeCodeInvoker:
         4. Call parse_output(output, returncode) to determine status
         5. Return InvocationResult
         """
-        claude_cmd = ["claude", "-p", "--allowedTools", _ALLOWED_TOOLS]
+        claude_cmd = ["claude", "-p", "--model", _MODEL, "--allowedTools", _ALLOWED_TOOLS]
         if os.name != "nt" and (Path(context.worktree_path) / "flake.nix").exists():
             cmd = ["nix", "develop", "--command"] + claude_cmd
         else:

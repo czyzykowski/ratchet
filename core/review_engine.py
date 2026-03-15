@@ -34,7 +34,7 @@ class ReviewEngine:
     ) -> list[Suggestion]:
         prompt = self._build_prompt(data, previous_run_summary)
 
-        base_cmd = ["claude", "-p", prompt, "--allowedTools", ""]
+        base_cmd = ["claude", "-p", prompt, "--model", "claude-sonnet-4-6", "--allowedTools", ""]
         if os.environ.get("USE_NIX_DEVELOP"):
             cmd = ["nix", "develop", "--command"] + base_cmd
         else:
