@@ -40,18 +40,27 @@ _COMPLETION_INSTRUCTIONS = """\
 
 ## Completion Instructions
 
-**Before declaring COMPLETED you MUST commit your changes.**
-The QA system verifies your work by inspecting the git diff on your branch.
-Without a commit your changes are lost and QA will always fail.
+**CRITICAL: You MUST commit AND then print the exact terminal marker as your very last output.**
+The worker scans your stdout for a literal string. If that string is absent the execution
+is recorded as failed — even if your code is correct and committed.
 
-Commit step (required):
+**Do not paraphrase.** Phrases like "All done", "The task is complete", "Everything looks good",
+or "232 tests passed" are NOT detected. You must print the exact word `COMPLETED` (or `BLOCKED:`)
+as the final thing you output.
+
+### On success
+
+First commit:
 ```bash
 git add -A && git commit -m "feat: <brief description of change>"
 ```
 
-Only after committing, output one of these markers:
+Then verify the commit exists:
+```bash
+git log --oneline -3
+```
 
-On success:
+Then print this as your last output:
 ```
 COMPLETED: <spec title or brief description>
 Tasks completed: N/N
@@ -60,19 +69,26 @@ Files created/modified:
 - <file 2>
 ```
 
-On failure or if you cannot complete the task:
+### On failure
+
+Emit `BLOCKED: <reason>` (without committing) when:
+- A required external resource is unavailable (missing env var, unreachable service).
+- A prerequisite task is incomplete and this spec cannot proceed without it.
+- You have exhausted all fix attempts and cannot resolve QA failures.
+
+Do NOT emit BLOCKED for normal compilation errors, test failures, or missing files you
+can create — fix those and proceed. BLOCKED is a last resort that signals a human must
+intervene before the task can continue. The reason is stored as the task's failure message.
+
 ```
 BLOCKED: <task name that failed>
-Reason: <what went wrong>
+Reason: <what went wrong and what would unblock it>
 Missing:
 - <item 1>
 User action required:
 <exact steps to unblock>
 Resume: re-run after fixing the above
-```
-
-These markers are parsed by the orchestrator. Without them the execution will be
-marked as failed."""
+```"""
 
 
 @dataclass
