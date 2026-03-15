@@ -246,7 +246,16 @@ def get_git_diff(cwd: str, execution_branch: str | None = None, base_ref: str = 
     else:
         ref_range = "HEAD~1..HEAD"
     proc = subprocess.run(
-        ["git", "diff", ref_range],
+        [
+            "git", "diff", ref_range,
+            "--",
+            ".",
+            ":!web/spa/dist",
+            ":!web/spa/node_modules",
+            ":!**/node_modules",
+            ":!**/*.min.js",
+            ":!**/*.min.css",
+        ],
         cwd=cwd,
         capture_output=True,
         text=True,
