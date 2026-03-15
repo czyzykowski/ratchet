@@ -86,6 +86,15 @@ class Execution(BaseModel):
     completed_at: datetime | None
 
 
+class ExecutionTrace(BaseModel):
+    execution_id: UUID
+    task_id: UUID
+    spec_id: UUID
+    content: str
+    started_at: datetime
+    created_at: datetime
+
+
 class ChatSession(BaseModel):
     id: UUID
     session_type: Literal["spec", "feature"]

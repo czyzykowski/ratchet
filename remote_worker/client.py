@@ -25,6 +25,7 @@ from core.remote_protocol import (
     WorkerHelloMessage,
     parse_orchestrator_message,
 )
+from core.store import InMemoryStore
 
 
 class ClaudeAuthError(Exception):
@@ -146,7 +147,7 @@ class RemoteWorkerClient:
                 prompt=prompt,
             )
 
-            invoker = ClaudeCodeInvoker()
+            invoker = ClaudeCodeInvoker(store=InMemoryStore())
             result = invoker.invoke(context)
 
             if self._cancel_flag:

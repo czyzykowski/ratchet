@@ -93,7 +93,7 @@ def _make_invoker(status: str = "completed") -> MagicMock:
         execution_id=uuid.uuid4(),
         status=status,
         failure_reason=None,
-        trace_path="/tmp/trace.md",
+        trace_id=uuid.uuid4(),
     )
     return invoker
 
@@ -152,7 +152,11 @@ async def test_run_once_skips_when_baseline_qa_fails() -> None:
         output="E501 line too long",
     )
 
-    with patch("worker.runner.check_baseline_qa", return_value=[fake_failure]):
+    with (
+        patch("worker.runner._create_baseline_worktree", return_value="/tmp/fake-baseline"),
+        patch("worker.runner._remove_qa_worktree"),
+        patch("worker.runner.check_baseline_qa", return_value=[fake_failure]),
+    ):
         result = await run_once(store, invoker)
 
     assert result is False

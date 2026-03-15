@@ -164,6 +164,7 @@ async def main() -> None:
                         read_intent,
                     )
                     from core.invoker import ClaudeCodeInvoker
+                    from core.store import InMemoryStore
 
                     spec_content = ""
                     if spec_id is not None:
@@ -189,7 +190,7 @@ async def main() -> None:
                         worktree_path=merge_worktree,
                         prompt=prompt,
                     )
-                    result = ClaudeCodeInvoker().invoke(context)
+                    result = ClaudeCodeInvoker(store=InMemoryStore()).invoke(context)
 
                     if result.status == "completed":
                         print(

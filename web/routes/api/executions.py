@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -10,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import events as ev
-from core.invoker import get_traces_dir
 
 router = APIRouter()
 
@@ -45,13 +43,7 @@ async def get_execution(execution_id: UUID, request: Request) -> JSONResponse:
             execution["failure_reason"] = event.payload.get("failure_reason")
             execution["completed_at"] = event.occurred_at.isoformat()
 
-    traces_dir = get_traces_dir()
-    trace_content: str | None = None
-    # Check for .json trace first (API format), fall back to .md (invoker format)
-    for ext in (".json", ".md"):
-        trace_path = Path(traces_dir) / f"{execution_id}{ext}"
-        if trace_path.exists():
-            trace_content = trace_path.read_text()
-            break
+    trace = await store.get_trace(execution_id)
+    trace_content: str | None = trace.content if trace is not None else None
 
     return JSONResponse({"execution": execution, "trace": trace_content})
