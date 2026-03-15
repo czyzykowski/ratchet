@@ -307,7 +307,9 @@ async def run_once(
     if not skip_baseline:
         ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
         try:
-            baseline_worktree = _create_baseline_worktree(project.local_path)
+            baseline_worktree = await asyncio.to_thread(
+                _create_baseline_worktree, project.local_path
+            )
         except QAWorktreeError as exc:
             logger.warning(
                 "Baseline QA worktree creation failed for project=%s: %s — skipping baseline check",
@@ -317,9 +319,11 @@ async def run_once(
             baseline_failures = []
         else:
             try:
-                baseline_failures = check_baseline_qa(baseline_worktree, ratchet_yaml)
+                baseline_failures = await asyncio.to_thread(
+                    check_baseline_qa, baseline_worktree, ratchet_yaml
+                )
             finally:
-                _remove_qa_worktree(project.local_path, baseline_worktree)
+                await asyncio.to_thread(_remove_qa_worktree, project.local_path, baseline_worktree)
         if baseline_failures:
             combined = "\n\n".join(
                 f"Step '{r.step_name}':\n{r.output}" for r in baseline_failures
@@ -666,7 +670,9 @@ async def run_qa_once(
         return True
 
     try:
-        qa_path, qa_worktree_owned = _create_qa_worktree(project.local_path, execution_branch)
+        qa_path, qa_worktree_owned = await asyncio.to_thread(
+            _create_qa_worktree, project.local_path, execution_branch
+        )
     except QAWorktreeError as exc:
         failure_reason = f"QA worktree creation failed: {exc}"
         logger.error("task=%s: %s", task.id, failure_reason)
@@ -676,11 +682,11 @@ async def run_qa_once(
         return True
 
     try:
-        run_auto_fixes(config, qa_path)
-        step_results = run_qa_steps(config, qa_path)
+        await asyncio.to_thread(run_auto_fixes, config, qa_path)
+        step_results = await asyncio.to_thread(run_qa_steps, config, qa_path)
     finally:
         if qa_worktree_owned:
-            _remove_qa_worktree(project.local_path, qa_path)
+            await asyncio.to_thread(_remove_qa_worktree, project.local_path, qa_path)
 
     failed_steps = [r for r in step_results if r.returncode != 0]
 
