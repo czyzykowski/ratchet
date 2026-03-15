@@ -94,7 +94,7 @@ scripts/
   board.py          — display task board grouped by status
   review-blocked.py — show blocked tasks with failure reasons
   archive-task.py   — abandon a task, transitioning it to the terminal 'abandoned' status
-  unblock-task.py   — unblock a task, transitioning it directly back to ready_for_implementation
+  unblock-task.py   — unblock a task, transitioning it directly back to ready_for_implementation; --retry-baseline clears pending baseline QA failures
   task-reset.py     — reset a task to ready_for_spec (or ready_for_implementation with --reuse-spec)
 ```
 
@@ -126,6 +126,8 @@ python scripts/archive-task.py --task-id <uuid> [--reason "reason text"]
 
 # Unblock a task (direct blocked → ready_for_implementation)
 python scripts/unblock-task.py --task-id <uuid>
+# Clear a pending baseline QA failure so the worker will retry baseline check
+python scripts/unblock-task.py --task-id <uuid> --retry-baseline
 
 # Reset a task to ready_for_spec (or ready_for_implementation reusing existing spec)
 python scripts/task-reset.py --task-id <uuid>
