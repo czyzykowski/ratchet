@@ -55,6 +55,15 @@ class Spec(BaseModel):
     created_at: datetime
 
 
+class ExecutionTrace(BaseModel):
+    execution_id: UUID
+    task_id: UUID
+    spec_id: UUID
+    content: str
+    started_at: datetime
+    created_at: datetime
+
+
 class Feature(BaseModel):
     id: UUID
     project_id: UUID

@@ -15,7 +15,9 @@ from subprocess import PIPE
 from uuid import UUID
 
 from core.context_assembler import ExecutionContext
+from core.models import ExecutionTrace
 from core.models_config import WORKER_MODEL
+from core.store import Store
 
 _ALLOWED_TOOLS = "Bash,Read,Write,Edit,Glob,Grep"
 _MODEL = WORKER_MODEL
@@ -26,7 +28,7 @@ class InvocationResult:
     execution_id: UUID
     status: str  # 'completed' | 'failed' | 'crashed'
     failure_reason: str | None  # None on success, descriptive string otherwise
-    trace_path: str  # absolute path to trace file
+    trace_id: UUID  # the execution_id used as trace identifier in the store
 
 
 def get_traces_dir() -> str:
@@ -106,19 +108,10 @@ def _watchdog_loop(
 class ClaudeCodeInvoker:
     def __init__(
         self,
-        traces_dir: str | None = None,
+        store: Store,
         watchdog_timeout: int = 300,
     ) -> None:
-        """If traces_dir is None, use get_traces_dir() to determine path.
-        Create traces_dir if it does not exist.
-        """
-        if traces_dir is None:
-            self.traces_dir = get_traces_dir()
-        else:
-            path = Path(traces_dir)
-            path.mkdir(parents=True, exist_ok=True)
-            self.traces_dir = str(path.resolve())
-        assert Path(self.traces_dir).is_dir(), f"traces dir not created: {self.traces_dir}"
+        self._store = store
         self.watchdog_timeout = watchdog_timeout
         self._proc: subprocess.Popen | None = None  # type: ignore[type-arg]
         self._proc_lock = threading.Lock()
@@ -134,7 +127,7 @@ class ClaudeCodeInvoker:
 
         1. Build command with prompt and allowed tools
         2. Run subprocess with cwd=context.worktree_path, reading stdout/stderr via threads
-        3. Write full output (stdout + stderr) to <traces_dir>/<execution_id>.md
+        3. Save trace via store.save_trace()
         4. Call parse_output(output, returncode) to determine status
         5. Return InvocationResult
         """
@@ -208,16 +201,24 @@ class ClaudeCodeInvoker:
 
         output = "".join(stdout_lines) + "".join(stderr_lines)
 
-        # Write trace file
-        trace_path = str(Path(self.traces_dir) / f"{context.execution_id}.md")
-        started_at = datetime.now(UTC).isoformat()
+        started_at = datetime.now(UTC)
         header = (
             f"# Execution Trace: {context.execution_id}\n\n"
             f"# Task: {context.task_id}\n\n"
             f"# Spec: {context.spec_id}\n\n"
-            f"# Started: {started_at}\n\n"
+            f"# Started: {started_at.isoformat()}\n\n"
         )
-        Path(trace_path).write_text(header + output)
+        content = header + output
+
+        trace = ExecutionTrace(
+            execution_id=context.execution_id,
+            task_id=context.task_id,
+            spec_id=context.spec_id,
+            content=content,
+            started_at=started_at,
+            created_at=started_at,
+        )
+        self._store.save_trace(trace)
 
         status, failure_reason = parse_output(output, returncode)
 
@@ -225,5 +226,5 @@ class ClaudeCodeInvoker:
             execution_id=context.execution_id,
             status=status,
             failure_reason=failure_reason,
-            trace_path=trace_path,
+            trace_id=context.execution_id,
         )

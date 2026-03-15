@@ -146,7 +146,8 @@ class RemoteWorkerClient:
                 prompt=prompt,
             )
 
-            invoker = ClaudeCodeInvoker()
+            from core.store import InMemoryStore
+            invoker = ClaudeCodeInvoker(store=InMemoryStore())
             result = invoker.invoke(context)
 
             if self._cancel_flag:

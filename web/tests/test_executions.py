@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -12,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core import events as ev
+from core.models import ExecutionTrace
 from core.store import InMemoryStore
 from web.routes.api.executions import router
 
@@ -33,8 +32,7 @@ def test_should_return_404_when_execution_does_not_exist(
     client: TestClient,
 ) -> None:
     missing_id = uuid4()
-    with patch("web.routes.api.executions.get_traces_dir", return_value="/tmp/no-such-dir"):
-        response = client.get(f"/executions/{missing_id}")
+    response = client.get(f"/executions/{missing_id}")
     assert response.status_code == 404
 
 
@@ -58,9 +56,7 @@ async def test_should_return_200_with_execution_fields_when_started_event_exists
         },
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
-            response = client.get(f"/executions/{execution_id}")
+    response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()
@@ -99,9 +95,7 @@ async def test_should_show_failure_reason_when_execution_failed_event_exists(
         },
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
-            response = client.get(f"/executions/{execution_id}")
+    response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()
@@ -128,9 +122,7 @@ async def test_should_return_null_trace_when_trace_file_does_not_exist(
         },
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
-            response = client.get(f"/executions/{execution_id}")
+    response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()
@@ -144,6 +136,7 @@ async def test_should_return_trace_content_when_trace_file_exists(
     execution_id = uuid4()
     task_id = uuid4()
     spec_id = uuid4()
+    now = datetime.now(UTC)
 
     await store.append_event(
         aggregate_id=execution_id,
@@ -156,12 +149,16 @@ async def test_should_return_trace_content_when_trace_file_exists(
             "started_at": "2024-01-01T00:00:00",
         },
     )
+    store.save_trace(ExecutionTrace(
+        execution_id=execution_id,
+        task_id=task_id,
+        spec_id=spec_id,
+        content="# Execution Trace\n\nAll good.",
+        started_at=now,
+        created_at=now,
+    ))
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        trace_file = Path(tmpdir) / f"{execution_id}.md"
-        trace_file.write_text("# Execution Trace\n\nAll good.")
-        with patch("web.routes.api.executions.get_traces_dir", return_value=tmpdir):
-            response = client.get(f"/executions/{execution_id}")
+    response = client.get(f"/executions/{execution_id}")
 
     assert response.status_code == 200
     data = response.json()
