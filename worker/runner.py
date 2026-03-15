@@ -228,7 +228,7 @@ async def run_once(
     Returns True if a task was found and processed, False otherwise.
     """
     if invoker is None:
-        invoker = ClaudeCodeInvoker()
+        invoker = ClaudeCodeInvoker(store=store)
 
     project_manager = ProjectManager(store)
     spec_manager = SpecManager(store)
@@ -288,9 +288,9 @@ async def run_once(
             await execution_manager.complete_execution(execution_id)
             await state_machine.transition(task.id, ev.READY_FOR_QA)
             logger.info(
-                "Execution completed: task=%s trace=%s",
+                "Execution completed: task=%s trace_id=%s",
                 task.id,
-                invocation_result.trace_path,
+                invocation_result.trace_id,
             )
         elif invocation_result.status in ("failed", "crashed"):
             failure_reason = invocation_result.failure_reason or invocation_result.status
@@ -394,21 +394,21 @@ async def run_once(
 
     if os.environ.get('RATCHET_DEBUG') == '1':
         print(f'[DEBUG] Invocation status: {invocation_result.status}')
-        print(f'[DEBUG] Trace path: {invocation_result.trace_path}')
+        print(f'[DEBUG] Trace id: {invocation_result.trace_id}')
         print('[DEBUG] Raw output preview:')
         try:
-            trace_content = Path(invocation_result.trace_path).read_text()[:1000]
-            print(trace_content)
+            trace = await store.get_trace(invocation_result.trace_id)
+            print(trace.content[:1000] if trace else '[DEBUG] No trace found')
         except Exception:
-            print('[DEBUG] Could not read trace file')
+            print('[DEBUG] Could not read trace')
 
     if invocation_result.status == "completed":
         await execution_manager.complete_execution(execution_id)
         await state_machine.transition(task.id, ev.READY_FOR_QA)
         logger.info(
-            "Execution completed: task=%s trace=%s",
+            "Execution completed: task=%s trace_id=%s",
             task.id,
-            invocation_result.trace_path,
+            invocation_result.trace_id,
         )
     elif invocation_result.status in ("failed", "crashed"):
         failure_reason = invocation_result.failure_reason or invocation_result.status
@@ -521,6 +521,11 @@ def _create_baseline_worktree(project_path: str) -> str:
     venv_dst = os.path.join(wt_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
+    # Symlink root node_modules so npm/deno npm packages work
+    nm_src = os.path.join(project_path, "node_modules")
+    nm_dst = os.path.join(wt_path, "node_modules")
+    if os.path.exists(nm_src) and not os.path.lexists(nm_dst):
+        os.symlink(nm_src, nm_dst)
     # Symlink web/spa/node_modules so npm build steps work
     spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
     spa_nm_dst = os.path.join(wt_path, "web", "spa", "node_modules")
@@ -605,7 +610,7 @@ async def run_qa_once(
     Returns True if a QA task was found and processed, False otherwise.
     """
     if invoker is None:
-        invoker = ClaudeCodeInvoker()
+        invoker = ClaudeCodeInvoker(store=store)
 
     project_manager = ProjectManager(store)
     spec_manager = SpecManager(store)
@@ -1011,7 +1016,7 @@ async def _main_async(
     from core.store import PostgresStore
 
     store = PostgresStore()
-    invoker = ClaudeCodeInvoker(watchdog_timeout=watchdog_timeout)
+    invoker = ClaudeCodeInvoker(store=store, watchdog_timeout=watchdog_timeout)
     try:
         did_qa = await run_qa_once(store, invoker)
         if not did_qa:
@@ -1034,7 +1039,7 @@ async def _main_loop_async(
 
     dsn = os.environ["DATABASE_URL"]
     store = PostgresStore()
-    invoker = ClaudeCodeInvoker(watchdog_timeout=watchdog_timeout)
+    invoker = ClaudeCodeInvoker(store=store, watchdog_timeout=watchdog_timeout)
 
     loop = asyncio.get_running_loop()
     current_task = asyncio.current_task()
