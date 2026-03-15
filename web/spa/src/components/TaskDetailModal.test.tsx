@@ -143,6 +143,109 @@ describe('TaskDetailModal state reset on taskId change', () => {
   })
 })
 
+describe('TaskDetailModal Archive action', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(qaApi.fetchTaskQA).mockResolvedValue({ history: [], pending: null })
+  })
+
+  it('should show Archive button for ready_for_spec status', async () => {
+    renderModal(makeTaskResponse('ready_for_spec'))
+    await screen.findByText('Test Task')
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument()
+  })
+
+  it('should show Archive button for blocked status', async () => {
+    renderModal(makeTaskResponse('blocked'))
+    await screen.findByText('Test Task')
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument()
+  })
+
+  it('should not show Archive button for abandoned status', async () => {
+    renderModal(makeTaskResponse('abandoned'))
+    await screen.findByText('Test Task')
+    expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
+  })
+
+  it('should show archive confirmation form when Archive button clicked', async () => {
+    renderModal(makeTaskResponse('ready_for_spec'))
+    await screen.findByText('Test Task')
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+    expect(screen.getByText('Archive Task')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Reason (optional)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm Archive' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+  })
+
+  it('should call POST /api/tasks/:id/archive with reason on confirm', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(makeTaskResponse('blocked')),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ task: makeTaskResponse('blocked').task }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <TaskDetailModal taskId={taskId} onClose={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    await screen.findByText('Test Task')
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+    fireEvent.change(screen.getByPlaceholderText('Reason (optional)'), { target: { value: 'no longer needed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Archive' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/tasks/${taskId}/archive`,
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ reason: 'no longer needed' }),
+        })
+      )
+    })
+  })
+
+  it('should display error when archive API call fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(makeTaskResponse('blocked')),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ detail: 'Archive not allowed' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <TaskDetailModal taskId={taskId} onClose={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    await screen.findByText('Test Task')
+    fireEvent.click(screen.getByRole('button', { name: 'Archive' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Archive' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Archive not allowed')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: 'Confirm Archive' })).toBeInTheDocument()
+  })
+})
+
 describe('TaskDetailModal Q&A panel', () => {
   beforeEach(() => {
     vi.clearAllMocks()

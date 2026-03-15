@@ -61,6 +61,18 @@ interface TaskDetailResponse {
   deploy_hooks: DeployHookStep[] | null
 }
 
+const ARCHIVABLE_STATUSES = [
+  'ready_for_spec',
+  'spec_qa',
+  'ready_for_implementation',
+  'in_progress',
+  'waiting_for_input',
+  'ready_for_qa',
+  'ready_for_merge',
+  'blocked',
+  'deployed',
+]
+
 async function fetchTaskDetail(taskId: string): Promise<TaskDetailResponse> {
   const res = await fetch(`/api/tasks/${taskId}`)
   if (!res.ok) throw new Error('Task not found')
@@ -90,6 +102,10 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   const [skipMerge, setSkipMerge] = useState(false)
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState<string | null>(null)
+  const [showArchive, setShowArchive] = useState(false)
+  const [archiveReason, setArchiveReason] = useState('')
+  const [archiving, setArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   const [forceExecuting, setForceExecuting] = useState(false)
@@ -247,11 +263,47 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     }
   }
 
+  function openArchiveForm() {
+    setArchiveReason('')
+    setArchiveError(null)
+    setShowArchive(true)
+  }
+
+  function cancelArchive() {
+    setShowArchive(false)
+    setArchiveError(null)
+  }
+
+  async function confirmArchive() {
+    if (!taskId) return
+    setArchiving(true)
+    setArchiveError(null)
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: archiveReason || null }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail ?? 'Archive failed')
+      }
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      queryClient.invalidateQueries({ queryKey: ['board'] })
+      onClose()
+    } catch (err) {
+      setArchiveError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setArchiving(false)
+    }
+  }
+
   const latestSpec = data?.specs[data.specs.length - 1] ?? null
   const latestExecution = data?.executions[data.executions.length - 1] ?? null
   const isBlocked = data?.task.status === 'blocked'
   const isReadyForSpec = data?.task.status === 'ready_for_spec'
   const isReadyForDeployment = data?.task.status === 'ready_for_merge'
+  const isArchivable = ARCHIVABLE_STATUSES.includes(data?.task.status ?? '')
 
   if (showChat && data) {
     return (
@@ -278,7 +330,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
         </div>
         {isLoading && <div className="loading-state">Loading task details...</div>}
         {error && <div className="error-state">Failed to load task</div>}
-        {data && !showReset && (
+        {data && !showReset && !showArchive && (
           <>
             <div className="modal-meta-row">
               <div className="modal-field">
@@ -489,7 +541,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               </div>
             )}
 
-            {(isBlocked || isReadyForSpec || isReadyForDeployment) && (
+            {(isBlocked || isReadyForSpec || isReadyForDeployment || isArchivable) && (
               <div className="modal-actions">
                 {isReadyForSpec && (
                   <button className="btn btn-primary" onClick={() => setShowChat(true)}>
@@ -504,6 +556,11 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 {isReadyForDeployment && (
                   <button className="btn btn-primary" onClick={openDeployForm}>
                     Merge
+                  </button>
+                )}
+                {isArchivable && !showDeploy && (
+                  <button className="btn btn-danger" onClick={openArchiveForm}>
+                    Archive
                   </button>
                 )}
               </div>
@@ -534,6 +591,34 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
               </button>
               <button className="btn btn-primary" onClick={confirmDeploy} disabled={deploying}>
                 {deploying ? 'Merging...' : 'Confirm Merge'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {data && showArchive && (
+          <div className="reset-form">
+            <div className="reset-form-header">Archive Task</div>
+
+            <textarea
+              className="reset-spec-textarea"
+              value={archiveReason}
+              onChange={e => setArchiveReason(e.target.value)}
+              rows={4}
+              placeholder="Reason (optional)"
+              disabled={archiving}
+            />
+
+            {archiveError && (
+              <div className="error-state" style={{ padding: '0.5rem 0' }}>{archiveError}</div>
+            )}
+
+            <div className="reset-form-actions">
+              <button className="btn btn-secondary" onClick={cancelArchive} disabled={archiving}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={confirmArchive} disabled={archiving}>
+                {archiving ? 'Archiving...' : 'Confirm Archive'}
               </button>
             </div>
           </div>
