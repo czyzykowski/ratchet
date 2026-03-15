@@ -50,6 +50,47 @@ def get_traces_dir() -> str:
     return str(traces_dir.resolve())
 
 
+def _scan_session_jsonl(worktree_path: str) -> str:
+    """Scan the most recent Claude session JSONL for assistant text content.
+
+    Claude stores conversation transcripts at:
+    ~/.claude/projects/<slug>/*.jsonl
+    where slug = absolute worktree path with '/' replaced by '-'.
+
+    Returns all assistant text joined together, or '' if not found.
+    """
+    import glob as _glob
+    import json as _json
+
+    # Claude slugifies paths by replacing both '/' and '.' with '-'
+    slug = worktree_path.replace("/", "-").replace(".", "-")
+    project_dir = Path.home() / ".claude" / "projects" / slug
+    if not project_dir.exists():
+        return ""
+    jsonl_files = sorted(_glob.glob(str(project_dir / "*.jsonl")), key=os.path.getmtime)
+    if not jsonl_files:
+        return ""
+    texts: list[str] = []
+    try:
+        with open(jsonl_files[-1]) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = _json.loads(line)
+                except _json.JSONDecodeError:
+                    continue
+                if obj.get("type") != "assistant":
+                    continue
+                for block in obj.get("message", {}).get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(block["text"])
+    except OSError:
+        return ""
+    return "\n".join(texts)
+
+
 def parse_output(output: str, returncode: int) -> tuple[str, str | None]:
     """Parse Claude Code output to determine invocation outcome.
 
@@ -220,6 +261,14 @@ class ClaudeCodeInvoker:
         self._store.save_trace(trace)
 
         status, failure_reason = parse_output(output, returncode)
+
+        # Fallback: if stdout lacks a completion marker but the Claude session
+        # JSONL has one (e.g. background tasks triggered extra turns after
+        # COMPLETED: was output), scan the session transcript directly.
+        if status == "failed" and failure_reason == "no completion marker found in output":
+            session_text = _scan_session_jsonl(context.worktree_path)
+            if session_text:
+                status, failure_reason = parse_output(session_text, 0)
 
         return InvocationResult(
             execution_id=context.execution_id,
