@@ -455,41 +455,37 @@ async def get_next_qa_task(
     return candidates[0]
 
 
-def _create_qa_worktree(
-    project_path: str, execution_branch: str | None
-) -> tuple[str, str | None]:
+class QAWorktreeError(Exception):
+    """Raised when a QA worktree cannot be created."""
+
+
+def _create_qa_worktree(project_path: str, execution_branch: str) -> str:
     """Create a temporary worktree on the execution branch for QA testing.
 
     Symlinks .venv from the project root so relative .venv/bin/python commands work.
-    Returns (cwd, worktree_path): cwd is where QA steps should run,
-    worktree_path is the path to remove afterwards (None if no worktree was created).
-    Falls back to (project_path, None) on any error.
+    Returns the worktree path on success.
+    Raises QAWorktreeError on failure — never falls back to project_path.
     """
-    if not execution_branch:
-        return project_path, None
-
     import uuid as _uuid
 
     qa_id = str(_uuid.uuid4())[:8]
     qa_path = os.path.join(project_path, ".worktrees", f"qa-{qa_id}")
-    try:
-        _subprocess.run(
-            ["git", "worktree", "add", qa_path, execution_branch],
-            cwd=project_path,
-            check=True,
-            capture_output=True,
+    result = _subprocess.run(
+        ["git", "worktree", "add", qa_path, execution_branch],
+        cwd=project_path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise QAWorktreeError(
+            f"git worktree add failed for branch {execution_branch!r}:"
+            f" {result.stderr.strip()}"
         )
-        venv_src = os.path.join(project_path, ".venv")
-        venv_dst = os.path.join(qa_path, ".venv")
-        if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
-            os.symlink(venv_src, venv_dst)
-        return qa_path, qa_path
-    except Exception:
-        logger.warning(
-            "Failed to create QA worktree for branch %s, falling back to project path",
-            execution_branch,
-        )
-        return project_path, None
+    venv_src = os.path.join(project_path, ".venv")
+    venv_dst = os.path.join(qa_path, ".venv")
+    if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
+        os.symlink(venv_src, venv_dst)
+    return qa_path
 
 
 def _remove_qa_worktree(project_path: str, qa_path: str) -> None:
@@ -554,7 +550,7 @@ async def run_qa_once(
         await state_machine.transition(task.id, ev.READY_FOR_DEPLOYMENT)
         return True
 
-    # Step 3: look up execution branch and run tool steps in that branch's worktree
+    # Step 3: look up execution branch — required, block task if missing
     execution_events = await store.get_events(task.id, "task_executions")
     execution_branch: str | None = None
     for event in reversed(execution_events):
@@ -564,12 +560,28 @@ async def run_qa_once(
                 execution_branch = bn
             break
 
-    qa_cwd, qa_worktree_path = _create_qa_worktree(project.local_path, execution_branch)
+    if not execution_branch:
+        failure_reason = "QA cannot run: no execution branch found for task"
+        logger.error("task=%s: %s", task.id, failure_reason)
+        await state_machine.transition(
+            task.id, ev.BLOCKED, extra_payload={"failure_reason": failure_reason}
+        )
+        return True
+
     try:
-        step_results = run_qa_steps(config, qa_cwd)
+        qa_path = _create_qa_worktree(project.local_path, execution_branch)
+    except QAWorktreeError as exc:
+        failure_reason = f"QA worktree creation failed: {exc}"
+        logger.error("task=%s: %s", task.id, failure_reason)
+        await state_machine.transition(
+            task.id, ev.BLOCKED, extra_payload={"failure_reason": failure_reason}
+        )
+        return True
+
+    try:
+        step_results = run_qa_steps(config, qa_path)
     finally:
-        if qa_worktree_path is not None:
-            _remove_qa_worktree(project.local_path, qa_worktree_path)
+        _remove_qa_worktree(project.local_path, qa_path)
 
     failed_steps = [r for r in step_results if r.returncode != 0]
 
