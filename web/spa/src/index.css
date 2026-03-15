@@ -163,6 +163,11 @@ body, #root {
 .badge-merged                 { background: #f0f0f0; color: #6b7280; }
 .badge-abandoned              { background: #f5f5f5; color: #9ca3af; }
 .badge-waiting_for_input      { background: #fff3cd; color: #92400e; }
+.badge-idea              { background: #f0f4ff; color: #4a5568; }
+.badge-in_clarification  { background: #fff3e0; color: #e65100; }
+.badge-defined           { background: #e8f5e9; color: #2e7d32; }
+.badge-generated         { background: #e3f2fd; color: #1565c0; }
+.badge-done              { background: #e8f5e9; color: #1b5e20; }
 
 .toast-container {
   position: fixed;

@@ -11,6 +11,7 @@ interface Feature {
   title: string
   description: string
   session_id: string | null
+  status: string
 }
 
 interface HighLevelSpec {
@@ -55,7 +56,10 @@ export function FeatureDetailPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <h1>{feature.title}</h1>
+        <h1>
+          {feature.title}
+          <span className={`badge badge-${feature.status}`} style={{ marginLeft: '0.75rem', verticalAlign: 'middle' }}>{feature.status.replace(/_/g, ' ')}</span>
+        </h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           {feature.session_id && (
             <button className="btn btn-secondary" onClick={() => setModalMode('view-chat')}>

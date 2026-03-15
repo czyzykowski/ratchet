@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- Feature lifecycle status (`idea`, `in_clarification`, `defined`, `generated`, `in_progress`, `done`) now included in `GET /api/features` and `GET /api/features/{feature_id}` responses
+- Feature status badges in web UI features list (`FeaturesPage`) and feature detail (`FeatureDetailPage`) pages
+- `--features` flag on `scripts/board.py` to display feature board grouped by lifecycle status
 - `execution_traces` Postgres table stores trace content; `EXECUTION_TRACE_RECORDED` event marks each trace in the event log
 - `ExecutionTrace` Pydantic model in `core/models.py`
 - `Store.save_trace()` and `Store.get_trace()` protocol methods; implemented in `InMemoryStore` and `PostgresStore`

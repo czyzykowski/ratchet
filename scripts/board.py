@@ -33,6 +33,10 @@ async def main() -> None:
         "--merged", action="store_true",
         help="Show only merged tasks instead of the default board.",
     )
+    parser.add_argument(
+        "--features", action="store_true",
+        help="Show feature board grouped by lifecycle status instead of the task board.",
+    )
     args = parser.parse_args()
 
     if not os.environ.get("DATABASE_URL"):
@@ -42,8 +46,61 @@ async def main() -> None:
     from core.db import close_pool
     from core.store import PostgresStore
 
+    FEATURE_STATUS_ORDER = [
+        ev.FEATURE_IDEA,
+        ev.FEATURE_IN_CLARIFICATION,
+        ev.FEATURE_DEFINED,
+        ev.FEATURE_GENERATED,
+        ev.FEATURE_IN_PROGRESS,
+        ev.FEATURE_DONE,
+    ]
+    FEATURE_STATUS_LABELS = {
+        ev.FEATURE_IDEA: "IDEA",
+        ev.FEATURE_IN_CLARIFICATION: "IN CLARIFICATION",
+        ev.FEATURE_DEFINED: "DEFINED",
+        ev.FEATURE_GENERATED: "GENERATED",
+        ev.FEATURE_IN_PROGRESS: "IN PROGRESS",
+        ev.FEATURE_DONE: "DONE",
+    }
+
     store = PostgresStore()
     try:
+        if args.features:
+            from core.feature_manager import FeatureManager
+            from core.project_manager import ProjectManager
+
+            pm = ProjectManager(store)
+            fm = FeatureManager(store)
+
+            projects = await pm.list_projects()
+            features_by_status: dict[str, list[tuple[str, str, str]]] = {
+                s: [] for s in FEATURE_STATUS_ORDER
+            }
+            for project in projects:
+                raw_features = await fm.list_features(project.id)
+                for feature in raw_features:
+                    status = await fm.get_feature_status(feature.id)
+                    if status not in features_by_status:
+                        features_by_status[status] = []
+                    features_by_status[status].append(
+                        (str(feature.id), feature.title, project.name)
+                    )
+
+            print("=== RATCHET FEATURE BOARD ===")
+            total = sum(len(v) for v in features_by_status.values())
+            if total == 0:
+                print("\nNo features found.")
+                return
+            for status in FEATURE_STATUS_ORDER:
+                feature_list = features_by_status.get(status, [])
+                if not feature_list:
+                    continue
+                label = FEATURE_STATUS_LABELS.get(status, status.upper())
+                print(f"\n{label} ({len(feature_list)})")
+                for feat_id, feat_title, proj_name in feature_list:
+                    print(f"  [{feat_id[:8]}] {feat_title} — {proj_name}")
+            return
+
         all_tasks, project_by_id, task_events_cache = await load_board(store)
 
         print("=== RATCHET BOARD ===")

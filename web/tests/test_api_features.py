@@ -177,3 +177,89 @@ def test_should_reflect_session_id_in_get_feature_response(
     get_resp = client.get(f"/api/features/{feature_id}")
     assert get_resp.status_code == 200
     assert get_resp.json()["feature"]["session_id"] == str(session_id)
+
+
+def test_should_include_status_in_features_list(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+
+    response = client.get("/api/features")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["features"][0]["status"] == "idea"
+
+
+def test_should_include_status_in_feature_detail(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+
+    response = client.get(f"/api/features/{feature_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["feature"]["status"] == "idea"
+
+
+def test_should_return_in_clarification_status_when_chat_session_exists(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+    asyncio.get_event_loop().run_until_complete(
+        store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.CHAT_SESSION_CREATED,
+            payload={"feature_id": str(feature_id), "session_id": str(uuid4())},
+        )
+    )
+
+    response = client.get(f"/api/features/{feature_id}")
+    assert response.status_code == 200
+    assert response.json()["feature"]["status"] == "in_clarification"
+
+
+def test_should_return_defined_status_when_hls_added(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    hls_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+    asyncio.get_event_loop().run_until_complete(
+        store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.HIGH_LEVEL_SPEC_ADDED,
+            payload={
+                "hls_id": str(hls_id),
+                "feature_id": str(feature_id),
+                "title": "Spec One",
+                "order": 1,
+                "content": "Some content.",
+                "dependencies": [],
+            },
+        )
+    )
+
+    response = client.get(f"/api/features/{feature_id}")
+    assert response.status_code == 200
+    assert response.json()["feature"]["status"] == "defined"

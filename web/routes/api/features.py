@@ -110,10 +110,12 @@ async def list_features(request: Request) -> JSONResponse:
         for feature in raw_features:
             specs = await fm.get_high_level_specs(feature.id)
             compiled_count = sum(1 for s in specs if s.compiled)
+            status = await fm.get_feature_status(feature.id)
             feature_data = feature.model_dump(mode="json")
             feature_data["compiled_spec_count"] = compiled_count
             feature_data["total_spec_count"] = len(specs)
             feature_data["project_name"] = project.name
+            feature_data["status"] = status
             features_list.append(feature_data)
 
     return JSONResponse({"features": features_list})
@@ -143,9 +145,13 @@ async def get_feature(feature_id: UUID, request: Request) -> JSONResponse:
         for s in specs
     ]
 
+    status = await fm.get_feature_status(feature_id)
+    feature_dict = feature.model_dump(mode="json")
+    feature_dict["status"] = status
+
     return JSONResponse(
         {
-            "feature": feature.model_dump(mode="json"),
+            "feature": feature_dict,
             "specs": specs_data,
         }
     )

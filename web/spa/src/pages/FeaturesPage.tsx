@@ -10,6 +10,7 @@ interface Feature {
   project_name: string
   compiled_spec_count: number
   total_spec_count: number
+  status: string
 }
 
 interface FeaturesResponse {
@@ -61,9 +62,10 @@ export function FeaturesPage() {
                     {f.description.slice(0, 80)}{f.description.length > 80 ? '…' : ''}
                   </td>
                   <td>
-                    <span className="badge badge-in_progress">
-                      {f.compiled_spec_count}/{f.total_spec_count} compiled
-                    </span>
+                    <span className={`badge badge-${f.status}`}>{f.status.replace(/_/g, ' ')}</span>
+                  </td>
+                  <td style={{ color: '#555', fontSize: '0.8rem' }}>
+                    {f.compiled_spec_count}/{f.total_spec_count} compiled
                   </td>
                 </tr>
               ))}
