@@ -284,12 +284,12 @@ async def test_mark_compiled_only_affects_targeted_spec() -> None:
 
 @pytest.mark.asyncio
 async def test_get_feature_status_defined_when_no_specs() -> None:
-    """should return defined when feature has no high-level specs"""
+    """should return idea when feature has no high-level specs and no chat session"""
     fm, _ = _make_fm()
     project_id = uuid.uuid4()
     feature = await fm.create_feature(project_id, "Feature", "desc")
     status = await fm.get_feature_status(feature.id)
-    assert status == ev.FEATURE_DEFINED
+    assert status == ev.FEATURE_IDEA
 
 
 @pytest.mark.asyncio
@@ -389,6 +389,77 @@ async def test_get_feature_status_done_when_all_tasks_deployed() -> None:
     await fm.mark_compiled(hls.id, task_id, feature.id)
     status = await fm.get_feature_status(feature.id)
     assert status == ev.FEATURE_DONE
+
+
+# ---------------------------------------------------------------------------
+# get_feature_status — early lifecycle derivation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_feature_status_idea_when_only_created() -> None:
+    """should return idea when feature has only FEATURE_CREATED event"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    status = await fm.get_feature_status(feature.id)
+    assert status == ev.FEATURE_IDEA
+
+
+@pytest.mark.asyncio
+async def test_get_feature_status_in_clarification_when_chat_session_exists() -> None:
+    """should return in_clarification when CHAT_SESSION_CREATED event exists but no HLS"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    session_id = uuid.uuid4()
+    await store.append_event(
+        aggregate_id=feature.id,
+        aggregate_type="feature",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_id": str(session_id),
+            "session_type": "feature",
+            "context_id": str(feature.id),
+            "context_type": "feature",
+        },
+    )
+    status = await fm.get_feature_status(feature.id)
+    assert status == ev.FEATURE_IN_CLARIFICATION
+
+
+@pytest.mark.asyncio
+async def test_get_feature_status_defined_when_hls_added_without_chat() -> None:
+    """should return defined when high-level spec added but no chat session"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
+    status = await fm.get_feature_status(feature.id)
+    assert status == ev.FEATURE_DEFINED
+
+
+@pytest.mark.asyncio
+async def test_get_feature_status_defined_when_both_chat_and_hls_exist() -> None:
+    """should return defined when both chat session and HLS exist (HLS takes precedence)"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    session_id = uuid.uuid4()
+    await store.append_event(
+        aggregate_id=feature.id,
+        aggregate_type="feature",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_id": str(session_id),
+            "session_type": "feature",
+            "context_id": str(feature.id),
+            "context_type": "feature",
+        },
+    )
+    await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
+    status = await fm.get_feature_status(feature.id)
+    assert status == ev.FEATURE_DEFINED
 
 
 # ---------------------------------------------------------------------------

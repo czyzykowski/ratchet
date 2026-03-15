@@ -198,18 +198,58 @@ class FeatureManager:
 
         Returns one of: idea, in_clarification, defined, generated, in_progress, done.
 
-        - idea: feature created but no clarification started (future logic)
-        - in_clarification: feature being clarified with stakeholders (future logic)
-        - defined: no high-level specs, or none are compiled
+        - idea: feature created but no clarification started
+        - in_clarification: chat session started but no high-level specs yet
+        - defined: high-level specs exist but none are compiled
         - generated: all compiled specs have tasks in early statuses
         - in_progress: ≥1 task past ready_for_implementation
         - done: all tasks deployed
         """
-        specs = await self.get_high_level_specs(feature_id)
-        compiled = [s for s in specs if s.compiled]
+        feature_events = await self._store.get_events(feature_id, "feature")
+
+        has_chat_session = any(e.event_type == ev.CHAT_SESSION_CREATED for e in feature_events)
+        has_hls = any(e.event_type == ev.HIGH_LEVEL_SPEC_ADDED for e in feature_events)
+
+        # Replay specs from the same event list
+        specs_map: dict[UUID, HighLevelSpec] = {}
+        for event in feature_events:
+            if event.event_type == ev.HIGH_LEVEL_SPEC_ADDED:
+                p = event.payload
+                hls_id = UUID(p["hls_id"])
+                specs_map[hls_id] = HighLevelSpec(
+                    id=hls_id,
+                    feature_id=UUID(p["feature_id"]),
+                    task_id=None,
+                    title=p["title"],
+                    order=p["order"],
+                    content=p["content"],
+                    compiled=False,
+                    dependencies=[UUID(d) for d in p.get("dependencies", [])],
+                )
+            elif event.event_type == ev.HIGH_LEVEL_SPEC_COMPILED:
+                p = event.payload
+                hls_id = UUID(p["hls_id"])
+                if hls_id in specs_map:
+                    existing = specs_map[hls_id]
+                    specs_map[hls_id] = HighLevelSpec(
+                        id=existing.id,
+                        feature_id=existing.feature_id,
+                        task_id=UUID(p["task_id"]),
+                        title=existing.title,
+                        order=existing.order,
+                        content=existing.content,
+                        compiled=True,
+                        dependencies=existing.dependencies,
+                    )
+
+        compiled = [s for s in specs_map.values() if s.compiled]
 
         if not compiled:
-            return ev.FEATURE_DEFINED
+            if has_hls:
+                return ev.FEATURE_DEFINED
+            if has_chat_session:
+                return ev.FEATURE_IN_CLARIFICATION
+            return ev.FEATURE_IDEA
 
         # Fetch task statuses for all compiled specs
         task_statuses: list[str] = []
