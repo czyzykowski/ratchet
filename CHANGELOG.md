@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- QA `build-spa` step fails in fresh worktrees because `node_modules` is gitignored; added `install-spa: npm ci` step before `build-spa` in QA steps
+
 ### Changed
 - Board tab and Focus tab pipeline strip no longer render the `spec_qa` column/stage; the status remains functional in the backend and API
 
