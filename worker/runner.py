@@ -571,6 +571,11 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
     venv_dst = os.path.join(qa_path, ".venv")
     if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
         os.symlink(venv_src, venv_dst)
+    # Symlink web/spa/node_modules so npm build steps work
+    spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
+    spa_nm_dst = os.path.join(qa_path, "web", "spa", "node_modules")
+    if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
+        os.symlink(spa_nm_src, spa_nm_dst)
     return qa_path, True
 
 
