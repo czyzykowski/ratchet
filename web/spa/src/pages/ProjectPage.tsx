@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProject, type Task } from '../api/projects'
+import { apiFetch } from '../api/client'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 import { NewTaskModal } from '../components/NewTaskModal'
-import { CreateFeatureChat } from '../components/CreateFeatureChat'
+import { NewFeatureModal } from '../components/NewFeatureModal'
+import { FeatureProgressBar } from '../components/FeatureProgressBar'
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal'
 import { STATUS_COLORS } from '../utils/statusColors'
 
@@ -29,6 +31,20 @@ const STATUS_LABELS: Record<string, string> = {
   ready_for_qa: 'Ready for QA',
   ready_for_merge: 'Ready for Merge',
   merged: 'Merged',
+}
+
+interface Feature {
+  id: string
+  project_id: string
+  title: string
+  description: string
+  compiled_spec_count: number
+  total_spec_count: number
+  status: string
+}
+
+interface FeaturesResponse {
+  features: Feature[]
 }
 
 function formatRelativeTime(isoString: string | null | undefined): string {
@@ -65,10 +81,16 @@ export function ProjectPage() {
     queryFn: () => fetchProject(project_id!),
     enabled: !!project_id,
   })
+  const { data: featuresData } = useQuery<FeaturesResponse>({
+    queryKey: ['project-features', project_id],
+    queryFn: () => apiFetch<FeaturesResponse>(`/api/features?project_id=${project_id}`),
+    enabled: !!project_id,
+  })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
-  const [featureChatOpen, setFeatureChatOpen] = useState(false)
+  const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
 
   useSSE((event) => {
     if (
@@ -85,6 +107,7 @@ export function ProjectPage() {
   if (!data) return <div className="error-state">Project not found</div>
 
   const groups = groupByStatus(data.tasks)
+  const features = featuresData?.features ?? []
 
   return (
     <div className="page">
@@ -94,7 +117,7 @@ export function ProjectPage() {
           <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
-          <button className="btn btn-secondary" onClick={() => setFeatureChatOpen(true)}>
+          <button className="btn btn-secondary" onClick={() => setFeatureModalOpen(true)}>
             Add Feature
           </button>
           <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
@@ -102,6 +125,48 @@ export function ProjectPage() {
           </button>
         </div>
       </header>
+
+      {features.length > 0 && (
+        <section className="status-section">
+          <h2
+            className="status-heading"
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setFeaturesCollapsed(c => !c)}
+          >
+            {featuresCollapsed ? '▶' : '▼'} Features ({features.length})
+          </h2>
+          {!featuresCollapsed && (
+            <table className="data-table">
+              <tbody>
+                {features.map(f => (
+                  <tr key={f.id} className="task-row">
+                    <td>
+                      <Link to={`/features/${f.id}`} style={{ color: '#1a1a1a', textDecoration: 'none' }}>
+                        {f.title}
+                      </Link>
+                    </td>
+                    <td>
+                      <span
+                        className="status-badge"
+                        style={{ backgroundColor: STATUS_COLORS[f.status] ?? '#6b7280' }}
+                      >
+                        {f.status.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td style={{ minWidth: '120px' }}>
+                      <FeatureProgressBar
+                        compiledCount={f.compiled_spec_count}
+                        totalCount={f.total_spec_count}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
       {STATUS_ORDER.map(status => {
         const tasks = groups[status]
         if (tasks.length === 0) return null
@@ -146,22 +211,19 @@ export function ProjectPage() {
           onClose={() => setTaskModalOpen(false)}
         />
       )}
+      {project_id && (
+        <NewFeatureModal
+          open={featureModalOpen}
+          projectId={project_id}
+          onClose={() => setFeatureModalOpen(false)}
+        />
+      )}
       {data && (
         <ProjectSettingsModal
           project={data.project}
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
         />
-      )}
-      {project_id && featureChatOpen && (
-        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setFeatureChatOpen(false) }}>
-          <div className="modal-content modal-content-chat">
-            <CreateFeatureChat
-              projectId={project_id}
-              onClose={() => setFeatureChatOpen(false)}
-            />
-          </div>
-        </div>
       )}
     </div>
   )

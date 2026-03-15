@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import { Markdown } from '../components/Markdown'
 import { CreateFeatureChat } from '../components/CreateFeatureChat'
+import { FeatureProgressBar } from '../components/FeatureProgressBar'
+import { STATUS_COLORS } from '../utils/statusColors'
 
 interface Feature {
   id: string
@@ -23,6 +25,7 @@ interface HighLevelSpec {
   content: string
   compiled: boolean
   dependencies: string[]
+  task_status: string | null
 }
 
 interface FeatureDetailResponse {
@@ -33,7 +36,8 @@ interface FeatureDetailResponse {
 export function FeatureDetailPage() {
   const { feature_id } = useParams<{ feature_id: string }>()
   const queryClient = useQueryClient()
-  const [modalMode, setModalMode] = useState<'view-chat' | 'new-feature' | null>(null)
+  const [showChat, setShowChat] = useState(false)
+  const [chatMode, setChatMode] = useState<'clarification' | 'view'>('clarification')
   const { data, isLoading, error } = useQuery<FeatureDetailResponse>({
     queryKey: ['feature', feature_id],
     queryFn: () => apiFetch<FeatureDetailResponse>(`/api/features/${feature_id}`),
@@ -46,11 +50,30 @@ export function FeatureDetailPage() {
 
   const { feature, specs } = data
   const sortedSpecs = [...specs].sort((a, b) => a.order - b.order)
+  const compiledSpecs = sortedSpecs.filter(s => s.compiled)
+  const taskStatuses = compiledSpecs.map(s => s.task_status)
+  const compiledCount = compiledSpecs.length
+  const totalCount = sortedSpecs.length
 
-  function handleModalClose() {
-    setModalMode(null)
+  function handleChatClose() {
+    setShowChat(false)
     queryClient.invalidateQueries({ queryKey: ['feature', feature_id] })
     queryClient.invalidateQueries({ queryKey: ['features'] })
+  }
+
+  if (showChat) {
+    const sessionId = chatMode === 'view' ? feature.session_id ?? undefined : undefined
+    const initMsg = chatMode === 'clarification'
+      ? `# ${feature.title}${feature.description ? '\n\n' + feature.description : ''}`
+      : undefined
+    return (
+      <CreateFeatureChat
+        projectId={feature.project_id}
+        sessionId={sessionId}
+        initialMessage={initMsg}
+        onClose={handleChatClose}
+      />
+    )
   }
 
   return (
@@ -62,30 +85,33 @@ export function FeatureDetailPage() {
         </h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           {feature.session_id && (
-            <button className="btn btn-secondary" onClick={() => setModalMode('view-chat')}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { setChatMode('view'); setShowChat(true) }}
+            >
               View Chat
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => setModalMode('new-feature')}>
-            New Feature
-          </button>
+          {feature.status === 'idea' && (
+            <button
+              className="btn btn-primary"
+              onClick={() => { setChatMode('clarification'); setShowChat(true) }}
+            >
+              Start Clarification
+            </button>
+          )}
           <Link to="/features" className="btn btn-secondary">← Features</Link>
         </div>
       </header>
 
-      {modalMode === 'view-chat' && feature.session_id && (
-        <CreateFeatureChat
-          projectId={feature.project_id}
-          sessionId={feature.session_id}
-          onClose={handleModalClose}
-        />
-      )}
-
-      {modalMode === 'new-feature' && (
-        <CreateFeatureChat
-          projectId={feature.project_id}
-          onClose={handleModalClose}
-        />
+      {totalCount > 0 && (
+        <div className="modal-field">
+          <FeatureProgressBar
+            compiledCount={compiledCount}
+            totalCount={totalCount}
+            taskStatuses={taskStatuses}
+          />
+        </div>
       )}
 
       {feature.description && (
@@ -113,6 +139,14 @@ export function FeatureDetailPage() {
                   <span className={`badge badge-${spec.compiled ? 'deployed' : 'ready_for_spec'}`}>
                     {spec.compiled ? 'compiled' : 'pending'}
                   </span>
+                  {spec.task_status && (
+                    <span
+                      className="status-badge"
+                      style={{ backgroundColor: STATUS_COLORS[spec.task_status] ?? '#6b7280' }}
+                    >
+                      {spec.task_status.replace(/_/g, ' ')}
+                    </span>
+                  )}
                   {spec.task_id && (
                     <Link to={`/tasks/${spec.task_id}`} style={{ color: '#7eb8f7', fontSize: '0.75rem' }}>
                       view task

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreateSpecChat } from './CreateSpecChat'
 import { Markdown } from './Markdown'
@@ -59,6 +60,8 @@ interface TaskDetailResponse {
   baseline_qa_failure: string | null
   pr_info: PrInfo | null
   deploy_hooks: DeployHookStep[] | null
+  feature_id: string | null
+  feature_title: string | null
 }
 
 const ARCHIVABLE_STATUSES = [
@@ -349,6 +352,16 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 <div className="modal-label">Refinements</div>
                 <div className="modal-value">{data.task.refinement_count}</div>
               </div>
+              {data.feature_id && data.feature_title && (
+                <div className="modal-field">
+                  <div className="modal-label">Feature</div>
+                  <div className="modal-value">
+                    <Link to={`/features/${data.feature_id}`} style={{ color: '#7eb8f7' }}>
+                      {data.feature_title}
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="modal-meta-row">

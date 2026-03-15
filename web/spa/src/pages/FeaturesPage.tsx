@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
+import { FeatureProgressBar } from '../components/FeatureProgressBar'
 
 interface Feature {
   id: string
@@ -64,8 +65,11 @@ export function FeaturesPage() {
                   <td>
                     <span className={`badge badge-${f.status}`}>{f.status.replace(/_/g, ' ')}</span>
                   </td>
-                  <td style={{ color: '#555', fontSize: '0.8rem' }}>
-                    {f.compiled_spec_count}/{f.total_spec_count} compiled
+                  <td style={{ minWidth: '120px' }}>
+                    <FeatureProgressBar
+                      compiledCount={f.compiled_spec_count}
+                      totalCount={f.total_spec_count}
+                    />
                   </td>
                 </tr>
               ))}

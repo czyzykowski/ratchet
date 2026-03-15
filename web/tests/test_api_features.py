@@ -234,6 +234,169 @@ def test_should_return_in_clarification_status_when_chat_session_exists(
     assert response.json()["feature"]["status"] == "in_clarification"
 
 
+def test_should_create_feature_via_simple_endpoint(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    response = client.post(
+        "/api/features/simple",
+        json={"project_id": str(project_id), "title": "My Simple Feature"},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["feature"]["title"] == "My Simple Feature"
+    assert data["feature"]["project_id"] == str(project_id)
+    assert data["feature"]["session_id"] is None
+
+
+def test_should_create_feature_via_simple_endpoint_with_description(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    response = client.post(
+        "/api/features/simple",
+        json={
+            "project_id": str(project_id),
+            "title": "Feature With Desc",
+            "description": "A detailed description",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["feature"]["title"] == "Feature With Desc"
+    assert data["feature"]["description"] == "A detailed description"
+
+
+def test_should_return_404_when_simple_endpoint_project_not_found(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    response = client.post(
+        "/api/features/simple",
+        json={"project_id": str(uuid4()), "title": "Orphan Feature"},
+    )
+    assert response.status_code == 404
+
+
+def test_should_filter_features_by_project_id(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id_a = uuid4()
+    project_id_b = uuid4()
+    feature_id_a = uuid4()
+    feature_id_b = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id_a, "Project A"))
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id_b, "Project B"))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id_a, project_id_a, "Feature A")
+    )
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id_b, project_id_b, "Feature B")
+    )
+
+    response = client.get(f"/api/features?project_id={project_id_a}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["features"]) == 1
+    assert data["features"][0]["title"] == "Feature A"
+
+
+def test_should_include_task_status_in_compiled_spec(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    hls_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+
+    async def _seed_compiled_spec() -> None:
+        await store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.HIGH_LEVEL_SPEC_ADDED,
+            payload={
+                "hls_id": str(hls_id),
+                "feature_id": str(feature_id),
+                "title": "Spec One",
+                "order": 1,
+                "content": "Some content.",
+                "dependencies": [],
+            },
+        )
+        await store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.HIGH_LEVEL_SPEC_COMPILED,
+            payload={
+                "hls_id": str(hls_id),
+                "feature_id": str(feature_id),
+                "task_id": str(task_id),
+            },
+        )
+        # Seed task
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_CREATED,
+            payload={
+                "task_id": str(task_id),
+                "project_id": str(project_id),
+                "title": "Compiled task",
+                "status": ev.READY_FOR_SPEC,
+            },
+        )
+
+    asyncio.get_event_loop().run_until_complete(_seed_compiled_spec())
+
+    response = client.get(f"/api/features/{feature_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["specs"]) == 1
+    assert data["specs"][0]["compiled"] is True
+    assert data["specs"][0]["task_status"] == ev.READY_FOR_SPEC
+
+
+def test_should_return_null_task_status_for_pending_spec(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    feature_id = uuid4()
+    hls_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature(store, feature_id, project_id, "My Feature")
+    )
+    asyncio.get_event_loop().run_until_complete(
+        store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.HIGH_LEVEL_SPEC_ADDED,
+            payload={
+                "hls_id": str(hls_id),
+                "feature_id": str(feature_id),
+                "title": "Spec One",
+                "order": 1,
+                "content": "Some content.",
+                "dependencies": [],
+            },
+        )
+    )
+
+    response = client.get(f"/api/features/{feature_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["specs"]) == 1
+    assert data["specs"][0]["compiled"] is False
+    assert data["specs"][0]["task_status"] is None
+
+
 def test_should_return_defined_status_when_hls_added(
     client: TestClient, store: InMemoryStore
 ) -> None:

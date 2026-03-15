@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from core import events as ev
 from core.execution_manager import ExecutionManager
+from core.feature_manager import FeatureManager
 from core.models import QAExchange
 from core.project_manager import ProjectManager
 from core.qa_manager import get_pending_question, get_qa_history
@@ -111,6 +112,21 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
     project = await pm.get_project(task.project_id)
     project_name = project.name if project is not None else None
 
+    # Feature backlink: scan all features for this project to find one containing this task
+    feature_id: str | None = None
+    feature_title: str | None = None
+    fm = FeatureManager(store)
+    project_features = await fm.list_features(task.project_id)
+    for feature in project_features:
+        specs = await fm.get_high_level_specs(feature.id)
+        for spec in specs:
+            if spec.task_id == task_id:
+                feature_id = str(feature.id)
+                feature_title = feature.title
+                break
+        if feature_id:
+            break
+
     return JSONResponse(
         {
             "task": task_dict,
@@ -122,6 +138,8 @@ async def get_task(task_id: UUID, request: Request) -> JSONResponse:
             "baseline_qa_failure": baseline_qa_failure,
             "pr_info": pr_info,
             "deploy_hooks": deploy_hooks,
+            "feature_id": feature_id,
+            "feature_title": feature_title,
         }
     )
 

@@ -6,6 +6,7 @@ interface CreateFeatureChatProps {
   projectId: string
   onClose: () => void
   sessionId?: string
+  initialMessage?: string
 }
 
 interface Message {
@@ -21,7 +22,7 @@ interface FeaturePreview {
   raw: string
 }
 
-export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessionId }: CreateFeatureChatProps) {
+export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessionId, initialMessage }: CreateFeatureChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -55,6 +56,9 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
           restored.push({ role: 'assistant', content: entry.assistant })
         }
         setMessages(restored)
+      } else if (initialMessage && !initialSessionId) {
+        setTimeout(() => sendMessage(initialMessage), 100)
+        return
       }
       setTimeout(() => inputRef.current?.focus(), 50)
     })

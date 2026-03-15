@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from core.feature_manager import FeatureManager
 from core.models import HighLevelSpec
 from core.project_manager import ProjectManager
+from core.task_manager import TaskManager
 
 router = APIRouter()
 
@@ -21,6 +22,12 @@ class CreateFeatureBody(BaseModel):
     project_id: UUID
     feature_block: str  # raw text from ## FEATURE READY block
     session_id: UUID | None = None
+
+
+class CreateSimpleFeatureBody(BaseModel):
+    project_id: UUID
+    title: str
+    description: str | None = None
 
 
 def _parse_feature_block(block: str) -> tuple[str, str, list[dict[str, Any]]]:
@@ -63,6 +70,23 @@ def _parse_feature_block(block: str) -> tuple[str, str, list[dict[str, Any]]]:
     return title, description, specs
 
 
+@router.post("/features/simple", status_code=201)
+async def create_simple_feature(body: CreateSimpleFeatureBody, request: Request) -> JSONResponse:
+    store = request.app.state.store
+    pm = ProjectManager(store)
+    fm = FeatureManager(store)
+
+    project = await pm.get_project(body.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {body.project_id} not found")
+
+    feature = await fm.create_feature(
+        body.project_id, body.title, body.description or "", session_id=None
+    )
+
+    return JSONResponse({"feature": feature.model_dump(mode="json")}, status_code=201)
+
+
 @router.post("/features", status_code=201)
 async def create_feature(body: CreateFeatureBody, request: Request) -> JSONResponse:
     store = request.app.state.store
@@ -98,12 +122,14 @@ async def create_feature(body: CreateFeatureBody, request: Request) -> JSONRespo
 
 
 @router.get("/features")
-async def list_features(request: Request) -> JSONResponse:
+async def list_features(request: Request, project_id: UUID | None = None) -> JSONResponse:
     store = request.app.state.store
     pm = ProjectManager(store)
     fm = FeatureManager(store)
 
     projects = await pm.list_projects()
+    if project_id is not None:
+        projects = [p for p in projects if p.id == project_id]
     features_list = []
     for project in projects:
         raw_features = await fm.list_features(project.id)
@@ -131,8 +157,15 @@ async def get_feature(feature_id: UUID, request: Request) -> JSONResponse:
         raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
 
     specs = await fm.get_high_level_specs(feature_id)
-    specs_data = [
-        {
+    task_manager = TaskManager(store)
+    specs_data = []
+    for s in specs:
+        task_status: str | None = None
+        if s.task_id is not None:
+            task = await task_manager.get_task(s.task_id)
+            if task is not None:
+                task_status = task.status
+        specs_data.append({
             "id": str(s.id),
             "feature_id": str(s.feature_id),
             "task_id": str(s.task_id) if s.task_id else None,
@@ -141,9 +174,8 @@ async def get_feature(feature_id: UUID, request: Request) -> JSONResponse:
             "content": s.content,
             "compiled": s.compiled,
             "dependencies": [str(d) for d in s.dependencies],
-        }
-        for s in specs
-    ]
+            "task_status": task_status,
+        })
 
     status = await fm.get_feature_status(feature_id)
     feature_dict = feature.model_dump(mode="json")

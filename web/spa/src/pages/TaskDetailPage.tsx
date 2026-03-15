@@ -53,6 +53,8 @@ interface TaskDetailResponse {
   baseline_qa_failure: string | null
   pr_info: PrInfo | null
   deploy_hooks: DeployHookStep[] | null
+  feature_id: string | null
+  feature_title: string | null
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -121,6 +123,16 @@ export function TaskDetailPage() {
           <div className="modal-label">Refinements</div>
           <div className="modal-value">{task.refinement_count}</div>
         </div>
+        {data.feature_id && data.feature_title && (
+          <div className="modal-field">
+            <div className="modal-label">Feature</div>
+            <div className="modal-value">
+              <Link to={`/features/${data.feature_id}`} style={{ color: '#7eb8f7' }}>
+                {data.feature_title}
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="modal-meta-row">

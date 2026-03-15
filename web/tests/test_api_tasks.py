@@ -558,3 +558,92 @@ def test_should_return_null_pr_info_and_deploy_hooks_when_no_deployment_events(
     data = response.json()
     assert data["pr_info"] is None
     assert data["deploy_hooks"] is None
+
+
+_FEATURE_REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000002")
+
+
+async def _seed_feature_with_compiled_spec(
+    store: InMemoryStore,
+    feature_id: UUID,
+    project_id: UUID,
+    task_id: UUID,
+    feature_title: str = "My Feature",
+) -> None:
+    hls_id = uuid4()
+    feature_payload = {
+        "feature_id": str(feature_id),
+        "project_id": str(project_id),
+        "title": feature_title,
+        "description": "Feature description",
+        "session_id": None,
+    }
+    await store.append_event(
+        aggregate_id=feature_id,
+        aggregate_type="feature",
+        event_type=ev.FEATURE_CREATED,
+        payload=feature_payload,
+    )
+    await store.append_event(
+        aggregate_id=project_id,
+        aggregate_type="project_features",
+        event_type=ev.FEATURE_CREATED,
+        payload=feature_payload,
+    )
+    await store.append_event(
+        aggregate_id=feature_id,
+        aggregate_type="feature",
+        event_type=ev.HIGH_LEVEL_SPEC_ADDED,
+        payload={
+            "hls_id": str(hls_id),
+            "feature_id": str(feature_id),
+            "title": "Spec One",
+            "order": 1,
+            "content": "Some content.",
+            "dependencies": [],
+        },
+    )
+    await store.append_event(
+        aggregate_id=feature_id,
+        aggregate_type="feature",
+        event_type=ev.HIGH_LEVEL_SPEC_COMPILED,
+        payload={
+            "hls_id": str(hls_id),
+            "feature_id": str(feature_id),
+            "task_id": str(task_id),
+        },
+    )
+
+
+def test_should_return_feature_backlink_when_task_belongs_to_compiled_spec(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    feature_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(_seed_task(store, task_id, project_id, "My Task"))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_feature_with_compiled_spec(store, feature_id, project_id, task_id, "My Feature")
+    )
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["feature_id"] == str(feature_id)
+    assert data["feature_title"] == "My Feature"
+
+
+def test_should_return_null_feature_backlink_when_task_not_in_feature(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(_seed_task(store, task_id, project_id, "My Task"))
+
+    response = client.get(f"/api/tasks/{task_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["feature_id"] is None
+    assert data["feature_title"] is None
