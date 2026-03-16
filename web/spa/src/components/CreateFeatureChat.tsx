@@ -48,7 +48,7 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
     const init = initialSessionId
       ? loadSession(initialSessionId)
       : createSession()
-    init.then(({ history }) => {
+    init.then(({ sid, history }) => {
       if (history.length > 0) {
         const restored: Message[] = []
         for (const entry of history) {
@@ -57,7 +57,7 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
         }
         setMessages(restored)
       } else if (initialMessage && !initialSessionId) {
-        setTimeout(() => sendMessage(initialMessage), 100)
+        sendMessage(initialMessage, sid)
         return
       }
       setTimeout(() => inputRef.current?.focus(), 50)
@@ -162,8 +162,9 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
     setUploadError(null)
   }
 
-  async function sendMessage(userInput: string) {
-    if (!sessionId) return
+  async function sendMessage(userInput: string, sid?: string) {
+    const activeSessionId = sid ?? sessionId
+    if (!activeSessionId) return
 
     const sentImageId = pendingImageId
     const sentThumbnailUrl = pendingThumbnailUrl
@@ -178,7 +179,7 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
       const body: Record<string, unknown> = { user_input: userInput }
       if (sentImageId) body.image_id = sentImageId
 
-      const res = await fetch(`/api/feature-sessions/${sessionId}/message`, {
+      const res = await fetch(`/api/feature-sessions/${activeSessionId}/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
