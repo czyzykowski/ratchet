@@ -500,6 +500,26 @@ def _find_existing_worktree(project_path: str, branch: str) -> str | None:
     return None
 
 
+def _safe_symlink(src: str, dst: str) -> None:
+    """Create a relative symlink dst -> src, skipping if dst exists or src == dst.
+
+    Uses a relative target so the symlink remains valid regardless of how the path
+    is mounted or traversed.  Never creates a symlink whose target equals its own
+    location (which would be circular).
+    """
+    abs_src = os.path.abspath(src)
+    abs_dst = os.path.abspath(dst)
+    if abs_src == abs_dst:
+        logger.warning("Skipping symlink: src == dst (%s)", abs_src)
+        return
+    if os.path.lexists(dst):
+        return
+    if not os.path.exists(src):
+        return
+    relative_target = os.path.relpath(abs_src, os.path.dirname(abs_dst))
+    os.symlink(relative_target, dst)
+
+
 def _create_baseline_worktree(project_path: str) -> str:
     """Create a temporary worktree on HEAD for baseline QA.
 
@@ -522,26 +542,15 @@ def _create_baseline_worktree(project_path: str) -> str:
         raise QAWorktreeError(
             f"git worktree add (baseline) failed: {result.stderr.strip()}"
         )
-    # Symlink .venv so Python QA steps work
-    venv_src = os.path.join(project_path, ".venv")
-    venv_dst = os.path.join(wt_path, ".venv")
-    if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
-        os.symlink(venv_src, venv_dst)
-    # Symlink root node_modules so npm/deno npm packages work
-    nm_src = os.path.join(project_path, "node_modules")
-    nm_dst = os.path.join(wt_path, "node_modules")
-    if os.path.exists(nm_src) and not os.path.lexists(nm_dst):
-        os.symlink(nm_src, nm_dst)
-    # Symlink web/spa/node_modules so npm build steps work
-    spa_nm_src = os.path.join(project_path, "web", "spa", "node_modules")
-    spa_nm_dst = os.path.join(wt_path, "web", "spa", "node_modules")
-    if os.path.exists(spa_nm_src) and not os.path.lexists(spa_nm_dst):
-        os.symlink(spa_nm_src, spa_nm_dst)
-    # Symlink .env so tools that load env vars at module init (e.g. deno dotenv) work
-    env_src = os.path.join(project_path, ".env")
-    env_dst = os.path.join(wt_path, ".env")
-    if os.path.exists(env_src) and not os.path.lexists(env_dst):
-        os.symlink(env_src, env_dst)
+    _safe_symlink(os.path.join(project_path, ".venv"), os.path.join(wt_path, ".venv"))
+    _safe_symlink(
+        os.path.join(project_path, "node_modules"), os.path.join(wt_path, "node_modules")
+    )
+    _safe_symlink(
+        os.path.join(project_path, "web", "spa", "node_modules"),
+        os.path.join(wt_path, "web", "spa", "node_modules"),
+    )
+    _safe_symlink(os.path.join(project_path, ".env"), os.path.join(wt_path, ".env"))
     return wt_path
 
 
@@ -578,18 +587,11 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
             f"git worktree add failed for branch {execution_branch!r}:"
             f" {result.stderr.strip()}"
         )
-    venv_src = os.path.join(project_path, ".venv")
-    venv_dst = os.path.join(qa_path, ".venv")
-    if os.path.exists(venv_src) and not os.path.lexists(venv_dst):
-        os.symlink(venv_src, venv_dst)
-    nm_src = os.path.join(project_path, "node_modules")
-    nm_dst = os.path.join(qa_path, "node_modules")
-    if os.path.exists(nm_src) and not os.path.lexists(nm_dst):
-        os.symlink(nm_src, nm_dst)
-    env_src = os.path.join(project_path, ".env")
-    env_dst = os.path.join(qa_path, ".env")
-    if os.path.exists(env_src) and not os.path.lexists(env_dst):
-        os.symlink(env_src, env_dst)
+    _safe_symlink(os.path.join(project_path, ".venv"), os.path.join(qa_path, ".venv"))
+    _safe_symlink(
+        os.path.join(project_path, "node_modules"), os.path.join(qa_path, "node_modules")
+    )
+    _safe_symlink(os.path.join(project_path, ".env"), os.path.join(qa_path, ".env"))
     return qa_path, True
 
 
