@@ -6,7 +6,7 @@ import { apiFetch } from '../api/client'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
 import { NewTaskModal } from '../components/NewTaskModal'
-import { NewFeatureModal } from '../components/NewFeatureModal'
+import { CreateFeatureChat } from '../components/CreateFeatureChat'
 import { FeatureProgressBar } from '../components/FeatureProgressBar'
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal'
 import { STATUS_COLORS } from '../utils/statusColors'
@@ -88,7 +88,7 @@ export function ProjectPage() {
   })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [taskModalOpen, setTaskModalOpen] = useState(false)
-  const [featureModalOpen, setFeatureModalOpen] = useState(false)
+  const [showFeatureChat, setShowFeatureChat] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
 
@@ -109,6 +109,19 @@ export function ProjectPage() {
   const groups = groupByStatus(data.tasks)
   const features = featuresData?.features ?? []
 
+  if (showFeatureChat && project_id) {
+    return (
+      <CreateFeatureChat
+        projectId={project_id}
+        onClose={() => {
+          setShowFeatureChat(false)
+          queryClient.invalidateQueries({ queryKey: ['project-features', project_id] })
+          queryClient.invalidateQueries({ queryKey: ['features'] })
+        }}
+      />
+    )
+  }
+
   return (
     <div className="page">
       <header className="page-header">
@@ -117,7 +130,7 @@ export function ProjectPage() {
           <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
-          <button className="btn btn-secondary" onClick={() => setFeatureModalOpen(true)}>
+          <button className="btn btn-secondary" onClick={() => setShowFeatureChat(true)}>
             Add Feature
           </button>
           <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
@@ -211,13 +224,7 @@ export function ProjectPage() {
           onClose={() => setTaskModalOpen(false)}
         />
       )}
-      {project_id && (
-        <NewFeatureModal
-          open={featureModalOpen}
-          projectId={project_id}
-          onClose={() => setFeatureModalOpen(false)}
-        />
-      )}
+
       {data && (
         <ProjectSettingsModal
           project={data.project}
