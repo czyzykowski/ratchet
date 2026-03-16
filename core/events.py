@@ -20,6 +20,8 @@ TASK_DEPLOY_HOOKS_RUN = "task.merge_hooks_run"
 TASK_WORKER_DISCONNECTED = "task.worker_disconnected"
 TASK_PR_CREATED = "task.pr_created"
 # TASK_PR_CREATED payload: {pr_url: str, pr_number: int, branch: str}
+TASK_AUTO_MERGE_FAILED = "task.auto_merge_failed"
+# TASK_AUTO_MERGE_FAILED payload: {failure_reason: str}
 
 # Spec events
 SPEC_CREATED = "spec.created"
