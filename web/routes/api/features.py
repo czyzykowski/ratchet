@@ -127,7 +127,9 @@ async def create_feature(body: CreateFeatureBody, request: Request) -> JSONRespo
 
 
 @router.post("/features/{feature_id}/finalize", status_code=200)
-async def finalize_feature(feature_id: UUID, body: FinalizeFeatureBody, request: Request) -> JSONResponse:
+async def finalize_feature(
+    feature_id: UUID, body: FinalizeFeatureBody, request: Request
+) -> JSONResponse:
     """Add high-level specs (and optionally a session link) to an existing idea feature."""
     store = request.app.state.store
     fm = FeatureManager(store)
@@ -139,7 +141,9 @@ async def finalize_feature(feature_id: UUID, body: FinalizeFeatureBody, request:
     title, description, specs = _parse_feature_block(body.feature_block)
 
     # Update title/description via a new event if they differ (treat as refinement)
-    await fm.update_feature(feature_id, title=title, description=description, session_id=body.session_id)
+    await fm.update_feature(
+        feature_id, title=title, description=description, session_id=body.session_id
+    )
 
     hls_by_order: dict[int, HighLevelSpec] = {}
     for spec_def in sorted(specs, key=lambda s: s["order"]):
