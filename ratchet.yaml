@@ -3,7 +3,7 @@ qa:
   auto_fix:
     - "ruff check --fix ."
   steps:
-    test: ".venv/bin/python -m pytest core/tests/ web/tests/ orchestrator/tests/ remote_worker/tests/ -v"
+    test: ".venv/bin/python -m pytest core/tests/ web/tests/ worker/tests/ orchestrator/tests/ remote_worker/tests/ -v"
     lint: "ruff check ."
     typecheck: "mypy core/ worker/ web/ orchestrator/ remote_worker/"
     install-spa: "npm ci --prefix web/spa"

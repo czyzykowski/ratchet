@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from core.invoker import ClaudeCodeInvoker
 from core.store import PostgresStore
+from worker.log_buffer import LogBuffer, WorkerLogHandler
 from worker.runner import notification_loop
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ class WorkerService:
         pool: AsyncConnectionPool,
         dsn: str,
         settings: WorkerSettings | None = None,
+        log_buffer: LogBuffer | None = None,
     ) -> None:
         self._pool = pool
         self._dsn = dsn
@@ -47,6 +49,8 @@ class WorkerService:
         self._status: str = "stopped"
         self.started_at: datetime | None = None
         self.error_message: str | None = None
+        self.log_buffer: LogBuffer = log_buffer if log_buffer is not None else LogBuffer()
+        self._log_handler: WorkerLogHandler | None = None
 
     @property
     def status(self) -> str:
@@ -67,6 +71,10 @@ class WorkerService:
 
         self._status = "starting"
         self.error_message = None
+
+        handler = WorkerLogHandler(self.log_buffer)
+        logging.getLogger("worker").addHandler(handler)
+        self._log_handler = handler
 
         store = PostgresStore(pool=self._pool)
         invoker = ClaudeCodeInvoker(store=store, watchdog_timeout=self._settings.watchdog_timeout)
@@ -116,6 +124,10 @@ class WorkerService:
                 await self._task
             except (asyncio.CancelledError, Exception):
                 pass
+
+        if self._log_handler is not None:
+            logging.getLogger("worker").removeHandler(self._log_handler)
+            self._log_handler = None
 
         self._status = "stopped"
         self._task = None

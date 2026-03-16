@@ -25,6 +25,7 @@ from web.routes.api import feature_sessions as feature_sessions_router
 from web.routes.api import spec_sessions as spec_sessions_router
 from web.routes.api.router import api_router
 from web.templating import templates  # noqa: F401
+from worker.service import WorkerService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sse_clients = []
     app.state.spec_sessions = {}
     app.state.feature_sessions = {}
+
+    database_url = os.environ["DATABASE_URL"]
+    dsn = database_url.replace("postgresql+psycopg://", "postgresql://")
+    worker_service = WorkerService(pool=pool, dsn=dsn)
+    app.state.worker_service = worker_service
 
     async def _refresh_loop() -> None:
         while True:
