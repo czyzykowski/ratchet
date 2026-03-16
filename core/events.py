@@ -51,6 +51,7 @@ WAITING_FOR_INPUT = "waiting_for_input"
 
 # Feature events
 FEATURE_CREATED = "feature.created"
+FEATURE_UPDATED = "feature.updated"
 HIGH_LEVEL_SPEC_ADDED = "high_level_spec.added"
 HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
 

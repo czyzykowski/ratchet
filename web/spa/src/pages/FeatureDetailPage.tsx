@@ -71,6 +71,7 @@ export function FeatureDetailPage() {
         projectId={feature.project_id}
         sessionId={sessionId}
         initialMessage={initMsg}
+        featureId={chatMode === 'clarification' ? feature.id : undefined}
         onClose={handleChatClose}
       />
     )

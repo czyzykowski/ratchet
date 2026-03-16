@@ -7,6 +7,7 @@ interface CreateFeatureChatProps {
   onClose: () => void
   sessionId?: string
   initialMessage?: string
+  featureId?: string
 }
 
 interface Message {
@@ -22,7 +23,7 @@ interface FeaturePreview {
   raw: string
 }
 
-export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessionId, initialMessage }: CreateFeatureChatProps) {
+export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessionId, initialMessage, featureId }: CreateFeatureChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -247,21 +248,35 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
     setSaving(true)
     setSaveError(null)
     try {
-      const saveBody: Record<string, unknown> = {
-        project_id: projectId,
-        feature_block: detectedFeature.raw,
+      let res: Response
+      if (featureId) {
+        // Finalize existing idea feature with specs
+        const finalizeBody: Record<string, unknown> = { feature_block: detectedFeature.raw }
+        if (sessionId) finalizeBody.session_id = sessionId
+        res = await fetch(`/api/features/${featureId}/finalize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(finalizeBody),
+        })
+      } else {
+        // Create new feature
+        const saveBody: Record<string, unknown> = {
+          project_id: projectId,
+          feature_block: detectedFeature.raw,
+        }
+        if (sessionId) saveBody.session_id = sessionId
+        res = await fetch('/api/features', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(saveBody),
+        })
       }
-      if (sessionId) saveBody.session_id = sessionId
-      const res = await fetch('/api/features', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(saveBody),
-      })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.detail ?? 'Failed to save feature')
       }
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['feature', featureId] })
       onClose()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Unknown error')

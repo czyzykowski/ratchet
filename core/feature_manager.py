@@ -60,23 +60,58 @@ class FeatureManager:
             updated_at=event.occurred_at,
         )
 
+    async def update_feature(
+        self,
+        feature_id: UUID,
+        title: str,
+        description: str,
+        session_id: UUID | None = None,
+    ) -> None:
+        """Update title, description, and session_id of an existing feature.
+
+        Appends FEATURE_UPDATED event under the feature aggregate and the registry.
+        """
+        feature = await self.get_feature(feature_id)
+        if feature is None:
+            raise ValueError(f"Feature {feature_id} not found")
+        payload = {
+            "feature_id": str(feature_id),
+            "project_id": str(feature.project_id),
+            "title": title,
+            "description": description,
+            "session_id": str(session_id) if session_id else None,
+        }
+        await self._store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.FEATURE_UPDATED,
+            payload=payload,
+        )
+        await self._store.append_event(
+            aggregate_id=feature.project_id,
+            aggregate_type="project_features",
+            event_type=ev.FEATURE_UPDATED,
+            payload=payload,
+        )
+
     async def get_feature(self, feature_id: UUID) -> Feature | None:
         """Return feature by id, or None if not found."""
         feature_events = await self._store.get_events(feature_id, "feature")
+        result: Feature | None = None
         for event in feature_events:
-            if event.event_type == ev.FEATURE_CREATED:
+            if event.event_type in (ev.FEATURE_CREATED, ev.FEATURE_UPDATED):
                 p = event.payload
                 raw_sid = p.get("session_id")
-                return Feature(
+                result = Feature(
                     id=UUID(p["feature_id"]),
                     project_id=UUID(p["project_id"]),
                     title=p["title"],
                     description=p["description"],
                     session_id=UUID(raw_sid) if raw_sid else None,
-                    created_at=event.occurred_at,
+                    created_at=result.created_at if result else event.occurred_at,
                     updated_at=event.occurred_at,
                 )
-        return None
+        return result
 
     async def list_features(self, project_id: UUID) -> list[Feature]:
         """Return all features for a project ordered by created_at ascending."""
@@ -96,6 +131,21 @@ class FeatureManager:
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
+            elif event.event_type == ev.FEATURE_UPDATED:
+                p = event.payload
+                fid = UUID(p["feature_id"])
+                if fid in features:
+                    existing = features[fid]
+                    raw_sid = p.get("session_id")
+                    features[fid] = Feature(
+                        id=fid,
+                        project_id=UUID(p["project_id"]),
+                        title=p["title"],
+                        description=p["description"],
+                        session_id=UUID(raw_sid) if raw_sid else None,
+                        created_at=existing.created_at,
+                        updated_at=event.occurred_at,
+                    )
         return sorted(features.values(), key=lambda f: f.created_at)
 
     async def add_high_level_spec(

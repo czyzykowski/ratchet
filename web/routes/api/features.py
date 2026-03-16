@@ -24,6 +24,11 @@ class CreateFeatureBody(BaseModel):
     session_id: UUID | None = None
 
 
+class FinalizeFeatureBody(BaseModel):
+    feature_block: str  # raw text from ## FEATURE READY block
+    session_id: UUID | None = None
+
+
 class CreateSimpleFeatureBody(BaseModel):
     project_id: UUID
     title: str
@@ -119,6 +124,41 @@ async def create_feature(body: CreateFeatureBody, request: Request) -> JSONRespo
         hls_by_order[spec_def["order"]] = hls
 
     return JSONResponse({"feature": feature.model_dump(mode="json")}, status_code=201)
+
+
+@router.post("/features/{feature_id}/finalize", status_code=200)
+async def finalize_feature(feature_id: UUID, body: FinalizeFeatureBody, request: Request) -> JSONResponse:
+    """Add high-level specs (and optionally a session link) to an existing idea feature."""
+    store = request.app.state.store
+    fm = FeatureManager(store)
+
+    feature = await fm.get_feature(feature_id)
+    if feature is None:
+        raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
+
+    title, description, specs = _parse_feature_block(body.feature_block)
+
+    # Update title/description via a new event if they differ (treat as refinement)
+    await fm.update_feature(feature_id, title=title, description=description, session_id=body.session_id)
+
+    hls_by_order: dict[int, HighLevelSpec] = {}
+    for spec_def in sorted(specs, key=lambda s: s["order"]):
+        dep_uuids = [
+            hls_by_order[idx].id
+            for idx in spec_def["dep_indices"]
+            if idx in hls_by_order
+        ]
+        hls = await fm.add_high_level_spec(
+            feature_id=feature_id,
+            title=spec_def["title"],
+            order=spec_def["order"],
+            content=spec_def["content"],
+            dependencies=dep_uuids,
+        )
+        hls_by_order[spec_def["order"]] = hls
+
+    updated = await fm.get_feature(feature_id)
+    return JSONResponse({"feature": updated.model_dump(mode="json")})  # type: ignore[union-attr]
 
 
 @router.get("/features")
