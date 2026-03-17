@@ -54,7 +54,9 @@ class MockWorkerService:
         self._settings = settings
 
 
-def _make_test_app(store: InMemoryStore, worker_service: MockWorkerService | None = None) -> FastAPI:
+def _make_test_app(
+    store: InMemoryStore, worker_service: MockWorkerService | None = None
+) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.pool = MagicMock()
