@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- Auto-merge for local deployment mode via `merge_once()` in `worker/runner.py`; records `TASK_AUTO_MERGE_FAILED` event on failure instead of transitioning to `BLOCKED`
+- `core/merge.py`: `MergeResult` dataclass and `squash_merge()` helper encapsulating worktree creation, squash merge, Claude-assisted conflict resolution, commit, ref update, and branch cleanup
 - Feature lifecycle status (`idea`, `in_clarification`, `defined`, `generated`, `in_progress`, `done`) now included in `GET /api/features` and `GET /api/features/{feature_id}` responses
 - Feature status badges in web UI features list (`FeaturesPage`) and feature detail (`FeatureDetailPage`) pages
 - `--features` flag on `scripts/board.py` to display feature board grouped by lifecycle status
@@ -13,6 +15,7 @@
 - `FEATURE_IDEA = "idea"` and `FEATURE_IN_CLARIFICATION = "in_clarification"` feature status constants in `core/events.py`
 
 ### Changed
+- `scripts/merge-task.py` refactored to call `squash_merge()` from `core/merge.py` instead of inline git subprocess calls
 - `ClaudeCodeInvoker` now accepts `store: Store` (required); traces saved to DB instead of filesystem
 - `InvocationResult.trace_path` replaced with `trace_id: UUID`
 - `web/routes/api/executions.py` reads traces via `store.get_trace()` instead of filesystem

@@ -12,9 +12,15 @@ from uuid import UUID, uuid4
 
 from core import events as ev
 from core import qa_manager
-from core.context_assembler import ContextAssembler, ContextAssemblyError, ExecutionContext
+from core.context_assembler import (
+    ContextAssembler,
+    ContextAssemblyError,
+    ExecutionContext,
+    read_intent,
+)
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
+from core.merge import squash_merge
 from core.models import Project, Spec, Task
 from core.models_config import WORKER_MODEL
 from core.project_manager import ProjectManager
@@ -22,9 +28,12 @@ from core.qa_runner import (
     build_review_prompt,
     check_baseline_qa,
     get_git_diff,
+    load_deployment_config,
+    load_merge_config,
     load_qa_config,
     parse_review_output,
     run_auto_fixes,
+    run_merge_steps,
     run_qa_steps,
 )
 from core.spec_manager import SpecManager
@@ -864,6 +873,153 @@ async def poll_pr_merges(store: Store, project_local_path: str) -> None:
                 sha = (state_data.get("mergeCommit") or {}).get("oid") or None
                 extra_payload = {"merge_commit_sha": sha} if sha else None
                 await state_machine.transition(task_id, ev.DEPLOYED, extra_payload=extra_payload)
+
+
+async def merge_once(store: Store, invoker: ClaudeCodeInvoker) -> bool:
+    """Single-pass auto-merge for local deployment mode.
+
+    Finds the oldest READY_FOR_DEPLOYMENT task whose project uses deployment.mode=="local"
+    and that has no TASK_AUTO_MERGE_FAILED event, then squash-merges it.
+
+    Returns True if a merge was attempted, False if no eligible task was found.
+    On merge failure, records TASK_AUTO_MERGE_FAILED event and returns False.
+    On success, runs merge hooks, records TASK_DEPLOY_HOOKS_RUN, and transitions to DEPLOYED.
+    """
+
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    active_projects = await project_manager.list_projects()
+
+    candidates: list[tuple[Task, str, str, str, str]] = []
+    # candidates: (task, local_path, target_branch, execution_branch, spec_content)
+
+    for project in active_projects:
+        ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
+        deployment_config = load_deployment_config(project.local_path, ratchet_yaml)
+        if deployment_config.mode != "local":
+            continue
+
+        project_task_events = await store.get_events(project.id, "project_tasks")
+        task_ids_seen: set[UUID] = set()
+        task_ids_ordered: list[UUID] = []
+        for event in project_task_events:
+            tid_str = event.payload.get("task_id")
+            if tid_str:
+                tid = UUID(tid_str)
+                if tid not in task_ids_seen:
+                    task_ids_seen.add(tid)
+                    task_ids_ordered.append(tid)
+
+        for task_id in task_ids_ordered:
+            task = await task_manager.get_task(task_id)
+            if task is None or task.status != ev.READY_FOR_DEPLOYMENT:
+                continue
+
+            task_events = await store.get_events(task_id, "task")
+            has_failed = any(e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events)
+            if has_failed:
+                continue
+
+            # Extract execution branch from latest EXECUTION_STARTED event
+            execution_events = await store.get_events(task_id, "task_executions")
+            branch_name: str | None = None
+            spec_id: UUID | None = None
+            for event in reversed(execution_events):
+                if event.event_type == ev.EXECUTION_STARTED:
+                    bn = event.payload.get("branch_name")
+                    si = event.payload.get("spec_id")
+                    if bn:
+                        branch_name = bn
+                        spec_id = UUID(si) if si else None
+                        break
+
+            if branch_name is None:
+                logger.warning("merge_once: task=%s has no execution branch, skipping", task_id)
+                continue
+
+            spec_content = ""
+            if spec_id is not None:
+                spec_events = await store.get_events(spec_id, "spec")
+                for spec_event in spec_events:
+                    if spec_event.event_type == ev.SPEC_CREATED:
+                        spec_content = spec_event.payload.get("content", "")
+                        break
+
+            candidates.append(
+                (task, project.local_path, deployment_config.base_branch, branch_name, spec_content)
+            )
+
+    if not candidates:
+        logger.info("merge_once: no eligible tasks for auto-merge.")
+        return False
+
+    # Pick oldest task
+    candidates.sort(key=lambda c: c[0].created_at)
+    task, local_path, target_branch, execution_branch, spec_content = candidates[0]
+    task_id = task.id
+
+    try:
+        intent_content = read_intent(local_path)
+    except Exception as exc:
+        logger.warning("merge_once: could not read INTENT.md for task=%s: %s", task_id, exc)
+        intent_content = ""
+
+    logger.info(
+        "merge_once: merging task=%s branch=%s into %s",
+        task_id,
+        execution_branch,
+        target_branch,
+    )
+    merge_result = await asyncio.to_thread(
+        squash_merge,
+        local_path,
+        execution_branch,
+        target_branch,
+        task.title,
+        task_id,
+        store,
+        invoker,
+        spec_content,
+        intent_content,
+    )
+
+    if not merge_result.success:
+        failure_reason = merge_result.failure_reason or "merge failed"
+        logger.warning("merge_once: merge failed for task=%s: %s", task_id, failure_reason)
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_AUTO_MERGE_FAILED,
+            payload={"failure_reason": failure_reason},
+        )
+        return False
+
+    # Run merge hooks
+    merge_config = load_merge_config(local_path)
+    if merge_config is not None and merge_config.steps:
+        hook_results = await asyncio.to_thread(run_merge_steps, merge_config, local_path)
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+            payload={
+                "steps": [
+                    {
+                        "name": r.step_name,
+                        "command": r.command,
+                        "returncode": r.returncode,
+                        "output": r.output,
+                    }
+                    for r in hook_results
+                ]
+            },
+        )
+
+    await state_machine.transition(task_id, ev.DEPLOYED)
+    logger.info("merge_once: task=%s deployed (merge_commit_sha=%s)", task_id, merge_result.new_sha)
+    return True
 
 
 async def compile_once(store: Store) -> bool:
