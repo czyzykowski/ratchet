@@ -8,6 +8,7 @@ import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectPage } from './pages/ProjectPage'
 import { SpecDetailPage } from './pages/SpecDetailPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
+import { WorkersPage } from './pages/WorkersPage'
 import { NotificationsContext, useNotificationsState } from './hooks/useNotifications'
 import { useTitleBadge } from './hooks/useTitleBadge'
 import { Notifications } from './components/Notifications'
@@ -25,6 +26,7 @@ function AppInner() {
         <NavLink to="/board">Board</NavLink>
         <NavLink to="/projects">Projects</NavLink>
         <NavLink to="/features">Features</NavLink>
+        <NavLink to="/workers">Workers</NavLink>
       </nav>
       <Routes>
         <Route path="/" element={<FocusPage />} />
@@ -36,6 +38,7 @@ function AppInner() {
         <Route path="/features" element={<FeaturesPage />} />
         <Route path="/features/:feature_id" element={<FeatureDetailPage />} />
         <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
+        <Route path="/workers" element={<WorkersPage />} />
       </Routes>
     </div>
   )
