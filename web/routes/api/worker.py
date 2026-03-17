@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import UTC, datetime
-from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +14,7 @@ from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from web.sse import broadcast_task_updated
 from worker.runner import get_next_task, run_once
-from worker.service import WorkerService, WorkerSettings
+from worker.service import WorkerService
 
 router = APIRouter(prefix="/worker")
 
@@ -25,10 +24,10 @@ class StopBody(BaseModel):
 
 
 class SettingsBody(BaseModel):
-    watchdog_timeout: Optional[int] = None
-    max_workers: Optional[int] = None
-    local_capabilities: Optional[list[str]] = None
-    enabled: Optional[bool] = None
+    watchdog_timeout: int | None = None
+    max_workers: int | None = None
+    local_capabilities: list[str] | None = None
+    enabled: bool | None = None
 
 
 def _status_response(ws: WorkerService) -> dict[str, object]:
