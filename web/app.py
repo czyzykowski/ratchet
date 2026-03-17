@@ -25,9 +25,25 @@ from web.routes.api import feature_sessions as feature_sessions_router
 from web.routes.api import spec_sessions as spec_sessions_router
 from web.routes.api.router import api_router
 from web.templating import templates  # noqa: F401
-from worker.service import WorkerService
+from worker.log_buffer import LogBuffer
+from worker.service import WorkerService, WorkerSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_settings_from_env() -> WorkerSettings:
+    """Read worker configuration from environment variables."""
+    watchdog_timeout = int(os.environ.get("WORKER_WATCHDOG_TIMEOUT", "300"))
+    max_workers = int(os.environ.get("WORKER_MAX_WORKERS", "1"))
+    capabilities_raw = os.environ.get("WORKER_CAPABILITIES", "")
+    local_capabilities = [c.strip() for c in capabilities_raw.split(",") if c.strip()]
+    enabled = os.environ.get("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")
+    return WorkerSettings(
+        watchdog_timeout=watchdog_timeout,
+        max_workers=max_workers,
+        local_capabilities=local_capabilities,
+        enabled=enabled,
+    )
 
 
 async def _listen_task_events(queues: set[asyncio.Queue[str]]) -> None:
@@ -61,8 +77,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     database_url = os.environ["DATABASE_URL"]
     dsn = database_url.replace("postgresql+psycopg://", "postgresql://")
-    worker_service = WorkerService(pool=pool, dsn=dsn)
+    log_buffer = LogBuffer()
+    worker_service = WorkerService(
+        pool=pool, dsn=dsn, settings=_worker_settings_from_env(), log_buffer=log_buffer
+    )
     app.state.worker_service = worker_service
+    app.state.worker_log_buffer = log_buffer
+    await worker_service.start()
 
     async def _refresh_loop() -> None:
         while True:
@@ -90,6 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         for session in list(app.state.feature_sessions.values()):
             await session.close()
         app.state.feature_sessions.clear()
+        await worker_service.stop(graceful=True)
         await close_pool()
 
 
