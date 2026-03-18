@@ -30,6 +30,8 @@ worker/
   __init__.py
   __main__.py     — enables python -m worker
   runner.py       — get_next_task, run_once, main — single-pass task executor
+  service.py      — WorkerService, managed async lifecycle for embedded worker
+  log_buffer.py   — LogBuffer ring buffer with pub/sub for worker log streaming
   tests/          — integration tests
 pyproject.toml     — dependencies
 flake.nix          — reproducible dev shell (nix develop)
@@ -56,6 +58,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - Traces written to `$XDG_DATA_HOME/ratchet/traces/` (default `~/.local/share/ratchet/traces/`)
 - `flake.nix` shellHook sets `LD_LIBRARY_PATH` for libpq — required for psycopg to find PostgreSQL client library
 - All scripts must be run with `.venv/bin/python` — system Python does not have dependencies
+- The embedded worker in the web process shares its connection pool and is controlled via `app.state.worker_service`; configured by `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` env vars
 
 ## Running Things
 
@@ -77,6 +80,9 @@ scripts/run-spec.sh specs/10-update-claude-md.md
 
 # Run worker single pass (pick and execute next ready task)
 .venv/bin/python -m worker
+
+# Run web UI with embedded worker (starts both uvicorn and worker service)
+.venv/bin/python -m web
 
 # Run operational scripts (must use .venv/bin/python)
 .venv/bin/python scripts/board.py

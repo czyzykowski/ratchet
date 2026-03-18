@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Updated CLAUDE.md: documented embedded worker architecture, `worker/service.py` and `worker/log_buffer.py` in repo structure, `python -m web` entry point, `WORKER_*` env vars, and `app.state.worker_service` key pattern
 - `web/app.py` auto-starts embedded `WorkerService` on lifespan startup and stops it on shutdown; reads `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` from env vars; exposes `app.state.worker_log_buffer`
 - Auto-merge for local deployment mode via `merge_once()` in `worker/runner.py`; records `TASK_AUTO_MERGE_FAILED` event on failure instead of transitioning to `BLOCKED`
 - `core/merge.py`: `MergeResult` dataclass and `squash_merge()` helper encapsulating worktree creation, squash merge, Claude-assisted conflict resolution, commit, ref update, and branch cleanup
