@@ -883,11 +883,17 @@ async def poll_pr_merges(store: Store, project_local_path: str) -> None:
                 await state_machine.transition(task_id, ev.DEPLOYED, extra_payload=extra_payload)
 
 
-async def merge_once(store: Store, invoker: ClaudeCodeInvoker) -> bool:
+async def merge_once(
+    store: Store,
+    invoker: ClaudeCodeInvoker,
+    project_id: UUID | None = None,
+) -> bool:
     """Single-pass auto-merge for local deployment mode.
 
     Finds the oldest READY_FOR_DEPLOYMENT task whose project uses deployment.mode=="local"
     and that has no TASK_AUTO_MERGE_FAILED event, then squash-merges it.
+
+    If project_id is provided, only considers tasks belonging to that project.
 
     Returns True if a merge was attempted, False if no eligible task was found.
     On merge failure, records TASK_AUTO_MERGE_FAILED event and returns False.
@@ -904,6 +910,8 @@ async def merge_once(store: Store, invoker: ClaudeCodeInvoker) -> bool:
     # candidates: (task, local_path, target_branch, execution_branch, spec_content)
 
     for project in active_projects:
+        if project_id is not None and project.id != project_id:
+            continue
         ratchet_yaml = project.ratchet_yaml if project.config_source == "db" else None
         deployment_config = load_deployment_config(project.local_path, ratchet_yaml)
         if deployment_config.mode != "local":
@@ -1075,16 +1083,18 @@ async def notification_loop(
         busy_projects = set()
 
     async def _dispatch_for_project(pid: UUID) -> None:
-        """Run one QA→impl pass for a single project, then release busy lock."""
+        """Run one QA→merge→impl pass for a single project, then release busy lock."""
         try:
             did_qa = await run_qa_once(store, invoker, project_id=pid)
             if not did_qa:
-                await run_once(store, invoker, local_capabilities, project_id=pid)
+                did_merge = await merge_once(store, invoker, project_id=pid)
+                if not did_merge:
+                    await run_once(store, invoker, local_capabilities, project_id=pid)
         finally:
             busy_projects.discard(pid)
 
     async def _dispatch_all() -> None:
-        """Dispatch one pass per non-busy active project, then compile once."""
+        """Dispatch one QA→merge→impl pass per non-busy active project, then compile once."""
         pm = ProjectManager(store)
         projects = await pm.list_projects()
         to_dispatch = [p.id for p in projects if p.id not in busy_projects]
@@ -1208,9 +1218,11 @@ async def _main_async(
     try:
         did_qa = await run_qa_once(store, invoker)
         if not did_qa:
-            did_impl = await run_once(store, invoker, local_capabilities)
-            if not did_impl:
-                await compile_once(store)
+            did_merge = await merge_once(store, invoker)
+            if not did_merge:
+                did_impl = await run_once(store, invoker, local_capabilities)
+                if not did_impl:
+                    await compile_once(store)
     finally:
         await close_pool()
 

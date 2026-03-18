@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Integrated `merge_once` into worker dispatch cycle — tasks in local deployment mode auto-merge after QA passes; `merge_once` now accepts optional `project_id` parameter for per-project scoping
 - Updated CLAUDE.md: documented embedded worker architecture, `worker/service.py` and `worker/log_buffer.py` in repo structure, `python -m web` entry point, `WORKER_*` env vars, and `app.state.worker_service` key pattern
 - `web/app.py` auto-starts embedded `WorkerService` on lifespan startup and stops it on shutdown; reads `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` from env vars; exposes `app.state.worker_log_buffer`
 - Auto-merge for local deployment mode via `merge_once()` in `worker/runner.py`; records `TASK_AUTO_MERGE_FAILED` event on failure instead of transitioning to `BLOCKED`
