@@ -223,10 +223,10 @@ class TestDispatchForProjectMergeIntegration:
 
             await _main_async()
 
-        assert call_order == ["qa", "merge", "impl", "compile"]
+        assert call_order == ["merge", "qa", "impl", "compile"]
 
-    async def test_main_async_skips_merge_and_impl_when_qa_ran(self):
-        """_main_async: when QA does work, merge and impl should be skipped."""
+    async def test_main_async_skips_impl_when_qa_ran(self):
+        """_main_async: when QA does work, impl should be skipped."""
         call_order: list[str] = []
 
         async def fake_run_qa_once(store, invoker, **kwargs):
@@ -260,7 +260,7 @@ class TestDispatchForProjectMergeIntegration:
 
             await _main_async()
 
-        assert call_order == ["qa"]  # no merge, impl, or compile
+        assert call_order == ["merge", "qa"]  # merge first, then QA; no impl or compile
 
 
 class TestMergeOnceProjectIdFilter:

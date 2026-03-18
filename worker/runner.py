@@ -1087,18 +1087,18 @@ async def notification_loop(
         busy_projects = set()
 
     async def _dispatch_for_project(pid: UUID) -> None:
-        """Run one QA→merge→impl pass for a single project, then release busy lock."""
+        """Run one merge→QA→impl pass for a single project, then release busy lock."""
         try:
-            did_qa = await run_qa_once(store, invoker, project_id=pid)
-            if not did_qa:
-                did_merge = await merge_once(store, invoker, project_id=pid)
-                if not did_merge:
+            did_merge = await merge_once(store, invoker, project_id=pid)
+            if not did_merge:
+                did_qa = await run_qa_once(store, invoker, project_id=pid)
+                if not did_qa:
                     await run_once(store, invoker, local_capabilities, project_id=pid)
         finally:
             busy_projects.discard(pid)
 
     async def _dispatch_all() -> None:
-        """Dispatch one QA→merge→impl pass per non-busy active project, then compile once."""
+        """Dispatch one merge→QA→impl pass per non-busy active project, then compile once."""
         pm = ProjectManager(store)
         projects = await pm.list_projects()
         to_dispatch = [p.id for p in projects if p.id not in busy_projects]
@@ -1220,10 +1220,10 @@ async def _main_async(
     store = PostgresStore()
     invoker = ClaudeCodeInvoker(store=store, watchdog_timeout=watchdog_timeout)
     try:
-        did_qa = await run_qa_once(store, invoker)
-        if not did_qa:
-            did_merge = await merge_once(store, invoker)
-            if not did_merge:
+        did_merge = await merge_once(store, invoker)
+        if not did_merge:
+            did_qa = await run_qa_once(store, invoker)
+            if not did_qa:
                 did_impl = await run_once(store, invoker, local_capabilities)
                 if not did_impl:
                     await compile_once(store)
