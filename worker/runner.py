@@ -699,60 +699,68 @@ async def run_qa_once(
     try:
         await asyncio.to_thread(run_auto_fixes, config, qa_path)
         step_results = await asyncio.to_thread(run_qa_steps, config, qa_path)
-    finally:
-        if qa_worktree_owned:
-            await asyncio.to_thread(_remove_qa_worktree, project.local_path, qa_path)
 
-    failed_steps = [r for r in step_results if r.returncode != 0]
+        failed_steps = [r for r in step_results if r.returncode != 0]
 
-    if failed_steps:
-        # Read current qa_fix_attempts
-        task_events = await store.get_events(task.id, "task")
-        qa_fix_attempts = _get_qa_fix_attempts(task_events)
+        if failed_steps:
+            # Read current qa_fix_attempts
+            task_events = await store.get_events(task.id, "task")
+            qa_fix_attempts = _get_qa_fix_attempts(task_events)
 
-        if qa_fix_attempts >= config.max_fix_attempts:
-            combined_output = "\n\n".join(
-                f"Step '{r.step_name}':\n{r.output}" for r in failed_steps
+            if qa_fix_attempts >= config.max_fix_attempts:
+                combined_output = "\n\n".join(
+                    f"Step '{r.step_name}':\n{r.output}" for r in failed_steps
+                )
+                logger.info(
+                    "Max fix attempts reached for task=%s, transitioning to blocked",
+                    task.id,
+                )
+                await state_machine.transition(
+                    task.id,
+                    ev.BLOCKED,
+                    extra_payload={
+                        "failure_reason": combined_output,
+                        "qa_fix_attempts": qa_fix_attempts,
+                    },
+                )
+                return True
+
+            # Build auto-fix prompt and invoke Claude in the QA worktree
+            # (never in project root — that risks committing untracked files)
+            failed_output = "\n\n".join(
+                f"Step '{r.step_name}' (exit {r.returncode}):\n{r.output}"
+                for r in failed_steps
+            )
+            fix_prompt = (
+                f"{spec.content}\n\n"
+                f"QA tools found errors after implementation was marked complete:"
+                f"\n{failed_output}"
+            )
+            fix_context = ExecutionContext(
+                execution_id=uuid4(),
+                task_id=task.id,
+                spec_id=spec.id,
+                worktree_path=qa_path,
+                prompt=fix_prompt,
             )
             logger.info(
-                "Max fix attempts reached for task=%s, transitioning to blocked", task.id
+                "Auto-fix attempt %d/%d for task=%s",
+                qa_fix_attempts + 1,
+                config.max_fix_attempts,
+                task.id,
             )
+            await asyncio.to_thread(invoker.invoke, fix_context)
             await state_machine.transition(
                 task.id,
-                ev.BLOCKED,
-                extra_payload={
-                    "failure_reason": combined_output,
-                    "qa_fix_attempts": qa_fix_attempts,
-                },
+                ev.READY_FOR_QA,
+                extra_payload={"qa_fix_attempts": qa_fix_attempts + 1},
             )
             return True
-
-        # Build auto-fix prompt and invoke Claude Code
-        failed_output = "\n\n".join(
-            f"Step '{r.step_name}' (exit {r.returncode}):\n{r.output}" for r in failed_steps
-        )
-        fix_prompt = (
-            f"{spec.content}\n\n"
-            f"QA tools found errors after implementation was marked complete:\n{failed_output}"
-        )
-        fix_context = ExecutionContext(
-            execution_id=uuid4(),
-            task_id=task.id,
-            spec_id=spec.id,
-            worktree_path=project.local_path,
-            prompt=fix_prompt,
-        )
-        logger.info(
-            "Auto-fix attempt %d/%d for task=%s",
-            qa_fix_attempts + 1, config.max_fix_attempts, task.id
-        )
-        await asyncio.to_thread(invoker.invoke, fix_context)
-        await state_machine.transition(
-            task.id,
-            ev.READY_FOR_QA,
-            extra_payload={"qa_fix_attempts": qa_fix_attempts + 1},
-        )
-        return True
+    finally:
+        if qa_worktree_owned:
+            await asyncio.to_thread(
+                _remove_qa_worktree, project.local_path, qa_path
+            )
 
     # Step 4: all steps pass — run Claude review
     diff = get_git_diff(project.local_path, execution_branch)

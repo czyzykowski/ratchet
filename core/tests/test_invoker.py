@@ -24,7 +24,7 @@ from core.store import InMemoryStore
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_context(worktree_path: str = "/tmp/worktree") -> ExecutionContext:
+def _make_context(worktree_path: str = "/tmp/project/.worktrees/test-wt") -> ExecutionContext:
     return ExecutionContext(
         execution_id=uuid4(),
         task_id=uuid4(),
@@ -280,7 +280,9 @@ class TestClaudeCodeInvoker:
         assert result.execution_id == ctx.execution_id
 
     def test_subprocess_called_with_correct_args(self, tmp_path):
-        ctx = _make_context(worktree_path=str(tmp_path))
+        wt_path = tmp_path / ".worktrees" / "test-wt"
+        wt_path.mkdir(parents=True)
+        ctx = _make_context(worktree_path=str(wt_path))
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 

@@ -163,7 +163,12 @@ class ClaudeCodeInvoker:
             if self._proc is not None:
                 self._proc.terminate()
 
-    def invoke(self, context: ExecutionContext) -> InvocationResult:
+    def invoke(
+        self,
+        context: ExecutionContext,
+        *,
+        allow_project_root: bool = False,
+    ) -> InvocationResult:
         """Invoke Claude Code with assembled context.
 
         1. Build command with prompt and allowed tools
@@ -171,7 +176,18 @@ class ClaudeCodeInvoker:
         3. Build trace content (header + stdout + stderr) and save via store.save_trace()
         4. Call parse_output(output, returncode) to determine status
         5. Return InvocationResult
+
+        Safety: unless allow_project_root=True, raises ValueError if worktree_path
+        does not appear to be inside a .worktrees/ directory.  This prevents
+        accidental writes (commits, file changes) to the project's main checkout.
         """
+        wt = os.path.abspath(context.worktree_path)
+        if not allow_project_root and "/.worktrees/" not in wt:
+            raise ValueError(
+                f"Refusing to invoke in project root ({wt}). "
+                "Execution must happen inside a .worktrees/ directory. "
+                "Pass allow_project_root=True to override (merge only)."
+            )
         claude_cmd = ["claude", "-p", "--model", _MODEL, "--allowedTools", _ALLOWED_TOOLS]
         if os.name != "nt" and (Path(context.worktree_path) / "flake.nix").exists():
             cmd = ["nix", "develop", "--command"] + claude_cmd
