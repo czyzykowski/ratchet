@@ -59,6 +59,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - `flake.nix` shellHook sets `LD_LIBRARY_PATH` for libpq — required for psycopg to find PostgreSQL client library
 - All scripts must be run with `.venv/bin/python` — system Python does not have dependencies
 - The embedded worker in the web process shares its connection pool and is controlled via `app.state.worker_service`; configured by `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` env vars
+- Auto-merge: on each dispatch cycle, the worker attempts a local squash merge for one `ready_for_merge` task per project; `TASK_AUTO_MERGE_FAILED` prevents retry — use `scripts/merge-task.py` for manual merge
 
 ## Running Things
 
@@ -78,7 +79,7 @@ python db/smoke_test.py
 # Execute a spec
 scripts/run-spec.sh specs/10-update-claude-md.md
 
-# Run worker single pass (pick and execute next ready task)
+# Run worker single pass (dispatch priority: QA → merge → implementation → compilation)
 .venv/bin/python -m worker
 
 # Run web UI with embedded worker (starts both uvicorn and worker service)
@@ -102,6 +103,7 @@ scripts/
   archive-task.py   — abandon a task, transitioning it to the terminal 'abandoned' status
   unblock-task.py   — unblock a task, transitioning it directly back to ready_for_implementation; --retry-baseline clears pending baseline QA failures
   task-reset.py     — reset a task to ready_for_spec (or ready_for_implementation with --reuse-spec)
+  merge-task.py     — manually squash-merge a task's execution branch into develop
 ```
 
 ### Usage
@@ -138,6 +140,9 @@ python scripts/unblock-task.py --task-id <uuid> --retry-baseline
 # Reset a task to ready_for_spec (or ready_for_implementation reusing existing spec)
 python scripts/task-reset.py --task-id <uuid>
 python scripts/task-reset.py --task-id <uuid> --reuse-spec
+
+# Manually merge a task (fallback when auto-merge fails)
+python scripts/merge-task.py --task-id <uuid>
 ```
 
 ### Full Workflow
