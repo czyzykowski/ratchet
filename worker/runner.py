@@ -560,6 +560,8 @@ def _create_baseline_worktree(project_path: str) -> str:
         os.path.join(wt_path, "web", "spa", "node_modules"),
     )
     _safe_symlink(os.path.join(project_path, ".env"), os.path.join(wt_path, ".env"))
+    # Symlink deno cache so nix-shell deno doesn't re-download npm packages
+    _safe_symlink(os.path.join(project_path, ".deno"), os.path.join(wt_path, ".deno"))
     return wt_path
 
 
@@ -601,6 +603,7 @@ def _create_qa_worktree(project_path: str, execution_branch: str) -> tuple[str, 
         os.path.join(project_path, "node_modules"), os.path.join(qa_path, "node_modules")
     )
     _safe_symlink(os.path.join(project_path, ".env"), os.path.join(qa_path, ".env"))
+    _safe_symlink(os.path.join(project_path, ".deno"), os.path.join(qa_path, ".deno"))
     return qa_path, True
 
 
