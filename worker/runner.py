@@ -769,7 +769,8 @@ async def run_qa_once(
     diff = get_git_diff(project.local_path, execution_branch)
     review_prompt = build_review_prompt(spec.content, diff, step_results)
 
-    review_proc = _subprocess.run(
+    review_proc = await asyncio.to_thread(
+        _subprocess.run,
         ["claude", "-p", "--model", WORKER_MODEL, "--allowedTools", "Bash,Read,Glob,Grep"],
         input=review_prompt,
         cwd=project.local_path,
