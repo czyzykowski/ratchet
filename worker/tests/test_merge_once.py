@@ -299,6 +299,183 @@ class TestMergeOnceMergeFailure:
         assert status == ev.READY_FOR_DEPLOYMENT  # not BLOCKED
 
 
+class TestMergeOnceReadIntentFailure:
+    async def test_should_use_empty_intent_when_read_intent_raises(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id)
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="abc123")
+
+        with (
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, side_effect=FileNotFoundError("no INTENT.md")),
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            result = await merge_once(store, invoker)
+
+        assert result is True
+        state_machine = TaskStateMachine(store)
+        status = await state_machine.get_current_status(task_id)
+        assert status == ev.DEPLOYED
+
+
+class TestMergeOnceNoExecutionBranch:
+    async def test_should_skip_task_with_no_execution_branch(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id)
+
+        # Advance to READY_FOR_DEPLOYMENT via state machine
+        state_machine = TaskStateMachine(store)
+        await state_machine.transition(task_id, ev.SPEC_QA)
+        await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+        await state_machine.transition(
+            task_id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
+        )
+        await state_machine.transition(task_id, ev.READY_FOR_QA)
+        await state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+
+        # Append EXECUTION_STARTED with empty branch_name (falsy)
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task_executions",
+            event_type=ev.EXECUTION_STARTED,
+            payload={"branch_name": "", "spec_id": str(uuid.uuid4())},
+        )
+
+        invoker = _make_invoker()
+
+        with (
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_SQUASH_MERGE) as mock_merge,
+        ):
+            result = await merge_once(store, invoker)
+
+        assert result is False
+        mock_merge.assert_not_called()
+
+
+class TestMergeOnceConfigSource:
+    async def test_should_pass_ratchet_yaml_when_config_source_is_db(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id)
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="sha1")
+        captured_kwargs: list = []
+
+        def capture_load_deployment(local_path, ratchet_yaml=None):
+            captured_kwargs.append(ratchet_yaml)
+            return _local_deployment_config()
+
+        # Build a modified project with config_source="db" and ratchet_yaml set
+        modified_project = project.model_copy(
+            update={"config_source": "db", "ratchet_yaml": "custom: yaml"}
+        )
+
+        with (
+            patch("worker.runner.ProjectManager") as mock_pm_cls,
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_DEPLOYMENT, side_effect=capture_load_deployment),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            mock_pm = MagicMock()
+            mock_pm_cls.return_value = mock_pm
+            mock_pm.list_projects = MagicMock(return_value=_async_return([modified_project]))
+            result = await merge_once(store, invoker)
+
+        assert result is True
+        assert len(captured_kwargs) == 1
+        assert captured_kwargs[0] == "custom: yaml"
+
+    async def test_should_pass_none_ratchet_yaml_when_config_source_is_not_db(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id)
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="sha1")
+        captured_kwargs: list = []
+
+        def capture_load_deployment(local_path, ratchet_yaml=None):
+            captured_kwargs.append(ratchet_yaml)
+            return _local_deployment_config()
+
+        with (
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_DEPLOYMENT, side_effect=capture_load_deployment),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            result = await merge_once(store, invoker)
+
+        assert result is True
+        assert len(captured_kwargs) == 1
+        assert captured_kwargs[0] is None
+
+
+class TestMergeOnceNoSpecId:
+    async def test_should_use_empty_spec_content_when_no_spec_id(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id)
+
+        # Advance to READY_FOR_DEPLOYMENT but append EXECUTION_STARTED without spec_id
+        state_machine = TaskStateMachine(store)
+        await state_machine.transition(task_id, ev.SPEC_QA)
+        await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+        await state_machine.transition(
+            task_id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
+        )
+        await state_machine.transition(task_id, ev.READY_FOR_QA)
+        await state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task_executions",
+            event_type=ev.EXECUTION_STARTED,
+            payload={"branch_name": "task/exec-no-spec"},
+            # no spec_id key
+        )
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="sha1")
+        captured_args: list = []
+
+        def capture_squash(*args, **kwargs):
+            captured_args.extend(args)
+            return success_result
+
+        with (
+            patch(PATCH_SQUASH_MERGE, side_effect=capture_squash),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            result = await merge_once(store, invoker)
+
+        assert result is True
+        # squash_merge args: local_path, execution_branch, target_branch, title,
+        # task_id, store, invoker, spec_content, intent_content
+        spec_content_arg = captured_args[7]
+        assert spec_content_arg == ""
+
+
+def _async_return(value):
+    """Helper to create an async coroutine returning value."""
+    async def _inner():
+        return value
+    return _inner()
+
+
 class TestMergeOnceMultipleTasks:
     async def test_should_merge_oldest_task_first(self):
         import asyncio

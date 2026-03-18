@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Unit tests for `merge_once` edge cases: `read_intent` exception fallback, no execution branch, `config_source == "db"` ratchet_yaml branching, and missing `spec_id` handling
 - Integrated `merge_once` into worker dispatch cycle — tasks in local deployment mode auto-merge after QA passes; `merge_once` now accepts optional `project_id` parameter for per-project scoping
 - Updated CLAUDE.md: documented embedded worker architecture, `worker/service.py` and `worker/log_buffer.py` in repo structure, `python -m web` entry point, `WORKER_*` env vars, and `app.state.worker_service` key pattern
 - `web/app.py` auto-starts embedded `WorkerService` on lifespan startup and stops it on shutdown; reads `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` from env vars; exposes `app.state.worker_log_buffer`
