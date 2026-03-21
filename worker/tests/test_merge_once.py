@@ -380,7 +380,7 @@ class TestMergeOnceConfigSource:
         )
 
         with (
-            patch("worker.dispatcher.ProjectManager") as mock_pm_cls,
+            patch("core.managers.ProjectManager") as mock_pm_cls,
             patch(PATCH_SQUASH_MERGE, return_value=success_result),
             patch(PATCH_READ_INTENT, return_value="intent"),
             patch(PATCH_LOAD_DEPLOYMENT, side_effect=capture_load_deployment),

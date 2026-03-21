@@ -19,10 +19,10 @@ from core.context_assembler import (
 )
 from core.execution_manager import ExecutionManager
 from core.invoker import ClaudeCodeInvoker
+from core.managers import Managers
 from core.merge import squash_merge
 from core.models import Project, Spec, Task
 from core.models_config import WORKER_MODEL
-from core.project_manager import ProjectManager
 from core.qa_runner import (
     build_review_prompt,
     check_baseline_qa,
@@ -35,11 +35,9 @@ from core.qa_runner import (
     run_merge_steps,
     run_qa_steps,
 )
-from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
 from core.task_executor import ExecutionOutcome, ExecutionResult, TaskExecutor
-from core.task_manager import TaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -264,13 +262,14 @@ class ProjectDispatcher:
         invoker: ClaudeCodeInvoker,
         local_capabilities: list[str] | None = None,
     ) -> None:
-        self._store = store
+        m = Managers(store)
+        self._store = m.store
         self._invoker = invoker
         self._capabilities = local_capabilities or []
-        self._project_manager = ProjectManager(store)
-        self._task_manager = TaskManager(store)
-        self._spec_manager = SpecManager(store)
-        self._state_machine = TaskStateMachine(store)
+        self._project_manager = m.projects
+        self._task_manager = m.tasks
+        self._spec_manager = m.specs
+        self._state_machine = m.state_machine
 
     async def _find_tasks(
         self,

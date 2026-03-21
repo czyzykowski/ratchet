@@ -68,7 +68,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     pool = await get_pool()
     app.state.pool = pool
-    app.state.store = PostgresStore(pool)
+    store = PostgresStore(pool)
+    app.state.store = store
+
+    from core.managers import Managers
+    app.state.managers = Managers(store)
     sse_queues: set[asyncio.Queue[str]] = set()
     app.state.sse_queues = sse_queues
     app.state.sse_clients = []

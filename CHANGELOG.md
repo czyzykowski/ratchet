@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- `core/managers.py` — `Managers` facade that constructs all store-backed managers from a single `Store` instance; `app.state.managers` set on web startup
+
 ### Changed
+- `ProjectDispatcher` uses `Managers` facade internally instead of constructing 4 managers separately
 - Extracted `ProjectDispatcher` class into `worker/dispatcher.py` — owns task discovery, priority dispatch (merge > QA > impl), and manager construction
 - `worker/runner.py` reduced from 1206 to 386 lines — retains only notification loop, CLI entry points, and backwards-compatible wrappers
 - Deduplicated project→task discovery loop (was copy-pasted 5 times) into `ProjectDispatcher._find_tasks()`
