@@ -5,12 +5,14 @@ import { createTask } from '../api/projects'
 interface NewTaskModalProps {
   open: boolean
   projectId: string
+  projectCapabilities: string[]
   onClose: () => void
 }
 
-export function NewTaskModal({ open, projectId, onClose }: NewTaskModalProps) {
+export function NewTaskModal({ open, projectId, projectCapabilities, onClose }: NewTaskModalProps) {
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
+  const [capabilities, setCapabilities] = useState(projectCapabilities.join(', '))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -24,10 +26,14 @@ export function NewTaskModal({ open, projectId, onClose }: NewTaskModalProps) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
+    const caps = capabilities.trim()
+      ? capabilities.split(',').map(c => c.trim()).filter(Boolean)
+      : []
     try {
-      await createTask(projectId, title)
+      await createTask(projectId, title, caps)
       await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       setTitle('')
+      setCapabilities(projectCapabilities.join(', '))
       onClose()
     } catch (err: unknown) {
       const e = err as { detail?: string; message?: string }
@@ -54,6 +60,16 @@ export function NewTaskModal({ open, projectId, onClose }: NewTaskModalProps) {
               onChange={e => setTitle(e.target.value)}
               required
               placeholder="Task title"
+            />
+          </div>
+          <div className="modal-field">
+            <label className="modal-label" htmlFor="task-capabilities">Required Capabilities <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(comma-separated)</span></label>
+            <input
+              id="task-capabilities"
+              className="form-input"
+              value={capabilities}
+              onChange={e => setCapabilities(e.target.value)}
+              placeholder="e.g. linux, gpu"
             />
           </div>
           {error && <div className="error-state">{error}</div>}

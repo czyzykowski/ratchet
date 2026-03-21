@@ -18,6 +18,8 @@
 - Alembic migration `d1e2f3a4b5c6` adds `required_capabilities` JSONB column to `current_projects` view and updates `current_tasks` view to prefer `TASK_CAPABILITIES_UPDATED` over `TASK_CREATED`
 - Unit tests for project capabilities (create, update, replay) and task capability merging and editing
 - Web API tests for create/update project with capabilities and task capability update endpoint
+- `NewTaskModal` displays a "Required Capabilities" input pre-populated with project defaults; submitted capabilities are sent to `POST /api/tasks` as `required_capabilities`
+- `POST /api/tasks` accepts optional `required_capabilities`; when provided, uses them as-is without merging project defaults
 - Unit tests for `merge_once` edge cases: `read_intent` exception fallback, no execution branch, `config_source == "db"` ratchet_yaml branching, and missing `spec_id` handling
 - Integrated `merge_once` into worker dispatch cycle — tasks in local deployment mode auto-merge after QA passes; `merge_once` now accepts optional `project_id` parameter for per-project scoping
 - Updated CLAUDE.md: documented embedded worker architecture, `worker/service.py` and `worker/log_buffer.py` in repo structure, `python -m web` entry point, `WORKER_*` env vars, and `app.state.worker_service` key pattern

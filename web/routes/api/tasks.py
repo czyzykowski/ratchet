@@ -178,6 +178,7 @@ async def task_sse_events(task_id: UUID, request: Request) -> StreamingResponse:
 class CreateTaskBody(BaseModel):
     project_id: str
     title: str
+    required_capabilities: list[str] | None = None
 
 
 @router.post("/tasks", status_code=201)
@@ -187,12 +188,19 @@ async def create_task(body: CreateTaskBody, request: Request) -> JSONResponse:
     task_manager = TaskManager(store)
     pm = ProjectManager(store)
 
-    project = await pm.get_project(project_id)
-    project_capabilities = project.required_capabilities if project is not None else []
-
-    task = await task_manager.create_task(
-        project_id, body.title, project_capabilities=project_capabilities
-    )
+    if body.required_capabilities is not None:
+        task = await task_manager.create_task(
+            project_id,
+            body.title,
+            required_capabilities=body.required_capabilities,
+            project_capabilities=[],
+        )
+    else:
+        project = await pm.get_project(project_id)
+        project_capabilities = project.required_capabilities if project is not None else []
+        task = await task_manager.create_task(
+            project_id, body.title, project_capabilities=project_capabilities
+        )
     return JSONResponse({"task": task.model_dump(mode="json")}, status_code=201)
 
 

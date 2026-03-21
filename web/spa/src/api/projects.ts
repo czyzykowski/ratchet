@@ -74,11 +74,15 @@ export async function updateProject(id: string, body: UpdateProjectBody): Promis
   return data.project
 }
 
-export async function createTask(projectId: string, title: string): Promise<Task> {
+export async function createTask(projectId: string, title: string, required_capabilities?: string[]): Promise<Task> {
+  const body: Record<string, unknown> = { project_id: projectId, title }
+  if (required_capabilities !== undefined) {
+    body.required_capabilities = required_capabilities
+  }
   const data = await apiFetch<{ task: Task }>('/api/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: projectId, title }),
+    body: JSON.stringify(body),
   })
   return data.task
 }

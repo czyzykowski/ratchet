@@ -208,6 +208,7 @@ export function ProjectPage() {
         <NewTaskModal
           open={taskModalOpen}
           projectId={project_id}
+          projectCapabilities={data.project.required_capabilities}
           onClose={() => setTaskModalOpen(false)}
         />
       )}

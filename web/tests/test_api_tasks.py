@@ -125,6 +125,65 @@ def test_should_create_task_and_return_201(
     assert data["task"]["project_id"] == str(project_id)
 
 
+async def _seed_project_with_capabilities(
+    store: InMemoryStore, project_id: UUID, capabilities: list[str]
+) -> None:
+    payload = {
+        "project_id": str(project_id),
+        "name": "Test Project",
+        "repo_url": "/tmp/test",
+        "local_path": "/tmp/test",
+        "status": "active",
+        "required_capabilities": capabilities,
+    }
+    await store.append_event(
+        aggregate_id=_REGISTRY_ID,
+        aggregate_type="projects",
+        event_type=ev.PROJECT_CREATED,
+        payload=payload,
+    )
+    await store.append_event(
+        aggregate_id=project_id,
+        aggregate_type="project",
+        event_type=ev.PROJECT_CREATED,
+        payload=payload,
+    )
+
+
+def test_should_create_task_with_explicit_capabilities(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(
+        _seed_project_with_capabilities(store, project_id, ["linux", "gpu"])
+    )
+
+    response = client.post(
+        "/api/tasks",
+        json={"project_id": str(project_id), "title": "Cap Task", "required_capabilities": ["osx"]},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["task"]["required_capabilities"] == ["osx"]
+
+
+def test_should_create_task_inheriting_project_capabilities_when_omitted(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(
+        _seed_project_with_capabilities(store, project_id, ["linux", "gpu"])
+    )
+
+    response = client.post(
+        "/api/tasks",
+        json={"project_id": str(project_id), "title": "Inherited Cap Task"},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert set(data["task"]["required_capabilities"]) == {"linux", "gpu"}
+
+
 def test_should_update_task_title(client: TestClient, store: InMemoryStore) -> None:
     project_id = uuid4()
     task_id = uuid4()

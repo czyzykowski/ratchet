@@ -111,6 +111,19 @@ describe('ProjectPage', () => {
     expect(screen.getByLabelText(/title/i)).toBeInTheDocument()
   })
 
+  it('should show capabilities input pre-populated with project defaults when NewTaskModal opens', async () => {
+    vi.mocked(projectsApi.fetchProject).mockResolvedValue({
+      ...mockData,
+      project: { ...mockData.project, required_capabilities: ['linux', 'gpu'] },
+    })
+    renderWithProviders(<ProjectPage />, `/projects/${projectId}`)
+    await screen.findByText('Task Alpha')
+    await userEvent.click(screen.getByRole('button', { name: /add task/i }))
+    const capsInput = screen.getByLabelText(/required capabilities/i)
+    expect(capsInput).toBeInTheDocument()
+    expect((capsInput as HTMLInputElement).value).toBe('linux, gpu')
+  })
+
   it('should show loading state', () => {
     vi.mocked(projectsApi.fetchProject).mockReturnValue(new Promise(() => {}))
     renderWithProviders(<ProjectPage />, `/projects/${projectId}`)
