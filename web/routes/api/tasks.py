@@ -764,28 +764,102 @@ asking after each chunk whether it looks right.
 Keep to chunked format even when the picture is clear.
 
 When you have gathered enough information and confirmed your understanding with the user,
-produce the spec in this exact format:
+produce the spec following the guidelines and format below.
+
+## Spec Writing Guidelines
+
+Apply these principles when writing the spec:
+
+### Specificity Beats Abstraction
+Agents struggle with "improve performance" but excel with "reduce database queries in \
+UserService.findAll() by adding eager loading for relationships". Abstract goals require \
+human judgment; concrete goals enable autonomous execution.
+
+### Examples Are Executable Documentation
+A single example of desired output is worth 1000 words of description. "Follow the NBA \
+pattern" only works if you point to specific files and explain what to copy.
+
+### Constraints Prevent Waste
+Without explicit boundaries, agents over-engineer solutions. "Out of scope" sections save \
+more time than "in scope" sections.
+
+### Verification Criteria Enable Autonomy
+Testable success criteria let agents validate their own work. "Links should have proper \
+values" fails; "All links must include cid=2026olympicsoli" succeeds.
+
+### Vertical Slices, Not Horizontal Layers
+Tasks must be thin vertical slices — each cutting through all relevant layers of the \
+system — not horizontal single-layer tasks. Each slice should be independently verifiable \
+and produce a working increment.
+
+BAD (horizontal layers):
+- Add all database schema changes
+- Add all API endpoints
+- Write all tests
+
+GOOD (vertical slices):
+- Basic user creation: schema + endpoint + test
+- User validation: constraints + error responses + test
+- User search: query + endpoint + test
+
+Start with the thinnest possible end-to-end path ("tracer bullet"). Each subsequent slice \
+adds one capability. Each slice includes its own tests.
+
+### Anti-Patterns to Avoid
+- Vague objectives: "Improve handling" → "Set static CID to 'X' for messages where \
+league equals 'Y'"
+- Missing examples: "Follow the existing pattern" → "Follow NBAUrlStrategy in \
+url-strategies.ts lines 48-111"
+- Unbounded scope: No "Out of Scope" section → explicit list of what NOT to change
+- Untestable success: "Works correctly" → specific function returns specific values
+- Implicit knowledge: "Update the strategy" → "Create class in file X, copy from \
+lines Y-Z, replace A with B"
+
+## Spec Format
+
+Produce the spec in this exact format:
 
 ## SPEC READY
 # Spec N: <title>
 
 ## Objective
-...
+[One concrete sentence. Specific enough that an agent can determine when it's complete. \
+Use measurable outcomes.]
 
 ## Success Criteria
-- [ ] ...
+- [ ] [Specific, verifiable outcome with exact values]
+- [ ] [Another verifiable outcome — function signatures, field names, etc.]
+- [ ] [Test command succeeds]
+- [ ] [Lint/typecheck passes]
 
 ## Out of Scope
-...
+- [Explicit boundary — what NOT to change or create]
 
 ## Technical Context
-...
+- Stack: [Language, framework, etc.]
+- Entry point: [Path to main file]
+- Pattern to follow: [File path with line numbers]
+- Related files:
+  - [File path — purpose]
 
-## Tasks
-- [ ] ...
+## Data Examples
+**Input:** [sample]
+**Expected Output:** [sample]
+
+## Tasks (vertical slices — each independently testable)
+- [ ] [Slice 1: thinnest end-to-end path + its own test]
+- [ ] [Slice 2: next capability + test]
+- [ ] [Run full validation commands]
+
+## Test Requirements
+- Framework: [pytest, jest, etc.]
+- Scenarios:
+  - [Happy path]
+  - [Edge case]
+  - [Error condition]
 
 ## Assumptions
-...
+- [What the agent can assume is true]
 
 ## Verification Commands
 ```bash
@@ -793,12 +867,10 @@ produce the spec in this exact format:
 ```
 
 ## What Exists After This Spec
-
 ...
 
-Use the standard Ratchet spec format exactly as shown. Be specific about file paths,
-function names, and test requirements. Read the codebase to understand current patterns
-before generating the spec.
+Be specific about file paths, function names, and test requirements. Read the codebase \
+to understand current patterns before generating the spec.
 
 IMPORTANT: Every response must contain visible text. If you are reading files or using
 tools, first write a brief message like "Let me read the codebase before writing the spec."

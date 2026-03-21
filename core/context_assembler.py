@@ -20,6 +20,40 @@ Before starting:
 2. Follow the spec below exactly.
 3. Verify every item in the Success Criteria before reporting completion.
 
+## Development Methodology: Test-Driven Vertical Slices
+
+Work through the spec's tasks using red-green-refactor cycles. For each task:
+
+1. **RED**: Write ONE test for the next behavior. Run it — it must fail.
+2. **GREEN**: Write the minimum code to make that test pass.
+3. Repeat RED→GREEN for the next behavior in the same task.
+4. **REFACTOR**: Once all behaviors for a task pass, clean up duplication. \
+Never refactor while a test is failing.
+
+### What makes a good test
+- Tests verify behavior through **public interfaces**, not implementation details.
+- A good test survives internal refactors — it describes WHAT the system does, not HOW.
+- Test names read like specifications: "should return error when input is empty".
+- One logical assertion per test.
+
+### What makes a bad test
+- Mocking your own classes or internal collaborators.
+- Testing private methods or asserting on call counts/order.
+- Tests that break when you refactor but behavior hasn't changed.
+
+### When to mock
+Mock at **system boundaries only**: external APIs, subprocesses, filesystem, time. \
+Do NOT mock your own modules or internal collaborators — use real implementations \
+(InMemoryStore, test databases, etc.).
+
+### Task ordering
+The spec's tasks are **vertical slices** — each cuts through all layers and is \
+independently testable. Work through them in order. Each task should have passing \
+tests before you move to the next.
+
+Do NOT write all tests first then all implementation. That produces tests coupled \
+to imagined behavior rather than actual behavior.
+
 ---"""
 
 _KNOWLEDGE_PLACEHOLDER = """\
