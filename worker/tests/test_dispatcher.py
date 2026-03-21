@@ -325,7 +325,7 @@ PATCH_RUN_AUTO_FIXES = "worker.pipelines.qa.run_auto_fixes"
 PATCH_GET_GIT_DIFF = "worker.pipelines.qa.get_git_diff"
 PATCH_BUILD_REVIEW = "worker.pipelines.qa.build_review_prompt"
 PATCH_PARSE_REVIEW = "worker.pipelines.qa.parse_review_output"
-PATCH_SUBPROCESS_RUN = "worker.pipelines.qa._subprocess.run"
+PATCH_SUBPROCESS_RUN = "core.claude_subprocess.subprocess.Popen"
 
 
 async def _setup_task_for_qa(

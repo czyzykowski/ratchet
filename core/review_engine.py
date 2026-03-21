@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from pathlib import Path
 from statistics import mean
 from uuid import uuid4
 
+from core.claude_subprocess import ClaudeRequest
+from core.claude_subprocess import run as run_claude_subprocess
 from core.models import ReviewRun, Suggestion, SuggestionEvidence
 from core.models_config import WORKER_MODEL
 from core.review_collector import CollectedData
@@ -34,16 +34,14 @@ class ReviewEngine:
     ) -> list[Suggestion]:
         prompt = self._build_prompt(data, previous_run_summary)
 
-        base_cmd = ["claude", "-p", prompt, "--model", WORKER_MODEL, "--allowedTools", ""]
-        if os.environ.get("USE_NIX_DEVELOP"):
-            cmd = ["nix", "develop", "--command"] + base_cmd
-        else:
-            cmd = base_cmd
-
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, env=env
+        request = ClaudeRequest(
+            prompt=prompt,
+            cwd=".",
+            model=WORKER_MODEL,
+            allowed_tools="",
+            timeout=120,
         )
+        result = run_claude_subprocess(request)
         raw = result.stdout
 
         stripped = raw.strip()

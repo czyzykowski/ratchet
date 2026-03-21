@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from subprocess import PIPE
 from uuid import UUID
 
+from core.claude_subprocess import ClaudeRequest, StreamingHandle, start
 from core.context_assembler import ExecutionContext
 from core.models import ExecutionTrace
 from core.models_config import WORKER_MODEL
@@ -154,14 +153,14 @@ class ClaudeCodeInvoker:
     ) -> None:
         self._store = store
         self.watchdog_timeout = watchdog_timeout
-        self._proc: subprocess.Popen | None = None  # type: ignore[type-arg]
-        self._proc_lock = threading.Lock()
+        self._handle: StreamingHandle | None = None
+        self._handle_lock = threading.Lock()
 
     def terminate(self) -> None:
         """Terminate the currently running subprocess, if any."""
-        with self._proc_lock:
-            if self._proc is not None:
-                self._proc.terminate()
+        with self._handle_lock:
+            if self._handle is not None:
+                self._handle.terminate()
 
     def invoke(
         self,
@@ -171,15 +170,15 @@ class ClaudeCodeInvoker:
     ) -> InvocationResult:
         """Invoke Claude Code with assembled context.
 
-        1. Build command with prompt and allowed tools
-        2. Run subprocess with cwd=context.worktree_path, reading stdout/stderr via threads
-        3. Build trace content (header + stdout + stderr) and save via store.save_trace()
-        4. Call parse_output(output, returncode) to determine status
-        5. Return InvocationResult
+        1. Build ClaudeRequest and call start()
+        2. Run watchdog thread monitoring handle.get_last_activity()
+        3. Wait for completion via handle.wait()
+        4. Build trace content and save via store.save_trace()
+        5. Call parse_output(output, returncode) to determine status
+        6. Return InvocationResult
 
         Safety: unless allow_project_root=True, raises ValueError if worktree_path
-        does not appear to be inside a .worktrees/ directory.  This prevents
-        accidental writes (commits, file changes) to the project's main checkout.
+        does not appear to be inside a .worktrees/ directory.
         """
         wt = os.path.abspath(context.worktree_path)
         if not allow_project_root and "/.worktrees/" not in wt:
@@ -188,34 +187,24 @@ class ClaudeCodeInvoker:
                 "Execution must happen inside a .worktrees/ directory. "
                 "Pass allow_project_root=True to override (merge only)."
             )
-        claude_cmd = ["claude", "-p", "--model", _MODEL, "--allowedTools", _ALLOWED_TOOLS]
-        if os.name != "nt" and (Path(context.worktree_path) / "flake.nix").exists():
-            cmd = ["nix", "develop", "--command"] + claude_cmd
-        else:
-            cmd = claude_cmd
 
-        # Strip CLAUDECODE so nested sessions don't fail when worker runs inside Claude Code
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        request = ClaudeRequest(
+            prompt=context.prompt,
+            cwd=context.worktree_path,
+            model=_MODEL,
+            allowed_tools=_ALLOWED_TOOLS,
+        )
 
-        lock = threading.Lock()
-        last_activity: list[float] = [time.monotonic()]
-
-        def get_activity() -> float:
-            with lock:
-                return last_activity[0]
-
-        def read_stream(stream: Iterable[str], lines: list[str]) -> None:
-            for line in stream:
-                lines.append(line)
-                with lock:
-                    last_activity[0] = time.monotonic()
+        handle = start(request)
+        with self._handle_lock:
+            self._handle = handle
 
         stop_event = threading.Event()
         watchdog_thread = threading.Thread(
             target=_watchdog_loop,
             args=(
                 context.execution_id,
-                get_activity,
+                handle.get_last_activity,
                 stop_event,
                 self.watchdog_timeout,
             ),
@@ -223,40 +212,14 @@ class ClaudeCodeInvoker:
         )
         watchdog_thread.start()
 
-        proc = subprocess.Popen(
-            cmd,
-            cwd=context.worktree_path,
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True,
-            env=env,
-        )
-        with self._proc_lock:
-            self._proc = proc
+        result = handle.wait()
 
-        assert proc.stdin is not None
-        proc.stdin.write(context.prompt)
-        proc.stdin.close()
-
-        stdout_lines: list[str] = []
-        stderr_lines: list[str] = []
-
-        t_out = threading.Thread(target=read_stream, args=(proc.stdout, stdout_lines))
-        t_err = threading.Thread(target=read_stream, args=(proc.stderr, stderr_lines))
-        t_out.start()
-        t_err.start()
-        t_out.join()
-        t_err.join()
-
-        returncode = proc.wait()
-
-        with self._proc_lock:
-            self._proc = None
+        with self._handle_lock:
+            self._handle = None
         stop_event.set()
         watchdog_thread.join()
 
-        output = "".join(stdout_lines) + "".join(stderr_lines)
+        output = result.output
 
         # Build and save trace
         started_at = datetime.now(UTC)
@@ -276,7 +239,7 @@ class ClaudeCodeInvoker:
         )
         self._store.save_trace(trace)
 
-        status, failure_reason = parse_output(output, returncode)
+        status, failure_reason = parse_output(output, result.returncode)
 
         # Fallback: if stdout lacks a completion marker but the Claude session
         # JSONL has one (e.g. background tasks triggered extra turns after

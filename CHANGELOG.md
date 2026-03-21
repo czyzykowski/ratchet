@@ -2,7 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- `core/claude_subprocess.py` — unified Claude subprocess invocation with `run()` (blocking) and `start()` (non-blocking with activity tracking)
+
 ### Changed
+- `core/invoker.py` uses `claude_subprocess.start()` instead of raw `subprocess.Popen`
+- `core/compiler.py` uses `claude_subprocess.run()` instead of raw `subprocess.Popen`
+- `core/review_engine.py` uses `claude_subprocess.run()` instead of raw `subprocess.run`; removed `USE_NIX_DEVELOP` env var
+- `worker/pipelines/qa.py` uses `claude_subprocess.run()` for Claude review step
 - Decomposed `worker/dispatcher.py` (941 lines) into pipeline modules: `worker/pipelines/impl.py`, `worker/pipelines/qa.py`, `worker/pipelines/merge.py`
 - Extracted `worker/worktree.py` (worktree lifecycle helpers), `worker/event_helpers.py` (event query helpers), `worker/task_finder.py` (TaskFinder class)
 - `worker/dispatcher.py` is now a 168-line facade delegating to pipeline classes

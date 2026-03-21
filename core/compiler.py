@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
+from core.claude_subprocess import ClaudeRequest
+from core.claude_subprocess import run as run_claude_subprocess
 from core.models_config import CHAT_MODEL
 
 if TYPE_CHECKING:
@@ -26,23 +27,17 @@ def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
         print(prompt, file=sys.stderr)
         print("--- END PROMPT ---\n", file=sys.stderr)
 
-    cmd = ["claude", "-p", prompt, "--model", CHAT_MODEL, "--allowedTools", "Read,Glob,Bash"]
-    proc = subprocess.Popen(
-        cmd,
+    request = ClaudeRequest(
+        prompt=prompt,
         cwd=local_path,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-        text=True,
+        model=CHAT_MODEL,
+        allowed_tools="Read,Glob,Bash",
     )
-
-    output_lines: list[str] = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="", flush=True)
-        output_lines.append(line)
-
-    proc.wait()
-    return "".join(output_lines)
+    result = run_claude_subprocess(
+        request,
+        on_stdout_line=lambda line: print(line, end="", flush=True),
+    )
+    return result.stdout
 
 
 def build_compile_prompt(intent_md: str, feature_title: str, hls: HighLevelSpec) -> str:

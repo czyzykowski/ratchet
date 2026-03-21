@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess as _subprocess
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -12,6 +11,8 @@ if TYPE_CHECKING:
     from worker.dispatcher import DispatchResult
 
 from core import events as ev
+from core.claude_subprocess import ClaudeRequest
+from core.claude_subprocess import run as run_claude_subprocess
 from core.context_assembler import ExecutionContext
 from core.invoker import ClaudeCodeInvoker
 from core.managers import Managers
@@ -182,15 +183,14 @@ class QAPipeline:
         diff = get_git_diff(project.local_path, execution_branch)
         review_prompt = build_review_prompt(spec.content, diff, step_results)
 
-        review_proc = await asyncio.to_thread(
-            _subprocess.run,
-            ["claude", "-p", "--model", WORKER_MODEL, "--allowedTools", "Bash,Read,Glob,Grep"],
-            input=review_prompt,
+        review_request = ClaudeRequest(
+            prompt=review_prompt,
             cwd=project.local_path,
-            capture_output=True,
-            text=True,
+            model=WORKER_MODEL,
+            allowed_tools="Bash,Read,Glob,Grep",
         )
-        review_output = review_proc.stdout + review_proc.stderr
+        review_claude_result = await asyncio.to_thread(run_claude_subprocess, review_request)
+        review_output = review_claude_result.output
 
         review_result = parse_review_output(review_output)
 

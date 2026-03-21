@@ -1,4 +1,4 @@
-"""Unit tests for core/invoker.py — subprocess.Popen is mocked throughout."""
+"""Unit tests for core/invoker.py."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from core.invoker import (
     parse_output,
 )
 from core.store import InMemoryStore
+
+PATCH_POPEN = "core.claude_subprocess.subprocess.Popen"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -149,7 +151,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
-            "subprocess.Popen",
+            PATCH_POPEN,
             return_value=_fake_popen(stdout="COMPLETED: all tasks done"),
         ):
             result = invoker.invoke(ctx)
@@ -165,7 +167,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
         output = "BLOCKED: missing TEST_DATABASE_URL\n\nfurther info"
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout=output)):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout=output)):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
@@ -177,7 +179,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
-            "subprocess.Popen",
+            PATCH_POPEN,
             return_value=_fake_popen(stdout="fatal error", returncode=1),
         ):
             result = invoker.invoke(ctx)
@@ -190,7 +192,7 @@ class TestClaudeCodeInvoker:
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="I did some stuff")):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout="I did some stuff")):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
@@ -202,7 +204,7 @@ class TestClaudeCodeInvoker:
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout="COMPLETED: done")):
             invoker.invoke(ctx)
 
         trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
@@ -217,7 +219,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
-            "subprocess.Popen",
+            PATCH_POPEN,
             return_value=_fake_popen(stdout="boom", returncode=2),
         ):
             invoker.invoke(ctx)
@@ -231,7 +233,7 @@ class TestClaudeCodeInvoker:
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="BLOCKED: something")):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout="BLOCKED: something")):
             invoker.invoke(ctx)
 
         trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
@@ -243,7 +245,7 @@ class TestClaudeCodeInvoker:
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout="COMPLETED: done")):
             invoker.invoke(ctx)
 
         trace = asyncio.get_event_loop().run_until_complete(store.get_trace(ctx.execution_id))
@@ -260,7 +262,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
-            "subprocess.Popen",
+            PATCH_POPEN,
             return_value=_fake_popen(stdout="COMPLETED: ok", stderr="warning: something"),
         ):
             invoker.invoke(ctx)
@@ -274,7 +276,7 @@ class TestClaudeCodeInvoker:
         store = InMemoryStore()
         invoker = ClaudeCodeInvoker(store=store)
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout="COMPLETED: done")):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout="COMPLETED: done")):
             result = invoker.invoke(ctx)
 
         assert result.execution_id == ctx.execution_id
@@ -287,7 +289,7 @@ class TestClaudeCodeInvoker:
         invoker = ClaudeCodeInvoker(store=store)
 
         with patch(
-            "subprocess.Popen",
+            PATCH_POPEN,
             return_value=_fake_popen(stdout="COMPLETED: ok"),
         ) as mock_popen:
             invoker.invoke(ctx)
@@ -316,7 +318,7 @@ class TestClaudeCodeInvoker:
             "Set TEST_DATABASE_URL in .env\n"
         )
 
-        with patch("subprocess.Popen", return_value=_fake_popen(stdout=output)):
+        with patch(PATCH_POPEN, return_value=_fake_popen(stdout=output)):
             result = invoker.invoke(ctx)
 
         assert result.status == "failed"
