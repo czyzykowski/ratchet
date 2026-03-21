@@ -134,6 +134,7 @@ class RemoteWorkerClient:
         self, ws: websockets.asyncio.client.ClientConnection, msg: AssignTaskMessage
     ) -> None:
         execution_id = uuid4()
+        print(f"[remote-worker] Assigned task={msg.task_id}", flush=True)
 
         started = ExecutionStartedMessage(
             type="execution_started",
@@ -144,6 +145,7 @@ class RemoteWorkerClient:
             timestamp_utc=datetime.now(UTC).isoformat(),
         )
         await ws.send(started.model_dump_json())
+        print(f"[remote-worker] Sent execution_started", flush=True)
 
         tmpdir = tempfile.mkdtemp()
         try:
@@ -151,7 +153,9 @@ class RemoteWorkerClient:
                 return
 
             bundle_bytes = base64.b64decode(msg.git_bundle_b64)
+            print(f"[remote-worker] Extracting bundle to {tmpdir}", flush=True)
             git_transfer.extract_bundle(bundle_bytes, tmpdir)
+            print(f"[remote-worker] Bundle extracted", flush=True)
 
             if self._cancel_flag:
                 return
@@ -166,8 +170,10 @@ class RemoteWorkerClient:
                 prompt=prompt,
             )
 
+            print(f"[remote-worker] Invoking Claude in {tmpdir}", flush=True)
             invoker = ClaudeCodeInvoker(store=InMemoryStore())
             result = invoker.invoke(context, allow_project_root=True)
+            print(f"[remote-worker] Invocation result: {result.status}", flush=True)
 
             if self._cancel_flag:
                 return
