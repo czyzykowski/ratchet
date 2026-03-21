@@ -152,7 +152,7 @@ async def test_run_qa_once_transitions_to_ready_for_deployment_when_no_qa_config
     await _setup_spec(store, task_id)
     await _advance_task_to_ready_for_qa(store, task_id)
 
-    with patch("worker.runner.load_qa_config", return_value=None):
+    with patch("worker.dispatcher.load_qa_config", return_value=None):
         await run_qa_once(store)
 
     state_machine = TaskStateMachine(store)

@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+- Extracted `ProjectDispatcher` class into `worker/dispatcher.py` — owns task discovery, priority dispatch (merge > QA > impl), and manager construction
+- `worker/runner.py` reduced from 1206 to 386 lines — retains only notification loop, CLI entry points, and backwards-compatible wrappers
+- Deduplicated project→task discovery loop (was copy-pasted 5 times) into `ProjectDispatcher._find_tasks()`
+
+### Fixed
+- Updated all test patch targets from `worker.runner.*` to `worker.dispatcher.*` for functions that moved to the dispatcher module
+- Fixed `merge_once` backwards-compat wrapper returning `True` on merge failure (now returns `False` as the original did)
+- Fixed `get_next_task` backwards-compat wrapper using hardcoded `"deployed"` string instead of `ev.DEPLOYED` constant for dependency checks
+- Updated `scripts/board.py` to import `_has_pending_baseline_qa_failure` from `worker.dispatcher`
+
 ### Added
 - `Project` model gains `required_capabilities: list[str] = []` field; stored in `PROJECT_CREATED` / `PROJECT_UPDATED` event payloads
 - `TASK_CAPABILITIES_UPDATED` event type in `core/events.py`; `TaskManager.update_task_capabilities()` method

@@ -19,8 +19,8 @@ PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
-PATCH_BASELINE_WORKTREE = "worker.runner._create_baseline_worktree"
-PATCH_REMOVE_QA_WORKTREE = "worker.runner._remove_qa_worktree"
+PATCH_BASELINE_WORKTREE = "worker.dispatcher._create_baseline_worktree"
+PATCH_REMOVE_QA_WORKTREE = "worker.dispatcher._remove_qa_worktree"
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -160,7 +160,7 @@ async def test_run_once_skips_when_baseline_qa_fails() -> None:
     with (
         patch(PATCH_BASELINE_WORKTREE, return_value="/fake/baseline"),
         patch(PATCH_REMOVE_QA_WORKTREE),
-        patch("worker.runner.check_baseline_qa", return_value=[fake_failure]),
+        patch("worker.dispatcher.check_baseline_qa", return_value=[fake_failure]),
     ):
         result = await run_once(store, invoker)
 
@@ -193,7 +193,7 @@ async def test_run_qa_once_returns_true_when_qa_task_found() -> None:
     await _setup_spec(store, task_id)
     await _advance_to_ready_for_qa(store, task_id)
 
-    with patch("worker.runner.load_qa_config", return_value=None):
+    with patch("worker.dispatcher.load_qa_config", return_value=None):
         result = await run_qa_once(store)
 
     assert result is True
@@ -222,63 +222,58 @@ class _MockNotificationListener:
 
 
 async def test_notification_loop_runs_catchup_on_startup() -> None:
-    """notification_loop calls run_qa_once, run_once, and compile_once on startup.
+    """notification_loop calls dispatch and compile_once on startup.
 
-    All three return False so all run during catchup.
+    Dispatch and compile_once are called during catchup.
     """
     store = InMemoryStore()
     invoker = _make_invoker()
     await _setup_project(store)  # needed so _dispatch_all finds an active project
 
+    from worker.dispatcher import DispatchResult, ProjectDispatcher
+
     catchup_calls: list[str] = []
 
-    async def fake_compile_once(*args, **kwargs) -> bool:
+    async def fake_dispatch(pid, **kwargs):
+        catchup_calls.append("dispatch")
+        return DispatchResult(action="idle", success=True)
+
+    async def fake_compile_once(**kwargs):
         catchup_calls.append("compile_once")
-        return False
-
-    async def fake_run_once(*args, **kwargs) -> bool:
-        catchup_calls.append("run_once")
-        return False
-
-    async def fake_run_qa_once(*args, **kwargs) -> bool:
-        catchup_calls.append("run_qa_once")
-        return False
+        return DispatchResult(action="idle", success=True)
 
     mock_listener = _MockNotificationListener([])  # no notifications → loop ends quickly
 
     with (
-        patch("worker.runner.compile_once", side_effect=fake_compile_once),
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch.object(ProjectDispatcher, "dispatch", side_effect=fake_dispatch),
+        patch.object(ProjectDispatcher, "compile_once", side_effect=fake_compile_once),
+        patch.object(ProjectDispatcher, "recover_orphans", return_value=0),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
 
     assert "compile_once" in catchup_calls
-    assert "run_once" in catchup_calls
-    assert "run_qa_once" in catchup_calls
+    assert "dispatch" in catchup_calls
 
 
 async def test_notification_loop_dispatches_queued_notifications() -> None:
-    """notification_loop calls run_once + run_qa_once for each queued task notification."""
+    """notification_loop calls dispatch for each queued task notification."""
     store = InMemoryStore()
     invoker = _make_invoker()
     await _setup_project(store)  # needed so _dispatch_all finds an active project
 
+    from worker.dispatcher import DispatchResult, ProjectDispatcher
+
     task_id = str(uuid.uuid4())
     dispatch_calls: list[str] = []
 
-    async def fake_compile_once(*args, **kwargs) -> bool:
+    async def fake_dispatch(pid, **kwargs):
+        dispatch_calls.append("dispatch")
+        return DispatchResult(action="idle", success=True)
+
+    async def fake_compile_once(**kwargs):
         dispatch_calls.append("compile_once")
-        return False
-
-    async def fake_run_once(*args, **kwargs) -> bool:
-        dispatch_calls.append("run_once")
-        return True
-
-    async def fake_run_qa_once(*args, **kwargs) -> bool:
-        dispatch_calls.append("run_qa_once")
-        return False
+        return DispatchResult(action="idle", success=True)
 
     # Two task notifications: one impl, one QA (3-tuples)
     notifications = [
@@ -288,9 +283,9 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
     mock_listener = _MockNotificationListener(notifications)
 
     with (
-        patch("worker.runner.compile_once", side_effect=fake_compile_once),
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch.object(ProjectDispatcher, "dispatch", side_effect=fake_dispatch),
+        patch.object(ProjectDispatcher, "compile_once", side_effect=fake_compile_once),
+        patch.object(ProjectDispatcher, "recover_orphans", return_value=0),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
@@ -298,10 +293,8 @@ async def test_notification_loop_dispatches_queued_notifications() -> None:
     # With per-project concurrent dispatch, each round uses asyncio.gather which
     # introduces context switches. The mock producer may finish before the consumer
     # processes all queued notifications. Assert at least the startup catchup ran.
-    run_once_count = dispatch_calls.count("run_once")
-    run_qa_count = dispatch_calls.count("run_qa_once")
-    assert run_once_count >= 1
-    assert run_qa_count >= 1
+    dispatch_count = dispatch_calls.count("dispatch")
+    assert dispatch_count >= 1
 
 
 async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
@@ -309,22 +302,21 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
     store = InMemoryStore()
     invoker = _make_invoker()
 
-    async def fake_compile_once(*args, **kwargs) -> bool:
-        return False
+    from worker.dispatcher import DispatchResult, ProjectDispatcher
 
-    async def fake_run_once(*args, **kwargs) -> bool:
-        return False
+    async def fake_dispatch(pid, **kwargs):
+        return DispatchResult(action="idle", success=True)
 
-    async def fake_run_qa_once(*args, **kwargs) -> bool:
-        return False
+    async def fake_compile_once(**kwargs):
+        return DispatchResult(action="idle", success=True)
 
     # Empty listener → producer finishes immediately → loop exits
     mock_listener = _MockNotificationListener([])
 
     with (
-        patch("worker.runner.compile_once", side_effect=fake_compile_once),
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch.object(ProjectDispatcher, "dispatch", side_effect=fake_dispatch),
+        patch.object(ProjectDispatcher, "compile_once", side_effect=fake_compile_once),
+        patch.object(ProjectDispatcher, "recover_orphans", return_value=0),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         # Should not raise
@@ -337,32 +329,29 @@ async def test_notification_loop_exits_cleanly_when_listener_ends() -> None:
 
 
 async def test_two_projects_dispatch_concurrently() -> None:
-    """Both project IDs appear in run_once calls during one startup dispatch round."""
+    """Both project IDs appear in dispatch calls during one startup dispatch round."""
     store = InMemoryStore()
     invoker = _make_invoker()
     _, project_a = await _setup_project(store, "project-a")
     _, project_b = await _setup_project(store, "project-b")
 
+    from worker.dispatcher import DispatchResult, ProjectDispatcher
+
     dispatched_ids: list[uuid.UUID] = []
 
-    async def fake_run_once(*args, **kwargs) -> bool:
-        pid = kwargs.get("project_id")
-        if pid is not None:
-            dispatched_ids.append(pid)
-        return False
+    async def fake_dispatch(pid, **kwargs):
+        dispatched_ids.append(pid)
+        return DispatchResult(action="idle", success=True)
 
-    async def fake_run_qa_once(*args, **kwargs) -> bool:
-        return False
-
-    async def fake_compile_once(*args, **kwargs) -> bool:
-        return False
+    async def fake_compile_once(**kwargs):
+        return DispatchResult(action="idle", success=True)
 
     mock_listener = _MockNotificationListener([])
 
     with (
-        patch("worker.runner.compile_once", side_effect=fake_compile_once),
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch.object(ProjectDispatcher, "dispatch", side_effect=fake_dispatch),
+        patch.object(ProjectDispatcher, "compile_once", side_effect=fake_compile_once),
+        patch.object(ProjectDispatcher, "recover_orphans", return_value=0),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
@@ -377,29 +366,23 @@ async def test_busy_project_skipped() -> None:
     invoker = _make_invoker()
     _, project_a = await _setup_project(store, "project-a")
 
+    from worker.dispatcher import DispatchResult, ProjectDispatcher
+
     dispatched_ids: list[uuid.UUID] = []
 
-    async def fake_run_qa_once(*args, **kwargs) -> bool:
-        pid = kwargs.get("project_id")
-        if pid is not None:
-            dispatched_ids.append(pid)
-        return False
+    async def fake_dispatch(pid, **kwargs):
+        dispatched_ids.append(pid)
+        return DispatchResult(action="idle", success=True)
 
-    async def fake_run_once(*args, **kwargs) -> bool:
-        pid = kwargs.get("project_id")
-        if pid is not None:
-            dispatched_ids.append(pid)
-        return False
-
-    async def fake_compile_once(*args, **kwargs) -> bool:
-        return False
+    async def fake_compile_once(**kwargs):
+        return DispatchResult(action="idle", success=True)
 
     mock_listener = _MockNotificationListener([])
 
     with (
-        patch("worker.runner.compile_once", side_effect=fake_compile_once),
-        patch("worker.runner.run_once", side_effect=fake_run_once),
-        patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
+        patch.object(ProjectDispatcher, "dispatch", side_effect=fake_dispatch),
+        patch.object(ProjectDispatcher, "compile_once", side_effect=fake_compile_once),
+        patch.object(ProjectDispatcher, "recover_orphans", return_value=0),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(

@@ -100,7 +100,7 @@ async def test_poll_pr_merges_merged_pr_transitions_to_deployed() -> None:
     task_id = await _setup_task_in_ready_for_deployment(store, project.id)
     await _emit_pr_created(store, task_id, pr_number=42)
 
-    with patch("worker.runner._gh_command", return_value=_make_gh_proc("MERGED")):
+    with patch("worker.dispatcher._gh_command", return_value=_make_gh_proc("MERGED")):
         await poll_pr_merges(store, FAKE_REPO_PATH)
 
     task_manager = TaskManager(store)
@@ -116,7 +116,7 @@ async def test_poll_pr_merges_open_pr_is_skipped() -> None:
     task_id = await _setup_task_in_ready_for_deployment(store, project.id)
     await _emit_pr_created(store, task_id, pr_number=7)
 
-    with patch("worker.runner._gh_command", return_value=_make_gh_proc("OPEN")):
+    with patch("worker.dispatcher._gh_command", return_value=_make_gh_proc("OPEN")):
         await poll_pr_merges(store, FAKE_REPO_PATH)
 
     task_manager = TaskManager(store)
@@ -132,7 +132,7 @@ async def test_poll_pr_merges_skips_tasks_without_pr_created_event() -> None:
     task_id = await _setup_task_in_ready_for_deployment(store, project.id)
     # No TASK_PR_CREATED event emitted — local-mode task
 
-    with patch("worker.runner._gh_command") as mock_gh:
+    with patch("worker.dispatcher._gh_command") as mock_gh:
         await poll_pr_merges(store, FAKE_REPO_PATH)
         mock_gh.assert_not_called()
 
@@ -151,7 +151,7 @@ async def test_poll_pr_merges_captures_merge_commit_sha() -> None:
 
     sha = "abc123def456abc123def456abc123def456abc1"
     mock_proc = _make_gh_proc("MERGED", merge_commit_sha=sha)
-    with patch("worker.runner._gh_command", return_value=mock_proc):
+    with patch("worker.dispatcher._gh_command", return_value=mock_proc):
         await poll_pr_merges(store, FAKE_REPO_PATH)
 
     task_manager = TaskManager(store)
@@ -179,7 +179,7 @@ async def test_poll_pr_merges_deployed_without_sha() -> None:
 
     # No mergeCommit key in response
     mock_proc = _make_gh_proc("MERGED")
-    with patch("worker.runner._gh_command", return_value=mock_proc):
+    with patch("worker.dispatcher._gh_command", return_value=mock_proc):
         await poll_pr_merges(store, FAKE_REPO_PATH)
 
     task_manager = TaskManager(store)

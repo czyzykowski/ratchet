@@ -12,10 +12,10 @@ from core.store import InMemoryStore
 from worker.runner import merge_once
 
 PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
-PATCH_LOAD_DEPLOYMENT = "worker.runner.load_deployment_config"
-PATCH_SQUASH_MERGE = "worker.runner.squash_merge"
-PATCH_READ_INTENT = "worker.runner.read_intent"
-PATCH_LOAD_MERGE_CONFIG = "worker.runner.load_merge_config"
+PATCH_LOAD_DEPLOYMENT = "worker.dispatcher.load_deployment_config"
+PATCH_SQUASH_MERGE = "worker.dispatcher.squash_merge"
+PATCH_READ_INTENT = "worker.dispatcher.read_intent"
+PATCH_LOAD_MERGE_CONFIG = "worker.dispatcher.load_merge_config"
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -113,44 +113,16 @@ class TestDispatchForProjectMergeIntegration:
 
         success_result = MergeResult(success=True, new_sha="abc123")
 
+        # Call merge_once directly with project_id to verify signature works
         with (
-            patch("worker.runner.run_qa_once", new_callable=AsyncMock, return_value=False),
-            patch(
-                "worker.runner.merge_once",
-                new_callable=AsyncMock,
-                return_value=True,
-            ) as mock_merge,
-            patch(
-                "worker.runner.run_once",
-                new_callable=AsyncMock,
-                return_value=False,
-            ) as mock_run_once,
-            patch("worker.runner.compile_once", new_callable=AsyncMock),
-            patch("worker.runner.ProjectManager") as mock_pm_cls,
-            patch("worker.runner.recover_orphaned_tasks", new_callable=AsyncMock),
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
         ):
-            # Set up ProjectManager mock to return our project
-            mock_pm = AsyncMock()
-            mock_pm.list_projects.return_value = [project]
-            mock_pm_cls.return_value = mock_pm
+            result = await merge_once(store, _make_invoker(), project_id=project.id)
 
-            # Import notification_loop internals via direct function test
-            # We test _dispatch_for_project indirectly by checking the call pattern
-            # The function is a nested closure; test via module-level patches
-            # Instead, verify through the dispatch cycle logic directly
-            mock_merge.assert_not_called()
-            mock_run_once.assert_not_called()
-
-            # Call merge_once directly with project_id to verify signature works
-            with (
-                patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
-                patch(PATCH_SQUASH_MERGE, return_value=success_result),
-                patch(PATCH_READ_INTENT, return_value="intent"),
-                patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
-            ):
-                result = await merge_once(store, _make_invoker(), project_id=project.id)
-
-            assert result is True
+        assert result is True
 
     async def test_dispatch_for_project_skips_merge_when_qa_ran(self):
         """When QA returns True (work done), merge_once should NOT be called."""
@@ -188,33 +160,22 @@ class TestDispatchForProjectMergeIntegration:
         mock_merge.assert_called_once()
         mock_run_once.assert_called_once()
 
-    async def test_main_async_calls_merge_before_impl(self):
-        """_main_async should call merge between QA and impl."""
-        call_order: list[str] = []
+    async def test_main_async_calls_dispatch_all(self):
+        """_main_async should call dispatch_all which runs merge>qa>impl>compile."""
+        from worker.dispatcher import DispatchResult, ProjectDispatcher
 
-        async def fake_run_qa_once(store, invoker, **kwargs):
-            call_order.append("qa")
-            return False
+        dispatch_all_called = False
 
-        async def fake_merge_once(store, invoker, **kwargs):
-            call_order.append("merge")
-            return False
-
-        async def fake_run_once(store, invoker, caps, **kwargs):
-            call_order.append("impl")
-            return False
-
-        async def fake_compile_once(store):
-            call_order.append("compile")
+        async def fake_dispatch_all(self_disp, busy_projects=None):
+            nonlocal dispatch_all_called
+            dispatch_all_called = True
+            return [DispatchResult(action="idle", success=True)]
 
         async def fake_close_pool():
             pass
 
         with (
-            patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
-            patch("worker.runner.merge_once", side_effect=fake_merge_once),
-            patch("worker.runner.run_once", side_effect=fake_run_once),
-            patch("worker.runner.compile_once", side_effect=fake_compile_once),
+            patch.object(ProjectDispatcher, "dispatch_all", fake_dispatch_all),
             patch("core.db.close_pool", side_effect=fake_close_pool),
             patch("core.store.PostgresStore", return_value=InMemoryStore()),
             patch("worker.runner.ClaudeCodeInvoker", return_value=_make_invoker()),
@@ -223,44 +184,71 @@ class TestDispatchForProjectMergeIntegration:
 
             await _main_async()
 
-        assert call_order == ["merge", "qa", "impl", "compile"]
+        assert dispatch_all_called
 
-    async def test_main_async_skips_impl_when_qa_ran(self):
-        """_main_async: when QA does work, impl should be skipped."""
+    async def test_dispatch_calls_merge_before_qa_before_impl(self):
+        """ProjectDispatcher.dispatch calls merge>qa>impl in priority order."""
+        from worker.dispatcher import DispatchResult, ProjectDispatcher
+
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        invoker = _make_invoker()
+        dispatcher = ProjectDispatcher(store, invoker)
+
         call_order: list[str] = []
 
-        async def fake_run_qa_once(store, invoker, **kwargs):
-            call_order.append("qa")
-            return True  # QA did work
-
-        async def fake_merge_once(store, invoker, **kwargs):
+        async def fake_merge_once(self_disp, project_id=None):
             call_order.append("merge")
-            return False
+            return DispatchResult(action="idle", success=True)
 
-        async def fake_run_once(store, invoker, caps, **kwargs):
+        async def fake_qa_once(self_disp, project_id=None):
+            call_order.append("qa")
+            return DispatchResult(action="idle", success=True)
+
+        async def fake_impl_once(self_disp, project_id=None):
             call_order.append("impl")
-            return False
-
-        async def fake_compile_once(store):
-            call_order.append("compile")
-
-        async def fake_close_pool():
-            pass
+            return DispatchResult(action="idle", success=True)
 
         with (
-            patch("worker.runner.run_qa_once", side_effect=fake_run_qa_once),
-            patch("worker.runner.merge_once", side_effect=fake_merge_once),
-            patch("worker.runner.run_once", side_effect=fake_run_once),
-            patch("worker.runner.compile_once", side_effect=fake_compile_once),
-            patch("core.db.close_pool", side_effect=fake_close_pool),
-            patch("core.store.PostgresStore", return_value=InMemoryStore()),
-            patch("worker.runner.ClaudeCodeInvoker", return_value=_make_invoker()),
+            patch.object(ProjectDispatcher, "merge_once", fake_merge_once),
+            patch.object(ProjectDispatcher, "qa_once", fake_qa_once),
+            patch.object(ProjectDispatcher, "impl_once", fake_impl_once),
         ):
-            from worker.runner import _main_async
+            await dispatcher.dispatch(project.id)
 
-            await _main_async()
+        assert call_order == ["merge", "qa", "impl"]
 
-        assert call_order == ["merge", "qa"]  # merge first, then QA; no impl or compile
+    async def test_dispatch_skips_impl_when_qa_ran(self):
+        """ProjectDispatcher.dispatch: when QA does work, impl should be skipped."""
+        from worker.dispatcher import DispatchResult, ProjectDispatcher
+
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        invoker = _make_invoker()
+        dispatcher = ProjectDispatcher(store, invoker)
+
+        call_order: list[str] = []
+
+        async def fake_merge_once(self_disp, project_id=None):
+            call_order.append("merge")
+            return DispatchResult(action="idle", success=True)
+
+        async def fake_qa_once(self_disp, project_id=None):
+            call_order.append("qa")
+            return DispatchResult(action="qa", success=True)  # QA did work
+
+        async def fake_impl_once(self_disp, project_id=None):
+            call_order.append("impl")
+            return DispatchResult(action="idle", success=True)
+
+        with (
+            patch.object(ProjectDispatcher, "merge_once", fake_merge_once),
+            patch.object(ProjectDispatcher, "qa_once", fake_qa_once),
+            patch.object(ProjectDispatcher, "impl_once", fake_impl_once),
+        ):
+            await dispatcher.dispatch(project.id)
+
+        assert call_order == ["merge", "qa"]  # no impl
 
 
 class TestMergeOnceProjectIdFilter:

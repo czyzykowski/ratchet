@@ -11,6 +11,7 @@ import pytest
 from core import events as ev
 from core.invoker import InvocationResult
 from core.store import InMemoryStore
+from worker.dispatcher import DispatchResult, ProjectDispatcher
 from worker.runner import notification_loop
 
 
@@ -43,6 +44,10 @@ class _MockNotificationListener:
             yield item
 
 
+def _idle_result():
+    return DispatchResult(action="idle", success=True)
+
+
 @pytest.mark.asyncio
 async def test_refresh_called_after_startup_catchup() -> None:
     """store.refresh_views() is called after startup catchup completes."""
@@ -53,9 +58,9 @@ async def test_refresh_called_after_startup_catchup() -> None:
     mock_listener = _MockNotificationListener([])  # no notifications
 
     with (
-        patch("worker.runner.compile_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_qa_once", new=AsyncMock(return_value=False)),
+        patch.object(ProjectDispatcher, "dispatch", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "compile_once", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "recover_orphans", new=AsyncMock(return_value=0)),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
@@ -77,9 +82,9 @@ async def test_refresh_called_after_task_notification() -> None:
     mock_listener = _MockNotificationListener(notifications)
 
     with (
-        patch("worker.runner.compile_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_qa_once", new=AsyncMock(return_value=False)),
+        patch.object(ProjectDispatcher, "dispatch", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "compile_once", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "recover_orphans", new=AsyncMock(return_value=0)),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
@@ -101,9 +106,9 @@ async def test_refresh_called_after_compile_notification() -> None:
     mock_listener = _MockNotificationListener(notifications)
 
     with (
-        patch("worker.runner.compile_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_qa_once", new=AsyncMock(return_value=False)),
+        patch.object(ProjectDispatcher, "dispatch", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "compile_once", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "recover_orphans", new=AsyncMock(return_value=0)),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         await notification_loop(store, invoker, dsn="postgresql://fake/test")
@@ -128,9 +133,9 @@ async def test_refresh_errors_do_not_crash_notification_loop() -> None:
     mock_listener = _MockNotificationListener(notifications)
 
     with (
-        patch("worker.runner.compile_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_once", new=AsyncMock(return_value=False)),
-        patch("worker.runner.run_qa_once", new=AsyncMock(return_value=False)),
+        patch.object(ProjectDispatcher, "dispatch", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "compile_once", new=AsyncMock(return_value=_idle_result())),
+        patch.object(ProjectDispatcher, "recover_orphans", new=AsyncMock(return_value=0)),
         patch("worker.runner.NotificationListener", return_value=mock_listener),
     ):
         # Should not raise even though refresh_views always raises
