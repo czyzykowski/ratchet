@@ -34,11 +34,13 @@ class MergePipeline:
         managers: Managers,
         invoker: ClaudeCodeInvoker,
         task_finder: TaskFinder,
+        capabilities: list[str] | None = None,
     ) -> None:
         self._store = managers.store
         self._invoker = invoker
         self._task_finder = task_finder
         self._state_machine = managers.state_machine
+        self._capabilities = capabilities or []
 
     async def run(self, project_id: UUID | None = None) -> DispatchResult:
         """Single-pass auto-merge for local deployment mode."""
@@ -47,7 +49,7 @@ class MergePipeline:
         def _no_auto_merge_failed(task: Task, task_events: list[Any]) -> bool:
             return not any(
                 e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events
-            )
+            ) and set(task.required_capabilities).issubset(set(self._capabilities))
 
         candidates = await self._task_finder.find(
             statuses={ev.READY_FOR_DEPLOYMENT},

@@ -39,6 +39,7 @@ async def _setup_project(
 async def _setup_task(
     store: InMemoryStore,
     project_id: uuid.UUID,
+    required_capabilities: list[str] | None = None,
 ) -> uuid.UUID:
     """Create a task in READY_FOR_SPEC and register it under project_tasks."""
     task_id = uuid.uuid4()
@@ -48,7 +49,7 @@ async def _setup_task(
         "title": "Test task",
         "status": ev.READY_FOR_SPEC,
         "refinement_count": 0,
-        "required_capabilities": [],
+        "required_capabilities": required_capabilities or [],
     }
     await store.append_event(
         aggregate_id=task_id,
@@ -474,6 +475,66 @@ def _async_return(value):
     async def _inner():
         return value
     return _inner()
+
+
+class TestMergeOnceCapabilityFiltering:
+    async def test_should_match_task_with_no_required_capabilities(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id, required_capabilities=[])
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="abc123")
+
+        with (
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            result = await merge_once(store, invoker, local_capabilities=[])
+
+        assert result is True
+
+    async def test_should_match_task_with_matched_capabilities(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id, required_capabilities=["docker"])
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+        success_result = MergeResult(success=True, new_sha="abc123")
+
+        with (
+            patch(PATCH_SQUASH_MERGE, return_value=success_result),
+            patch(PATCH_READ_INTENT, return_value="intent"),
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_LOAD_MERGE_CONFIG, return_value=None),
+        ):
+            result = await merge_once(store, invoker, local_capabilities=["docker", "gpu"])
+
+        assert result is True
+
+    async def test_should_skip_task_with_unmatched_capabilities(self):
+        store = InMemoryStore()
+        _, project = await _setup_project(store)
+        task_id = await _setup_task(store, project.id, required_capabilities=["gpu"])
+        await _advance_to_ready_for_deployment(store, task_id)
+
+        invoker = _make_invoker()
+
+        with (
+            patch(PATCH_LOAD_DEPLOYMENT, return_value=_local_deployment_config()),
+            patch(PATCH_SQUASH_MERGE) as mock_merge,
+        ):
+            result = await merge_once(store, invoker, local_capabilities=[])
+
+        assert result is False
+        mock_merge.assert_not_called()
+        state_machine = TaskStateMachine(store)
+        status = await state_machine.get_current_status(task_id)
+        assert status == ev.READY_FOR_DEPLOYMENT
 
 
 class TestMergeOnceMultipleTasks:

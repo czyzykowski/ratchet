@@ -32,6 +32,7 @@ async def _setup_task(
     store: InMemoryStore,
     project_id: uuid.UUID,
     initial_status: str = ev.READY_FOR_SPEC,
+    required_capabilities: list[str] | None = None,
 ) -> uuid.UUID:
     task_id = uuid.uuid4()
     task_payload = {
@@ -40,6 +41,7 @@ async def _setup_task(
         "title": "Test task",
         "status": initial_status,
         "refinement_count": 0,
+        "required_capabilities": required_capabilities or [],
     }
     await store.append_event(
         aggregate_id=task_id,
@@ -165,3 +167,55 @@ async def test_run_qa_once_does_nothing_when_no_qa_tasks() -> None:
 
     # Should not raise
     await run_qa_once(store)
+
+
+# ---------------------------------------------------------------------------
+# QAPipeline capability filtering
+# ---------------------------------------------------------------------------
+
+
+async def test_qa_pipeline_matches_task_with_no_required_capabilities() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id, required_capabilities=[])
+    await _setup_spec(store, task_id)
+    await _advance_task_to_ready_for_qa(store, task_id)
+
+    with patch("worker.pipelines.qa.load_qa_config", return_value=None):
+        result = await run_qa_once(store, local_capabilities=[])
+
+    assert result is True
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.READY_FOR_DEPLOYMENT
+
+
+async def test_qa_pipeline_matches_task_with_matched_capabilities() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id, required_capabilities=["docker"])
+    await _setup_spec(store, task_id)
+    await _advance_task_to_ready_for_qa(store, task_id)
+
+    with patch("worker.pipelines.qa.load_qa_config", return_value=None):
+        result = await run_qa_once(store, local_capabilities=["docker", "gpu"])
+
+    assert result is True
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.READY_FOR_DEPLOYMENT
+
+
+async def test_qa_pipeline_skips_task_with_unmatched_capabilities() -> None:
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id, required_capabilities=["gpu"])
+    await _setup_spec(store, task_id)
+    await _advance_task_to_ready_for_qa(store, task_id)
+
+    result = await run_qa_once(store, local_capabilities=[])
+
+    assert result is False
+    state_machine = TaskStateMachine(store)
+    status = await state_machine.get_current_status(task_id)
+    assert status == ev.READY_FOR_QA

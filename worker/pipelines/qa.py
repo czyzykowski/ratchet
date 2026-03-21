@@ -43,12 +43,14 @@ class QAPipeline:
         managers: Managers,
         invoker: ClaudeCodeInvoker,
         task_finder: TaskFinder,
+        capabilities: list[str] | None = None,
     ) -> None:
         self._store = managers.store
         self._invoker = invoker
         self._task_finder = task_finder
         self._spec_manager = managers.specs
         self._state_machine = managers.state_machine
+        self._capabilities = capabilities or []
 
     async def run(self, project_id: UUID | None = None) -> DispatchResult:
         from worker.dispatcher import DispatchResult  # runtime import to avoid circular
@@ -56,6 +58,9 @@ class QAPipeline:
         candidates = await self._task_finder.find(
             statuses={ev.READY_FOR_QA},
             project_id=project_id,
+            predicate=lambda t, _: set(t.required_capabilities).issubset(
+                set(self._capabilities)
+            ),
         )
 
         task: Task | None = None

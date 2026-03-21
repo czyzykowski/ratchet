@@ -56,8 +56,8 @@ class ProjectDispatcher:
         from worker.pipelines.qa import QAPipeline
 
         self._impl = ImplPipeline(m, invoker, self._task_finder, self._capabilities)
-        self._qa = QAPipeline(m, invoker, self._task_finder)
-        self._merge = MergePipeline(m, invoker, self._task_finder)
+        self._qa = QAPipeline(m, invoker, self._task_finder, self._capabilities)
+        self._merge = MergePipeline(m, invoker, self._task_finder, self._capabilities)
 
     async def _find_tasks(
         self,

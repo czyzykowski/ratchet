@@ -108,16 +108,18 @@ async def get_next_qa_task(
     project_manager: object,
     spec_manager: object,
     state_machine: object,
+    local_capabilities: list[str] = [],
     project_id: UUID | None = None,
 ) -> tuple[Any, ...] | None:
     """Backwards-compatible wrapper."""
     from core.invoker import ClaudeCodeInvoker as _Invoker
     from core.spec_manager import SpecManager
     invoker = _Invoker(store=store)
-    dispatcher = ProjectDispatcher(store, invoker)
+    dispatcher = ProjectDispatcher(store, invoker, local_capabilities)
     candidates = await dispatcher._find_tasks(
         statuses={"ready_for_qa"},
         project_id=project_id,
+        predicate=lambda t, _: set(t.required_capabilities).issubset(set(local_capabilities)),
     )
     sm = SpecManager(store)
     for t, p, _ in candidates:
@@ -131,12 +133,13 @@ async def get_next_qa_task(
 async def run_qa_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
+    local_capabilities: list[str] = [],
     project_id: UUID | None = None,
 ) -> bool:
     """Backwards-compatible wrapper around ProjectDispatcher.qa_once."""
     if invoker is None:
         invoker = ClaudeCodeInvoker(store=store)
-    dispatcher = ProjectDispatcher(store, invoker)
+    dispatcher = ProjectDispatcher(store, invoker, local_capabilities)
     result = await dispatcher.qa_once(project_id=project_id)
     return result.action != "idle"
 
@@ -144,10 +147,11 @@ async def run_qa_once(
 async def merge_once(
     store: Store,
     invoker: ClaudeCodeInvoker,
+    local_capabilities: list[str] = [],
     project_id: UUID | None = None,
 ) -> bool:
     """Backwards-compatible wrapper around ProjectDispatcher.merge_once."""
-    dispatcher = ProjectDispatcher(store, invoker)
+    dispatcher = ProjectDispatcher(store, invoker, local_capabilities)
     result = await dispatcher.merge_once(project_id=project_id)
     return result.action != "idle" and result.success
 
