@@ -22,6 +22,7 @@ from core.qa_runner import (
     load_merge_config,
     run_merge_steps,
 )
+from worker.capability_check import capabilities_met
 from worker.event_helpers import gh_command
 from worker.task_finder import TaskFinder
 
@@ -49,7 +50,7 @@ class MergePipeline:
         def _no_auto_merge_failed(task: Task, task_events: list[Any]) -> bool:
             return not any(
                 e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events
-            ) and set(task.required_capabilities).issubset(set(self._capabilities))
+            )
 
         candidates = await self._task_finder.find(
             statuses={ev.READY_FOR_DEPLOYMENT},
@@ -57,9 +58,11 @@ class MergePipeline:
             predicate=_no_auto_merge_failed,
         )
 
-        # Post-filter: deployment mode, execution branch
+        # Post-filter: deployment mode, execution branch, capabilities
         merge_candidates: list[tuple[Task, str, str, str, str]] = []
         for task, project, _ in candidates:
+            if not capabilities_met(task, project, self._capabilities):
+                continue
             ratchet_yaml = (
                 project.ratchet_yaml if project.config_source == "db" else None
             )

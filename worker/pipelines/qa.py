@@ -26,6 +26,7 @@ from core.qa_runner import (
     run_auto_fixes,
     run_qa_steps,
 )
+from worker.capability_check import capabilities_met
 from worker.event_helpers import get_qa_fix_attempts
 from worker.task_finder import TaskFinder
 from worker.worktree import (
@@ -58,15 +59,14 @@ class QAPipeline:
         candidates = await self._task_finder.find(
             statuses={ev.READY_FOR_QA},
             project_id=project_id,
-            predicate=lambda t, _: set(t.required_capabilities).issubset(
-                set(self._capabilities)
-            ),
         )
 
         task: Task | None = None
         project: Project | None = None
         spec: Spec | None = None
         for t, p, _ in candidates:
+            if not capabilities_met(t, p, self._capabilities):
+                continue
             s = await self._spec_manager.get_current_spec(t.id)
             if s is None:
                 logger.warning("Task %s has no spec assigned, skipping", t.id)

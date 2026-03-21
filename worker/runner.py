@@ -52,10 +52,10 @@ async def get_next_task(
     from core.invoker import ClaudeCodeInvoker as _Invoker
     invoker = _Invoker(store=store)
     dispatcher = ProjectDispatcher(store, invoker, local_capabilities)
+    from worker.capability_check import capabilities_met
     candidates = await dispatcher._find_tasks(
         statuses={"ready_for_implementation", "waiting_for_input"},
         project_id=project_id,
-        predicate=lambda t, _: set(t.required_capabilities).issubset(set(local_capabilities)),
         skip_project_if_status="in_progress",
     )
     from core import qa_manager
@@ -64,6 +64,8 @@ async def get_next_task(
     from core.task_manager import TaskManager
     tm = TaskManager(store)
     for t, p, _task_events in candidates:
+        if not capabilities_met(t, p, local_capabilities):
+            continue
         if t.status == "waiting_for_input":
             pending = await qa_manager.get_pending_question(store, t.id)
             if pending is not None:
@@ -116,13 +118,15 @@ async def get_next_qa_task(
     from core.spec_manager import SpecManager
     invoker = _Invoker(store=store)
     dispatcher = ProjectDispatcher(store, invoker, local_capabilities)
+    from worker.capability_check import capabilities_met
     candidates = await dispatcher._find_tasks(
         statuses={"ready_for_qa"},
         project_id=project_id,
-        predicate=lambda t, _: set(t.required_capabilities).issubset(set(local_capabilities)),
     )
     sm = SpecManager(store)
     for t, p, _ in candidates:
+        if not capabilities_met(t, p, local_capabilities):
+            continue
         spec = await sm.get_current_spec(t.id)
         if spec is None:
             continue

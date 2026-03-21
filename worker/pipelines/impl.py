@@ -19,6 +19,7 @@ from core.managers import Managers
 from core.models import Project, Spec, Task
 from core.qa_runner import check_baseline_qa
 from core.task_executor import TaskExecutor
+from worker.capability_check import capabilities_met
 from worker.event_helpers import (
     apply_execution_outcome,
     has_pending_baseline_qa_failure,
@@ -57,9 +58,6 @@ class ImplPipeline:
         candidates = await self._task_finder.find(
             statuses={ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT},
             project_id=project_id,
-            predicate=lambda t, _: set(t.required_capabilities).issubset(
-                set(self._capabilities)
-            ),
             skip_project_if_status=ev.IN_PROGRESS,
         )
 
@@ -68,6 +66,8 @@ class ImplPipeline:
         project: Project | None = None
         spec: Spec | None = None
         for t, p, task_events in candidates:
+            if not capabilities_met(t, p, self._capabilities):
+                continue
             if t.status == ev.WAITING_FOR_INPUT:
                 pending = await qa_manager.get_pending_question(self._store, t.id)
                 if pending is not None:

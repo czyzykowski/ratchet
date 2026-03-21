@@ -6,6 +6,7 @@
 - `core/claude_subprocess.py` — unified Claude subprocess invocation with `run()` (blocking) and `start()` (non-blocking with activity tracking)
 
 ### Changed
+- Capability matching now merges task + project `required_capabilities` at dispatch time via `worker/capability_check.py`
 - `core/invoker.py` uses `claude_subprocess.start()` instead of raw `subprocess.Popen`
 - `core/compiler.py` uses `claude_subprocess.run()` instead of raw `subprocess.Popen`
 - `core/review_engine.py` uses `claude_subprocess.run()` instead of raw `subprocess.run`; removed `USE_NIX_DEVELOP` env var
