@@ -148,7 +148,7 @@ class RemoteWorkerClient:
             )
 
             invoker = ClaudeCodeInvoker(store=InMemoryStore())
-            result = invoker.invoke(context)
+            result = invoker.invoke(context, allow_project_root=True)
 
             if self._cancel_flag:
                 return
