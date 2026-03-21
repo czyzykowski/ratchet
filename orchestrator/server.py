@@ -29,7 +29,7 @@ from core.remote_protocol import (
 from core.state_machine import TaskStateMachine
 from core.store import PostgresStore, Store
 from core.task_manager import TaskManager
-from orchestrator.dispatcher import JobDispatcher
+from orchestrator.dispatcher import JobDispatcher, dispatch_loop
 from orchestrator.registry import WorkerConnection, WorkerRegistry
 
 logger = logging.getLogger(__name__)
@@ -221,7 +221,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     store = PostgresStore()
     registry = WorkerRegistry()
     dispatcher = JobDispatcher(registry)
-    dispatch_task = asyncio.create_task(dispatcher.dispatch_loop())
+    dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
 
     app.state.store = store
     app.state.registry = registry
@@ -281,6 +281,11 @@ async def ws_worker(websocket: WebSocket) -> None:
         return
 
     registry.register(worker_id, incoming.capabilities, websocket)
+    logger.info(
+        "Worker %s registered with capabilities: %s",
+        worker_id,
+        incoming.capabilities or "(none)",
+    )
     ack = OrchestratorAckMessage(
         type="orchestrator_ack", worker_id=worker_id, accepted=True, message="registered"
     )
