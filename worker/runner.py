@@ -14,7 +14,6 @@ from core import events as ev
 from core import qa_manager
 from core.context_assembler import (
     ContextAssembler,
-    ContextAssemblyError,
     ExecutionContext,
     read_intent,
 )
@@ -39,6 +38,7 @@ from core.qa_runner import (
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
+from core.task_executor import ExecutionOutcome, ExecutionResult, TaskExecutor
 from core.task_manager import TaskManager
 from worker.listener import NotificationListener
 
@@ -226,6 +226,21 @@ def _should_skip_baseline_qa(task_events: list[Any]) -> bool:
     return last_failed_seq is None or last_force_seq > last_failed_seq
 
 
+async def _apply_execution_outcome(
+    state_machine: TaskStateMachine,
+    task: Task,
+    result: ExecutionResult,
+) -> None:
+    """Translate an ExecutionResult into task state transitions."""
+    if result.outcome == ExecutionOutcome.COMPLETED:
+        await state_machine.transition(task.id, ev.READY_FOR_QA)
+    else:
+        failure_reason = result.failure_reason or result.outcome.value
+        await state_machine.transition(
+            task.id, ev.BLOCKED, extra_payload={"failure_reason": failure_reason}
+        )
+
+
 async def run_once(
     store: Store,
     invoker: ClaudeCodeInvoker | None = None,
@@ -257,7 +272,6 @@ async def run_once(
     # Resume path for waiting_for_input tasks
     if task.status == ev.WAITING_FOR_INPUT:
         execution_manager = ExecutionManager(store, project.local_path)
-        context_assembler = ContextAssembler(store)
         execution = await execution_manager.get_current_execution(task.id)
         if execution is None:
             logger.error(
@@ -268,45 +282,13 @@ async def run_once(
             )
             await state_machine.transition(task.id, ev.BLOCKED)
             return True
-        execution_id = execution.id
         await state_machine.transition(
             task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
         )
-        logger.info("Resuming execution after input: task=%s execution=%s", task.id, execution_id)
-        try:
-            context = await context_assembler.assemble(execution_id, project)
-        except ContextAssemblyError as exc:
-            failure_reason = str(exc)
-            logger.error(
-                "Context assembly failed: task=%s execution=%s reason=%s",
-                task.id,
-                execution_id,
-                failure_reason,
-            )
-            await execution_manager.fail_execution(execution_id, failure_reason)
-            await state_machine.transition(task.id, ev.BLOCKED)
-            return True
-        try:
-            invocation_result = await asyncio.to_thread(invoker.invoke, context)
-        except Exception as exc:
-            failure_reason = f"unexpected error: {exc}"
-            logger.error("Unexpected error: task=%s error=%s", task.id, str(exc))
-            await execution_manager.fail_execution(execution_id, failure_reason)
-            await state_machine.transition(task.id, ev.BLOCKED)
-            raise
-        if invocation_result.status == "completed":
-            await execution_manager.complete_execution(execution_id)
-            await state_machine.transition(task.id, ev.READY_FOR_QA)
-            logger.info(
-                "Execution completed: task=%s trace_id=%s",
-                task.id,
-                invocation_result.trace_id,
-            )
-        elif invocation_result.status in ("failed", "crashed"):
-            failure_reason = invocation_result.failure_reason or invocation_result.status
-            await execution_manager.fail_execution(execution_id, failure_reason)
-            await state_machine.transition(task.id, ev.BLOCKED)
-            logger.info("Execution failed: task=%s reason=%s", task.id, failure_reason)
+        logger.info("Resuming execution after input: task=%s execution=%s", task.id, execution.id)
+        executor = TaskExecutor(execution_manager, ContextAssembler(store), invoker)
+        exec_result = await executor.resume(task, project, execution.id)
+        await _apply_execution_outcome(state_machine, task, exec_result)
         return True
 
     # Check if force-execute was requested after last baseline failure
@@ -353,7 +335,6 @@ async def run_once(
                 )
             return False
     execution_manager = ExecutionManager(store, project.local_path)
-    context_assembler = ContextAssembler(store)
 
     logger.info(
         "Starting execution: task=%s project=%s spec=%s",
@@ -364,73 +345,18 @@ async def run_once(
 
     await state_machine.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
 
-    try:
-        execution = await execution_manager.start_execution(task.id, spec.id, project)
-    except OSError as exc:
-        failure_reason = str(exc)
-        logger.error(
-            "Environment preparation failed: task=%s reason=%s", task.id, failure_reason
-        )
-        await state_machine.transition(task.id, ev.BLOCKED)
-        return True
+    executor = TaskExecutor(execution_manager, ContextAssembler(store), invoker)
+    exec_result = await executor.execute(task, spec, project)
 
-    execution_id = execution.id
-    logger.info("Execution started: task=%s execution=%s", task.id, execution_id)
+    logger.info(
+        "Execution %s: task=%s execution=%s trace=%s",
+        exec_result.outcome.value,
+        task.id,
+        exec_result.execution_id,
+        exec_result.trace_id,
+    )
 
-    try:
-        context = await context_assembler.assemble(execution_id, project)
-    except ContextAssemblyError as exc:
-        failure_reason = str(exc)
-        logger.error(
-            "Context assembly failed: task=%s execution=%s reason=%s",
-            task.id,
-            execution_id,
-            failure_reason,
-        )
-        await execution_manager.fail_execution(execution_id, failure_reason)
-        await state_machine.transition(task.id, ev.BLOCKED)
-        return True
-
-    if os.environ.get('RATCHET_DEBUG') == '1':
-        print(f'[DEBUG] Assembled prompt ({len(context.prompt)} chars):')
-        print(context.prompt[:2000])  # first 2000 chars to avoid overwhelming output
-        print(f'[DEBUG] Worktree: {context.worktree_path}')
-        print('[DEBUG] Command: claude -p <prompt> --allowedTools Bash,Read,Write,Edit,Glob,Grep')
-
-    try:
-        invocation_result = await asyncio.to_thread(invoker.invoke, context)
-    except Exception as exc:
-        failure_reason = f"unexpected error: {exc}"
-        logger.error("Unexpected error: task=%s error=%s", task.id, str(exc))
-        await execution_manager.fail_execution(execution_id, failure_reason)
-        await state_machine.transition(task.id, ev.BLOCKED)
-        raise
-
-    if os.environ.get('RATCHET_DEBUG') == '1':
-        print(f'[DEBUG] Invocation status: {invocation_result.status}')
-        print(f'[DEBUG] Trace ID: {invocation_result.trace_id}')
-        print('[DEBUG] Raw output preview:')
-        try:
-            trace = await store.get_trace(invocation_result.execution_id)
-            trace_content = (trace.content[:1000] if trace is not None else '[no trace]')
-            print(trace_content)
-        except Exception:
-            print('[DEBUG] Could not read trace')
-
-    if invocation_result.status == "completed":
-        await execution_manager.complete_execution(execution_id)
-        await state_machine.transition(task.id, ev.READY_FOR_QA)
-        logger.info(
-            "Execution completed: task=%s trace_id=%s",
-            task.id,
-            invocation_result.trace_id,
-        )
-    elif invocation_result.status in ("failed", "crashed"):
-        failure_reason = invocation_result.failure_reason or invocation_result.status
-        await execution_manager.fail_execution(execution_id, failure_reason)
-        await state_machine.transition(task.id, ev.BLOCKED)
-        logger.info("Execution failed: task=%s reason=%s", task.id, failure_reason)
-
+    await _apply_execution_outcome(state_machine, task, exec_result)
     return True
 
 
