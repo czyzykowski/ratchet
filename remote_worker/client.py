@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import logging
 import shutil
 import subprocess
 import tempfile
+import traceback
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -26,6 +28,8 @@ from core.remote_protocol import (
     parse_orchestrator_message,
 )
 from core.store import InMemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeAuthError(Exception):
@@ -107,7 +111,22 @@ class RemoteWorkerClient:
                     if not msg.accepted:
                         raise RuntimeError(f"Registration rejected: {msg.message}")
                 elif isinstance(msg, AssignTaskMessage):
-                    await self._handle_assignment(ws, msg)
+                    try:
+                        await self._handle_assignment(ws, msg)
+                    except Exception:
+                        logger.exception("Task execution failed for task=%s", msg.task_id)
+                        try:
+                            failed = ExecutionFailedMessage(
+                                type="execution_failed",
+                                worker_id=self._worker_id,
+                                task_id=msg.task_id,
+                                execution_id="",
+                                failure_reason=traceback.format_exc(),
+                                timestamp_utc=datetime.now(UTC).isoformat(),
+                            )
+                            await ws.send(failed.model_dump_json())
+                        except Exception:
+                            logger.exception("Failed to send error report")
                 elif isinstance(msg, CancelTaskMessage):
                     self._cancel_flag = True
 

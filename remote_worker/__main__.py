@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import logging
 import sys
 import time
 
@@ -21,6 +22,8 @@ def main() -> None:
         help="Comma-separated capability list",
     )
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     try:
         verify_claude_auth()
