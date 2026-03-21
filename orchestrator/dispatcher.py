@@ -72,8 +72,15 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         worker = registry.find_available(required)
         if worker is None:
             continue
-        await _dispatch_one(task, project, spec, worker, store, registry)
-        count += 1
+        try:
+            await _dispatch_one(task, project, spec, worker, store, registry)
+            count += 1
+        except Exception:
+            logger.exception(
+                "dispatch_pending: failed to dispatch task=%s to worker=%s",
+                task.id,
+                worker.worker_id,
+            )
 
     return count
 
