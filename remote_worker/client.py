@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import shutil
@@ -172,7 +173,9 @@ class RemoteWorkerClient:
 
             print(f"[remote-worker] Invoking Claude in {tmpdir}", flush=True)
             invoker = ClaudeCodeInvoker(store=InMemoryStore())
-            result = invoker.invoke(context, allow_project_root=True)
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: invoker.invoke(context, allow_project_root=True)
+            )
             print(f"[remote-worker] Invocation result: {result.status}", flush=True)
 
             if self._cancel_flag:
