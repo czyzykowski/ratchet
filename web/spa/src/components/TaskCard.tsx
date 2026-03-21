@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { BoardTask } from '../hooks/useBoard'
+import { capabilityColor } from '../utils/capabilityColor'
 
 interface TaskCardProps {
   task: BoardTask
@@ -96,6 +97,18 @@ export function TaskCard({ task, onOpen }: TaskCardProps) {
           <span className="warning-text">&#9888; {task.unmet_deps.length} dep(s)</span>
         )}
       </div>
+      {task.required_capabilities.length > 0 && (
+        <div className="task-meta" style={{ marginTop: '0.25rem', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {task.required_capabilities.map(cap => {
+            const colors = capabilityColor(cap)
+            return (
+              <span key={cap} className="badge" style={{ background: colors.background, color: colors.color }}>
+                {cap}
+              </span>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

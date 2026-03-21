@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import { Markdown } from '../components/Markdown'
+import { capabilityColor } from '../utils/capabilityColor'
 
 interface TaskDetail {
   id: string
@@ -148,6 +149,21 @@ export function TaskDetailPage() {
               <Link to={`/features/${data.feature_id}`} style={{ color: '#7eb8f7' }}>
                 {data.feature_title}
               </Link>
+            </div>
+          </div>
+        )}
+        {currentCapabilities.length > 0 && (
+          <div className="modal-field">
+            <div className="modal-label">Capabilities</div>
+            <div className="modal-value" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+              {currentCapabilities.map(cap => {
+                const colors = capabilityColor(cap)
+                return (
+                  <span key={cap} className="badge" style={{ background: colors.background, color: colors.color }}>
+                    {cap}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}

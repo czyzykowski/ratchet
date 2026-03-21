@@ -4,6 +4,7 @@ import { useBoard } from '../hooks/useBoard'
 import { useActivity } from '../hooks/useActivity'
 import { useSSE } from '../hooks/useSSE'
 import { TaskDetailModal } from '../components/TaskDetailModal'
+import { capabilityColor } from '../utils/capabilityColor'
 
 const ATTENTION_STATUSES = ['ready_for_spec', 'blocked', 'ready_for_merge', 'waiting_for_input']
 
@@ -92,6 +93,14 @@ export function FocusPage() {
               {task.baseline_qa_failure && (
                 <span className="badge badge-baseline-qa-failed">Baseline QA failed</span>
               )}
+              {task.required_capabilities.map(cap => {
+                const colors = capabilityColor(cap)
+                return (
+                  <span key={cap} className="badge" style={{ background: colors.background, color: colors.color }}>
+                    {cap}
+                  </span>
+                )
+              })}
               <span className="attention-title">{task.title}</span>
               <span className="attention-meta">{task.project_name}</span>
               <span className="attention-meta">{formatRelativeTime(task.updated_at)}</span>

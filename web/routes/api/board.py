@@ -110,6 +110,7 @@ async def get_board(request: Request) -> JSONResponse:
                 "refinement_count": task.get("refinement_count", 0),
                 "unmet_deps": unmet,
                 "baseline_qa_failure": baseline_qa_failure,
+                "required_capabilities": task.get("required_capabilities", []),
             }
         )
 

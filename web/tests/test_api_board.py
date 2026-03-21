@@ -121,3 +121,72 @@ def test_should_return_empty_groups_when_no_tasks(
     assert "columns" in data
     for col in data["columns"]:
         assert col["tasks"] == []
+
+
+async def _seed_task_with_capabilities(
+    store: InMemoryStore,
+    task_id: UUID,
+    project_id: UUID,
+    title: str,
+    capabilities: list[str],
+) -> None:
+    await store.append_event(
+        aggregate_id=project_id,
+        aggregate_type="project_tasks",
+        event_type=ev.TASK_CREATED,
+        payload={"task_id": str(task_id), "project_id": str(project_id), "title": title},
+    )
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task",
+        event_type=ev.TASK_CREATED,
+        payload={
+            "task_id": str(task_id),
+            "project_id": str(project_id),
+            "title": title,
+            "status": ev.READY_FOR_SPEC,
+            "required_capabilities": capabilities,
+        },
+    )
+
+
+def test_should_return_required_capabilities_when_task_has_capabilities(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task_with_capabilities(store, task_id, project_id, "GPU Task", ["gpu", "linux"])
+    )
+
+    response = client.get("/api/board")
+    assert response.status_code == 200
+    data = response.json()
+
+    columns = {c["status"]: c for c in data["columns"]}
+    tasks = columns[ev.READY_FOR_SPEC]["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["required_capabilities"] == ["gpu", "linux"]
+
+
+def test_should_return_empty_required_capabilities_when_task_has_none(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Plain Task", ev.READY_FOR_SPEC)
+    )
+
+    response = client.get("/api/board")
+    assert response.status_code == 200
+    data = response.json()
+
+    columns = {c["status"]: c for c in data["columns"]}
+    tasks = columns[ev.READY_FOR_SPEC]["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["required_capabilities"] == []

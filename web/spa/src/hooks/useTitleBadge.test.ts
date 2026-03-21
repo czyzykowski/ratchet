@@ -18,6 +18,7 @@ function makeBoardData(waitingCount: number): { data: BoardData } {
     refinement_count: 0,
     unmet_deps: [],
     baseline_qa_failure: null,
+    required_capabilities: [],
   }))
 
   return {

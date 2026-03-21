@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreateSpecChat } from './CreateSpecChat'
 import { Markdown } from './Markdown'
 import { fetchTaskQA, submitAnswer } from '../api/qa'
+import { capabilityColor } from '../utils/capabilityColor'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -20,6 +21,7 @@ interface TaskDetail {
   current_spec_id: string | null
   refinement_count: number
   depends_on: string[]
+  required_capabilities: string[]
 }
 
 interface Spec {
@@ -359,6 +361,21 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                     <Link to={`/features/${data.feature_id}`} style={{ color: '#7eb8f7' }}>
                       {data.feature_title}
                     </Link>
+                  </div>
+                </div>
+              )}
+              {(data.task.required_capabilities ?? []).length > 0 && (
+                <div className="modal-field">
+                  <div className="modal-label">Capabilities</div>
+                  <div className="modal-value" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                    {(data.task.required_capabilities ?? []).map(cap => {
+                      const colors = capabilityColor(cap)
+                      return (
+                        <span key={cap} className="badge" style={{ background: colors.background, color: colors.color }}>
+                          {cap}
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
               )}

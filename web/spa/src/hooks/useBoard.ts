@@ -11,6 +11,7 @@ export interface BoardTask {
   refinement_count: number
   unmet_deps: string[]
   baseline_qa_failure: string | null
+  required_capabilities: string[]
 }
 
 export interface BoardColumn {
