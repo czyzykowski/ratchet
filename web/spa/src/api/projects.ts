@@ -12,6 +12,7 @@ export interface Project {
   claude_md: string | null
   intent_md: string | null
   ratchet_yaml: string | null
+  required_capabilities: string[]
 }
 
 export interface Task {
@@ -32,6 +33,7 @@ export interface UpdateProjectBody {
   claude_md?: string | null
   intent_md?: string | null
   ratchet_yaml?: string | null
+  required_capabilities?: string[]
 }
 
 export async function fetchProjects(): Promise<Project[]> {
@@ -52,6 +54,7 @@ export async function createProject(
     claude_md?: string | null
     intent_md?: string | null
     ratchet_yaml?: string | null
+    required_capabilities?: string[]
   }
 ): Promise<Project> {
   const data = await apiFetch<{ project: Project }>('/api/projects', {

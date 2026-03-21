@@ -261,7 +261,67 @@ def test_should_use_explicit_repo_url_when_provided(
         repo_url="https://github.com/org/repo",
         local_path="/tmp/local",
         config_source="disk",
+        required_capabilities=[],
     )
+
+
+def test_should_create_project_with_required_capabilities(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    with patch(
+        "web.routes.api.projects.ProjectManager.register_project",
+        new_callable=AsyncMock,
+    ) as mock_register:
+        project_id = uuid4()
+        now = datetime.now(UTC)
+        mock_register.return_value = Project(
+            id=project_id,
+            name="Cap Project",
+            repo_url="/tmp/cap",
+            local_path="/tmp/cap",
+            status="active",
+            required_capabilities=["osx", "gpu"],
+            created_at=now,
+            updated_at=now,
+        )
+        response = client.post(
+            "/api/projects",
+            json={
+                "name": "Cap Project",
+                "path": "/tmp/cap",
+                "required_capabilities": ["osx", "gpu"],
+            },
+        )
+
+    assert response.status_code == 201
+    mock_register.assert_called_once_with(
+        name="Cap Project",
+        repo_url="/tmp/cap",
+        local_path="/tmp/cap",
+        config_source="disk",
+        required_capabilities=["osx", "gpu"],
+    )
+
+
+def test_should_update_project_with_required_capabilities(
+    client: TestClient, store: InMemoryStore
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "Original"))
+
+    response = client.patch(
+        f"/api/projects/{project_id}",
+        json={
+            "name": "Updated",
+            "repo_url": "/tmp/updated",
+            "local_path": "/tmp/updated",
+            "config_source": "disk",
+            "required_capabilities": ["docker"],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["project"]["required_capabilities"] == ["docker"]
 
 
 def test_should_create_project_with_config_source_db_and_file_contents(

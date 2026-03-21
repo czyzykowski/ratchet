@@ -185,35 +185,47 @@ async def create_task(body: CreateTaskBody, request: Request) -> JSONResponse:
     store = request.app.state.store
     project_id = UUID(body.project_id)
     task_manager = TaskManager(store)
+    pm = ProjectManager(store)
 
-    task = await task_manager.create_task(project_id, body.title)
+    project = await pm.get_project(project_id)
+    project_capabilities = project.required_capabilities if project is not None else []
+
+    task = await task_manager.create_task(
+        project_id, body.title, project_capabilities=project_capabilities
+    )
     return JSONResponse({"task": task.model_dump(mode="json")}, status_code=201)
 
 
 class UpdateTaskBody(BaseModel):
-    title: str
+    title: str | None = None
+    required_capabilities: list[str] | None = None
 
 
 @router.patch("/tasks/{task_id}")
 async def update_task_title(task_id: UUID, body: UpdateTaskBody, request: Request) -> JSONResponse:
     store = request.app.state.store
-
-    if not body.title.strip():
-        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    task_manager = TaskManager(store)
 
     task_events = await store.get_events(task_id, "task")
     if not task_events:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_TITLE_CHANGED,
-        payload={"title": body.title},
-    )
+    if body.title is not None:
+        if not body.title.strip():
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        await store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_TITLE_CHANGED,
+            payload={"title": body.title},
+        )
+
+    if body.required_capabilities is not None:
+        await task_manager.update_task_capabilities(task_id, body.required_capabilities)
 
     broadcast_task_updated(request.app)
-    return JSONResponse({"id": str(task_id), "title": body.title})
+    task = await task_manager.get_task(task_id)
+    return JSONResponse({"id": str(task_id), "title": task.title if task else None})
 
 
 class AssignSpecBody(BaseModel):

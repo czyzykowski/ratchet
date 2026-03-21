@@ -16,6 +16,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const [claudeMd, setClaudeMd] = useState('')
   const [intentMd, setIntentMd] = useState('')
   const [ratchetYaml, setRatchetYaml] = useState('')
+  const [capabilities, setCapabilities] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -30,12 +31,16 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     setError(null)
     setSubmitting(true)
     try {
+      const caps = capabilities.trim()
+        ? capabilities.split(',').map(c => c.trim()).filter(Boolean)
+        : []
       await createProject(name, path, {
         config_source: configSource,
         repo_url: repoUrl || undefined,
         claude_md: configSource === 'db' ? claudeMd || null : null,
         intent_md: configSource === 'db' ? intentMd || null : null,
         ratchet_yaml: configSource === 'db' ? ratchetYaml || null : null,
+        required_capabilities: caps,
       })
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
       setName('')
@@ -45,6 +50,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
       setClaudeMd('')
       setIntentMd('')
       setRatchetYaml('')
+      setCapabilities('')
       onClose()
     } catch (err: unknown) {
       const e = err as { detail?: string; message?: string }
@@ -105,6 +111,16 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
               <option value="disk">disk</option>
               <option value="db">db</option>
             </select>
+          </div>
+          <div className="modal-field">
+            <label className="modal-label" htmlFor="project-capabilities">Required Capabilities <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional, comma-separated)</span></label>
+            <input
+              id="project-capabilities"
+              className="form-input"
+              value={capabilities}
+              onChange={e => setCapabilities(e.target.value)}
+              placeholder="e.g. osx, gpu"
+            />
           </div>
           {configSource === 'db' && (
             <>

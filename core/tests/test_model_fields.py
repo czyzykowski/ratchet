@@ -23,6 +23,7 @@ def test_project_fields() -> None:
         "claude_md",
         "intent_md",
         "ratchet_yaml",
+        "required_capabilities",
     }
     assert set(Project.model_fields) == expected
 

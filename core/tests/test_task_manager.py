@@ -148,6 +148,73 @@ async def test_create_task_with_required_capabilities(manager: TaskManager) -> N
 
 
 @pytest.mark.asyncio
+async def test_create_task_merges_project_and_task_capabilities(manager: TaskManager) -> None:
+    """should union project_capabilities and required_capabilities without duplicates"""
+    project_id = uuid4()
+    task = await manager.create_task(
+        project_id,
+        "Merged Caps",
+        required_capabilities=["gpu", "docker"],
+        project_capabilities=["osx", "gpu"],
+    )
+    # union: osx + gpu + docker (gpu deduplicated)
+    assert set(task.required_capabilities) == {"osx", "gpu", "docker"}
+    replayed = await manager.get_task(task.id)
+    assert replayed is not None
+    assert set(replayed.required_capabilities) == {"osx", "gpu", "docker"}
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_only_project_capabilities(manager: TaskManager) -> None:
+    """should inherit project capabilities when task has none of its own"""
+    project_id = uuid4()
+    task = await manager.create_task(
+        project_id, "Inherited", project_capabilities=["osx", "windows"]
+    )
+    assert set(task.required_capabilities) == {"osx", "windows"}
+
+
+@pytest.mark.asyncio
+async def test_update_task_capabilities_overwrites(
+    store: InMemoryStore, manager: TaskManager
+) -> None:
+    """should overwrite required_capabilities on task via TASK_CAPABILITIES_UPDATED event"""
+    project_id = uuid4()
+    task = await manager.create_task(project_id, "Cap Task", required_capabilities=["osx"])
+    assert task.required_capabilities == ["osx"]
+
+    updated = await manager.update_task_capabilities(task.id, ["gpu", "docker"])
+    assert updated.required_capabilities == ["gpu", "docker"]
+
+    replayed = await manager.get_task(task.id)
+    assert replayed is not None
+    assert replayed.required_capabilities == ["gpu", "docker"]
+
+
+@pytest.mark.asyncio
+async def test_update_task_capabilities_appends_event(
+    store: InMemoryStore, manager: TaskManager
+) -> None:
+    """should append TASK_CAPABILITIES_UPDATED event to task aggregate"""
+    project_id = uuid4()
+    task = await manager.create_task(project_id, "Cap Task")
+
+    await manager.update_task_capabilities(task.id, ["linux"])
+
+    task_events = await store.get_events(task.id, "task")
+    cap_events = [e for e in task_events if e.event_type == ev.TASK_CAPABILITIES_UPDATED]
+    assert len(cap_events) == 1
+    assert cap_events[0].payload["required_capabilities"] == ["linux"]
+
+
+@pytest.mark.asyncio
+async def test_update_task_capabilities_raises_for_unknown_task(manager: TaskManager) -> None:
+    """should raise ValueError for unknown task_id"""
+    with pytest.raises(ValueError, match="task not found"):
+        await manager.update_task_capabilities(uuid4(), ["gpu"])
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_by_project_returns_all_tasks(manager: TaskManager) -> None:
     project_id = uuid4()
     other_project_id = uuid4()

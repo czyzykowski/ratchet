@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- `Project` model gains `required_capabilities: list[str] = []` field; stored in `PROJECT_CREATED` / `PROJECT_UPDATED` event payloads
+- `TASK_CAPABILITIES_UPDATED` event type in `core/events.py`; `TaskManager.update_task_capabilities()` method
+- `TaskManager.create_task()` accepts `project_capabilities` parameter and unions it with task-level `required_capabilities` (deduplicated)
+- `TaskManager._replay_task()` handles `TASK_CAPABILITIES_UPDATED` by overwriting `required_capabilities`
+- `scripts/add-project.py` gains `--capabilities` flag (comma-separated)
+- `scripts/update-project.py`: new script with `--project-id` and `--capabilities` flags
+- `POST /api/projects` and `PATCH /api/projects/{project_id}` accept `required_capabilities`
+- `PATCH /api/tasks/{task_id}` accepts `required_capabilities` to call `TaskManager.update_task_capabilities()`
+- `POST /api/tasks` fetches project capabilities and passes them to `TaskManager.create_task()`
+- TypeScript `Project` interface and `createProject()` options include `required_capabilities`
+- `NewProjectModal` and `ProjectSettingsModal` include a comma-separated capabilities input
+- Task detail page displays and allows inline editing of `required_capabilities`
+- Alembic migration `d1e2f3a4b5c6` adds `required_capabilities` JSONB column to `current_projects` view and updates `current_tasks` view to prefer `TASK_CAPABILITIES_UPDATED` over `TASK_CREATED`
+- Unit tests for project capabilities (create, update, replay) and task capability merging and editing
+- Web API tests for create/update project with capabilities and task capability update endpoint
 - Unit tests for `merge_once` edge cases: `read_intent` exception fallback, no execution branch, `config_source == "db"` ratchet_yaml branching, and missing `spec_id` handling
 - Integrated `merge_once` into worker dispatch cycle — tasks in local deployment mode auto-merge after QA passes; `merge_once` now accepts optional `project_id` parameter for per-project scoping
 - Updated CLAUDE.md: documented embedded worker architecture, `worker/service.py` and `worker/log_buffer.py` in repo structure, `python -m web` entry point, `WORKER_*` env vars, and `app.state.worker_service` key pattern

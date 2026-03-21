@@ -26,6 +26,7 @@ const mockProject: Project = {
   claude_md: null,
   intent_md: null,
   ratchet_yaml: null,
+  required_capabilities: [],
 }
 
 function renderModal(props: Partial<Parameters<typeof ProjectSettingsModal>[0]> = {}) {

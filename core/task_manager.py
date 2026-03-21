@@ -19,6 +19,7 @@ class TaskManager:
         title: str,
         depends_on: list[str] | None = None,
         required_capabilities: list[str] | None = None,
+        project_capabilities: list[str] | None = None,
     ) -> Task:
         """Create a new task in ready_for_spec status.
 
@@ -29,6 +30,10 @@ class TaskManager:
             depends_on = []
         if required_capabilities is None:
             required_capabilities = []
+        if project_capabilities is None:
+            project_capabilities = []
+        # Union task-specific and project-level capabilities (deduplicated)
+        merged_capabilities = list(dict.fromkeys(project_capabilities + required_capabilities))
         task_id = uuid4()
         await self._store.append_event(
             aggregate_id=task_id,
@@ -39,7 +44,7 @@ class TaskManager:
                 "project_id": str(project_id),
                 "title": title,
                 "status": ev.READY_FOR_SPEC,
-                "required_capabilities": required_capabilities,
+                "required_capabilities": merged_capabilities,
             },
         )
         await self._store.append_event(
@@ -68,6 +73,27 @@ class TaskManager:
         """Return a Task by replaying its events, or None if not found."""
         task_events = await self._store.get_events(task_id, "task")
         return await self._replay_task(task_id, task_events)
+
+    async def update_task_capabilities(
+        self, task_id: UUID, required_capabilities: list[str]
+    ) -> Task:
+        """Overwrite required_capabilities on a task by appending TASK_CAPABILITIES_UPDATED event.
+
+        Raises ValueError if task not found.
+        Returns updated Task.
+        """
+        task = await self.get_task(task_id)
+        if task is None:
+            raise ValueError("task not found")
+        await self._store.append_event(
+            aggregate_id=task_id,
+            aggregate_type="task",
+            event_type=ev.TASK_CAPABILITIES_UPDATED,
+            payload={"required_capabilities": required_capabilities},
+        )
+        updated = await self.get_task(task_id)
+        assert updated is not None
+        return updated
 
     async def list_tasks_by_project(self, project_id: UUID) -> list[Task]:
         """Return all tasks for a project using the project_tasks registry."""
@@ -134,6 +160,13 @@ class TaskManager:
                 task = task.model_copy(
                     update={
                         "title": event.payload["title"],
+                        "updated_at": event.occurred_at,
+                    }
+                )
+            elif event.event_type == ev.TASK_CAPABILITIES_UPDATED and task is not None:
+                task = task.model_copy(
+                    update={
+                        "required_capabilities": event.payload.get("required_capabilities", []),
                         "updated_at": event.occurred_at,
                     }
                 )

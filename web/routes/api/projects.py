@@ -23,6 +23,7 @@ class CreateProjectBody(BaseModel):
     claude_md: str | None = None
     intent_md: str | None = None
     ratchet_yaml: str | None = None
+    required_capabilities: list[str] = []
 
 
 class UpdateProjectBody(BaseModel):
@@ -33,6 +34,7 @@ class UpdateProjectBody(BaseModel):
     claude_md: str | None = None
     intent_md: str | None = None
     ratchet_yaml: str | None = None
+    required_capabilities: list[str] = []
 
 
 @router.get("/projects")
@@ -84,6 +86,7 @@ async def create_project(body: CreateProjectBody, request: Request) -> JSONRespo
             repo_url=body.repo_url or body.path,
             local_path=body.path,
             config_source=body.config_source,
+            required_capabilities=body.required_capabilities,
         )
     except OnboardingError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -114,6 +117,7 @@ async def update_project(
         repo_url=body.repo_url,
         local_path=body.local_path,
         config_source=body.config_source,
+        required_capabilities=body.required_capabilities,
     )
     if body.config_source == "db":
         await pm.update_project_config(

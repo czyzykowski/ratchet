@@ -413,3 +413,91 @@ async def test_archive_one_of_two_projects(tmp_path):
     result = await manager.list_projects()
     assert len(result) == 1
     assert result[0].id == project_b.id
+
+
+# ---------------------------------------------------------------------------
+# required_capabilities
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_register_project_with_capabilities(tmp_path):
+    """should store required_capabilities in PROJECT_CREATED event and return them"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+
+    project = await manager.register_project(
+        name="cap-project",
+        repo_url=path,
+        local_path=path,
+        required_capabilities=["osx", "gpu"],
+    )
+
+    assert project.required_capabilities == ["osx", "gpu"]
+    events = await store.get_events(project.id, "project")
+    assert events[0].payload["required_capabilities"] == ["osx", "gpu"]
+
+
+@pytest.mark.asyncio
+async def test_register_project_default_capabilities(tmp_path):
+    """should default required_capabilities to [] when not provided"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+
+    project = await manager.register_project(name="plain", repo_url=path, local_path=path)
+    assert project.required_capabilities == []
+
+
+@pytest.mark.asyncio
+async def test_update_project_capabilities(tmp_path):
+    """should update required_capabilities via update_project"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(name="p", repo_url=path, local_path=path)
+
+    await manager.update_project(
+        project.id, name="p", repo_url=path, local_path=path,
+        required_capabilities=["docker"],
+    )
+
+    fetched = await manager.get_project(project.id)
+    assert fetched is not None
+    assert fetched.required_capabilities == ["docker"]
+
+
+@pytest.mark.asyncio
+async def test_get_project_replays_capabilities_from_updated_event(tmp_path):
+    """should reflect latest required_capabilities from PROJECT_UPDATED"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    project = await manager.register_project(
+        name="p", repo_url=path, local_path=path, required_capabilities=["osx"]
+    )
+
+    await manager.update_project(
+        project.id, name="p", repo_url=path, local_path=path,
+        required_capabilities=["osx", "gpu"],
+    )
+
+    fetched = await manager.get_project(project.id)
+    assert fetched is not None
+    assert fetched.required_capabilities == ["osx", "gpu"]
+
+
+@pytest.mark.asyncio
+async def test_list_projects_reflects_capabilities(tmp_path):
+    """should return required_capabilities in list_projects"""
+    store = InMemoryStore()
+    manager = ProjectManager(store)
+    path = make_valid_repo(tmp_path)
+    await manager.register_project(
+        name="p", repo_url=path, local_path=path, required_capabilities=["windows"]
+    )
+
+    result = await manager.list_projects()
+    assert len(result) == 1
+    assert result[0].required_capabilities == ["windows"]

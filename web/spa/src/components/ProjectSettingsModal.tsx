@@ -17,6 +17,7 @@ export function ProjectSettingsModal({ project, open, onClose }: ProjectSettings
   const [claudeMd, setClaudeMd] = useState(project.claude_md ?? '')
   const [intentMd, setIntentMd] = useState(project.intent_md ?? '')
   const [ratchetYaml, setRatchetYaml] = useState(project.ratchet_yaml ?? '')
+  const [capabilities, setCapabilities] = useState((project.required_capabilities ?? []).join(', '))
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -31,6 +32,9 @@ export function ProjectSettingsModal({ project, open, onClose }: ProjectSettings
     setError(null)
     setSubmitting(true)
     try {
+      const caps = capabilities.trim()
+        ? capabilities.split(',').map(c => c.trim()).filter(Boolean)
+        : []
       await updateProject(project.id, {
         name,
         repo_url: repoUrl,
@@ -39,6 +43,7 @@ export function ProjectSettingsModal({ project, open, onClose }: ProjectSettings
         claude_md: configSource === 'db' ? claudeMd || null : null,
         intent_md: configSource === 'db' ? intentMd || null : null,
         ratchet_yaml: configSource === 'db' ? ratchetYaml || null : null,
+        required_capabilities: caps,
       })
       await queryClient.invalidateQueries({ queryKey: ['project', project.id] })
       onClose()
@@ -99,6 +104,16 @@ export function ProjectSettingsModal({ project, open, onClose }: ProjectSettings
               <option value="disk">disk</option>
               <option value="db">db</option>
             </select>
+          </div>
+          <div className="modal-field">
+            <label className="modal-label" htmlFor="settings-capabilities">Required Capabilities <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(comma-separated)</span></label>
+            <input
+              id="settings-capabilities"
+              className="form-input"
+              value={capabilities}
+              onChange={e => setCapabilities(e.target.value)}
+              placeholder="e.g. osx, gpu"
+            />
           </div>
           {configSource === 'db' && (
             <>

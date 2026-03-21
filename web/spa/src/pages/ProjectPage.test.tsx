@@ -61,6 +61,7 @@ const mockData = {
     claude_md: null,
     intent_md: null,
     ratchet_yaml: null,
+    required_capabilities: [],
   },
   tasks: [
     {

@@ -43,6 +43,16 @@ def parse_args() -> argparse.Namespace:
             "Use set-project-config.py to upload content. Default: disk."
         ),
     )
+    parser.add_argument(
+        "--capabilities",
+        default=None,
+        dest="capabilities",
+        metavar="CAPABILITIES",
+        help=(
+            "Comma-separated list of required capabilities for all tasks in this project "
+            "(e.g. 'osx,gpu'). Optional, defaults to empty."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -52,6 +62,7 @@ async def main() -> None:
         sys.exit(1)
 
     args = parse_args()
+    capabilities = [c.strip() for c in args.capabilities.split(",")] if args.capabilities else []
 
     from core.db import close_pool
     from core.project_manager import OnboardingError, ProjectManager
@@ -65,11 +76,14 @@ async def main() -> None:
             repo_url=args.repo_url or args.path,
             local_path=args.path,
             config_source=args.config_source,
+            required_capabilities=capabilities,
         )
         print(f"Registered project: {project.name}")
         print(f"Project ID: {project.id}")
         print(f"Repo: {project.local_path}")
         print(f"Config source: {project.config_source}")
+        if project.required_capabilities:
+            print(f"Required capabilities: {', '.join(project.required_capabilities)}")
     except OnboardingError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

@@ -50,6 +50,7 @@ class ProjectManager:
         repo_url: str,
         local_path: str,
         config_source: str = "disk",
+        required_capabilities: list[str] | None = None,
     ) -> Project:
         """Validate repo and register as a managed project.
 
@@ -57,6 +58,8 @@ class ProjectManager:
         Appends PROJECT_CREATED event on success.
         Returns Project model.
         """
+        if required_capabilities is None:
+            required_capabilities = []
         validate_repo(local_path, config_source)
         project_id = uuid4()
         payload = {
@@ -66,6 +69,7 @@ class ProjectManager:
             "local_path": local_path,
             "status": "active",
             "config_source": config_source,
+            "required_capabilities": required_capabilities,
         }
         event = await self._store.append_event(
             aggregate_id=project_id,
@@ -87,6 +91,7 @@ class ProjectManager:
             local_path=local_path,
             status="active",
             config_source=config_source,
+            required_capabilities=required_capabilities,
             created_at=event.occurred_at,
             updated_at=event.occurred_at,
         )
@@ -98,6 +103,7 @@ class ProjectManager:
         repo_url: str,
         local_path: str,
         config_source: str = "disk",
+        required_capabilities: list[str] | None = None,
     ) -> Project:
         """Update scalar fields of an existing project.
 
@@ -105,6 +111,8 @@ class ProjectManager:
         Appends PROJECT_UPDATED event (dual-written to registry).
         Returns updated Project.
         """
+        if required_capabilities is None:
+            required_capabilities = []
         existing = await self.get_project(project_id)
         if existing is None:
             raise ValueError("project not found")
@@ -114,6 +122,7 @@ class ProjectManager:
             "repo_url": repo_url,
             "local_path": local_path,
             "config_source": config_source,
+            "required_capabilities": required_capabilities,
         }
         event = await self._store.append_event(
             aggregate_id=project_id,
@@ -132,6 +141,7 @@ class ProjectManager:
             "repo_url": repo_url,
             "local_path": local_path,
             "config_source": config_source,
+            "required_capabilities": required_capabilities,
             "updated_at": event.occurred_at,
         })
 
@@ -182,6 +192,7 @@ class ProjectManager:
                     local_path=p["local_path"],
                     status=p["status"],
                     config_source=p.get("config_source", "disk"),
+                    required_capabilities=p.get("required_capabilities", []),
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
@@ -192,6 +203,7 @@ class ProjectManager:
                     "repo_url": p["repo_url"],
                     "local_path": p["local_path"],
                     "config_source": p.get("config_source", "disk"),
+                    "required_capabilities": p.get("required_capabilities", []),
                     "updated_at": event.occurred_at,
                 })
             elif event.event_type == ev.PROJECT_CONFIG_UPDATED and project is not None:
@@ -225,6 +237,7 @@ class ProjectManager:
                     local_path=p["local_path"],
                     status=p["status"],
                     config_source=p.get("config_source", "disk"),
+                    required_capabilities=p.get("required_capabilities", []),
                     created_at=event.occurred_at,
                     updated_at=event.occurred_at,
                 )
@@ -237,6 +250,7 @@ class ProjectManager:
                         "repo_url": p["repo_url"],
                         "local_path": p["local_path"],
                         "config_source": p.get("config_source", "disk"),
+                        "required_capabilities": p.get("required_capabilities", []),
                         "updated_at": event.occurred_at,
                     })
             elif event.event_type == ev.PROJECT_CONFIG_UPDATED:

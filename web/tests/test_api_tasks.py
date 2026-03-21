@@ -140,6 +140,26 @@ def test_should_update_task_title(client: TestClient, store: InMemoryStore) -> N
     assert data["id"] == str(task_id)
 
 
+def test_should_update_task_capabilities(client: TestClient, store: InMemoryStore) -> None:
+    project_id = uuid4()
+    task_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+    asyncio.get_event_loop().run_until_complete(
+        _seed_task(store, task_id, project_id, "Cap Task")
+    )
+
+    response = client.patch(
+        f"/api/tasks/{task_id}", json={"required_capabilities": ["osx", "gpu"]}
+    )
+    assert response.status_code == 200
+
+    # Verify replay reflects updated capabilities
+    task_response = client.get(f"/api/tasks/{task_id}")
+    assert task_response.status_code == 200
+    task_data = task_response.json()
+    assert set(task_data["task"]["required_capabilities"]) == {"osx", "gpu"}
+
+
 def test_should_assign_spec_to_task(client: TestClient, store: InMemoryStore) -> None:
     project_id = uuid4()
     task_id = uuid4()

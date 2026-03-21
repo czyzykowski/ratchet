@@ -31,6 +31,7 @@ class Project(BaseModel):
     claude_md: str | None = None
     intent_md: str | None = None
     ratchet_yaml: str | None = None
+    required_capabilities: list[str] = []
 
 
 class Task(BaseModel):

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
@@ -13,6 +14,7 @@ interface TaskDetail {
   current_spec_id: string | null
   refinement_count: number
   depends_on: string[]
+  required_capabilities: string[]
 }
 
 interface Spec {
@@ -65,6 +67,7 @@ function formatDate(iso: string | null | undefined): string {
 export function TaskDetailPage() {
   const { task_id } = useParams<{ task_id: string }>()
   const queryClient = useQueryClient()
+  const [capabilitiesEdit, setCapabilitiesEdit] = useState<string | null>(null)
   const { data, isLoading, error } = useQuery<TaskDetailResponse>({
     queryKey: ['task', task_id],
     queryFn: () => apiFetch<TaskDetailResponse>(`/api/tasks/${task_id}`),
@@ -87,6 +90,20 @@ export function TaskDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['task', task_id] })
   }
 
+  async function handleSaveCapabilities() {
+    if (!task_id || capabilitiesEdit === null) return
+    const caps = capabilitiesEdit.trim()
+      ? capabilitiesEdit.split(',').map(c => c.trim()).filter(Boolean)
+      : []
+    await fetch(`/api/tasks/${task_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ required_capabilities: caps }),
+    })
+    setCapabilitiesEdit(null)
+    queryClient.invalidateQueries({ queryKey: ['task', task_id] })
+  }
+
   async function handleArchive() {
     if (!task_id) return
     if (!confirm('Archive this task?')) return
@@ -99,6 +116,7 @@ export function TaskDetailPage() {
   if (!data) return <div className="error-state">Task not found</div>
 
   const { task, specs, executions, qa_failure, baseline_qa_failure, pr_info, deploy_hooks } = data
+  const currentCapabilities = task.required_capabilities ?? []
   const latestSpec = specs[specs.length - 1] ?? null
 
   return (
@@ -253,6 +271,35 @@ export function TaskDetailPage() {
           ))}
         </div>
       )}
+
+      <div className="modal-field">
+        <div className="modal-label">
+          Required Capabilities
+          {capabilitiesEdit === null && (
+            <button
+              style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.1rem 0.4rem', cursor: 'pointer' }}
+              onClick={() => setCapabilitiesEdit(currentCapabilities.join(', '))}
+            >edit</button>
+          )}
+        </div>
+        {capabilitiesEdit !== null ? (
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <input
+              className="form-input"
+              style={{ flex: 1 }}
+              value={capabilitiesEdit}
+              onChange={e => setCapabilitiesEdit(e.target.value)}
+              placeholder="comma-separated, e.g. osx, gpu"
+            />
+            <button className="btn btn-primary" style={{ padding: '0.25rem 0.6rem' }} onClick={handleSaveCapabilities}>Save</button>
+            <button className="btn btn-secondary" style={{ padding: '0.25rem 0.6rem' }} onClick={() => setCapabilitiesEdit(null)}>Cancel</button>
+          </div>
+        ) : (
+          <div className="modal-value" style={{ color: currentCapabilities.length ? undefined : '#666' }}>
+            {currentCapabilities.length ? currentCapabilities.join(', ') : '(none)'}
+          </div>
+        )}
+      </div>
 
       {data.dependencies.length > 0 && (
         <div className="modal-field">
