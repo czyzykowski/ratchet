@@ -64,9 +64,12 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
 
     candidates.sort(key=lambda c: c[0].created_at)
 
+    from worker.capability_check import effective_capabilities
+
     count = 0
     for task, project, spec in candidates:
-        worker = registry.find_available(task.required_capabilities or [])
+        required = list(effective_capabilities(task, project))
+        worker = registry.find_available(required)
         if worker is None:
             continue
         await _dispatch_one(task, project, spec, worker, store, registry)
