@@ -22,8 +22,8 @@ from worker.dispatcher import ProjectDispatcher
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
-PATCH_BASELINE_WORKTREE = "worker.dispatcher._create_baseline_worktree"
-PATCH_REMOVE_QA_WORKTREE = "worker.dispatcher._remove_qa_worktree"
+PATCH_BASELINE_WORKTREE = "worker.pipelines.impl.create_baseline_worktree"
+PATCH_REMOVE_QA_WORKTREE = "worker.pipelines.impl.remove_qa_worktree"
 
 FAKE_REPO_PATH = "/fake/repo"
 FAKE_WORKTREE_PATH = "/fake/repo/.worktrees/exec"
@@ -129,7 +129,7 @@ async def test_no_tasks_ready_logs_and_returns(caplog: pytest.LogCaptureFixture)
     store = InMemoryStore()
     dispatcher = _make_dispatcher(store)
 
-    with caplog.at_level(logging.INFO, logger="worker.dispatcher"):
+    with caplog.at_level(logging.INFO, logger="worker.pipelines.impl"):
         result = await dispatcher.impl_once()
 
     assert result.action == "idle"
@@ -169,7 +169,7 @@ async def test_task_with_no_spec_is_skipped_with_warning(
     await _advance_task_to_ready(store, task_id)
 
     dispatcher = _make_dispatcher(store)
-    with caplog.at_level(logging.INFO, logger="worker.dispatcher"):
+    with caplog.at_level(logging.INFO, logger="worker.pipelines.impl"):
         result = await dispatcher.impl_once()
 
     assert result.action == "idle"
@@ -247,7 +247,7 @@ async def test_successful_execution_logs_completion(caplog: pytest.LogCaptureFix
         patch(PATCH_READ_INTENT, return_value="# Intent"),
         patch(PATCH_BASELINE_WORKTREE, return_value="/fake/baseline"),
         patch(PATCH_REMOVE_QA_WORKTREE),
-        caplog.at_level(logging.INFO, logger="worker.dispatcher"),
+        caplog.at_level(logging.INFO, logger="worker.pipelines.impl"),
     ):
         mock_prepare.side_effect = _fake_worktree
         await dispatcher.impl_once()

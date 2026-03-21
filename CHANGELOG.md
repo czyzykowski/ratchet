@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- Decomposed `worker/dispatcher.py` (941 lines) into pipeline modules: `worker/pipelines/impl.py`, `worker/pipelines/qa.py`, `worker/pipelines/merge.py`
+- Extracted `worker/worktree.py` (worktree lifecycle helpers), `worker/event_helpers.py` (event query helpers), `worker/task_finder.py` (TaskFinder class)
+- `worker/dispatcher.py` is now a 168-line facade delegating to pipeline classes
+- Updated all test patch targets to reference new module paths
+
 ### Added
 - `core/managers.py` — `Managers` facade that constructs all store-backed managers from a single `Store` instance; `app.state.managers` set on web startup
 

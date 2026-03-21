@@ -19,8 +19,8 @@ PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
-PATCH_BASELINE_WORKTREE = "worker.dispatcher._create_baseline_worktree"
-PATCH_REMOVE_QA_WORKTREE = "worker.dispatcher._remove_qa_worktree"
+PATCH_BASELINE_WORKTREE = "worker.pipelines.impl.create_baseline_worktree"
+PATCH_REMOVE_QA_WORKTREE = "worker.pipelines.impl.remove_qa_worktree"
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -160,7 +160,7 @@ async def test_run_once_skips_when_baseline_qa_fails() -> None:
     with (
         patch(PATCH_BASELINE_WORKTREE, return_value="/fake/baseline"),
         patch(PATCH_REMOVE_QA_WORKTREE),
-        patch("worker.dispatcher.check_baseline_qa", return_value=[fake_failure]),
+        patch("worker.pipelines.impl.check_baseline_qa", return_value=[fake_failure]),
     ):
         result = await run_once(store, invoker)
 
@@ -193,7 +193,7 @@ async def test_run_qa_once_returns_true_when_qa_task_found() -> None:
     await _setup_spec(store, task_id)
     await _advance_to_ready_for_qa(store, task_id)
 
-    with patch("worker.dispatcher.load_qa_config", return_value=None):
+    with patch("worker.pipelines.qa.load_qa_config", return_value=None):
         result = await run_qa_once(store)
 
     assert result is True

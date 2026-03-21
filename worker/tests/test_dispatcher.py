@@ -135,8 +135,8 @@ async def test_recover_orphans_resets_in_progress_task() -> None:
 PATCH_PREPARE = "core.execution_manager.prepare_task_environment"
 PATCH_CLEANUP = "core.execution_manager.cleanup_task_environment"
 PATCH_READ_INTENT = "core.context_assembler.read_intent"
-PATCH_BASELINE_WORKTREE = "worker.dispatcher._create_baseline_worktree"
-PATCH_REMOVE_QA_WORKTREE = "worker.dispatcher._remove_qa_worktree"
+PATCH_BASELINE_WORKTREE = "worker.pipelines.impl.create_baseline_worktree"
+PATCH_REMOVE_QA_WORKTREE = "worker.pipelines.impl.remove_qa_worktree"
 
 
 def _fake_worktree(repo_path: str, execution_id: uuid.UUID, claude_md: str | None = None) -> str:
@@ -318,14 +318,14 @@ async def test_recover_orphans_ignores_non_in_progress_tasks() -> None:
 # qa_once
 # ---------------------------------------------------------------------------
 
-PATCH_QA_WORKTREE = "worker.dispatcher._create_qa_worktree"
-PATCH_LOAD_QA_CONFIG = "worker.dispatcher.load_qa_config"
-PATCH_RUN_QA_STEPS = "worker.dispatcher.run_qa_steps"
-PATCH_RUN_AUTO_FIXES = "worker.dispatcher.run_auto_fixes"
-PATCH_GET_GIT_DIFF = "worker.dispatcher.get_git_diff"
-PATCH_BUILD_REVIEW = "worker.dispatcher.build_review_prompt"
-PATCH_PARSE_REVIEW = "worker.dispatcher.parse_review_output"
-PATCH_SUBPROCESS_RUN = "worker.dispatcher._subprocess.run"
+PATCH_QA_WORKTREE = "worker.pipelines.qa.create_qa_worktree"
+PATCH_LOAD_QA_CONFIG = "worker.pipelines.qa.load_qa_config"
+PATCH_RUN_QA_STEPS = "worker.pipelines.qa.run_qa_steps"
+PATCH_RUN_AUTO_FIXES = "worker.pipelines.qa.run_auto_fixes"
+PATCH_GET_GIT_DIFF = "worker.pipelines.qa.get_git_diff"
+PATCH_BUILD_REVIEW = "worker.pipelines.qa.build_review_prompt"
+PATCH_PARSE_REVIEW = "worker.pipelines.qa.parse_review_output"
+PATCH_SUBPROCESS_RUN = "worker.pipelines.qa._subprocess.run"
 
 
 async def _setup_task_for_qa(
@@ -382,10 +382,10 @@ async def test_qa_once_transitions_to_deployed_when_no_qa_config() -> None:
 # merge_once
 # ---------------------------------------------------------------------------
 
-PATCH_LOAD_DEPLOY_CONFIG = "worker.dispatcher.load_deployment_config"
-PATCH_SQUASH_MERGE = "worker.dispatcher.squash_merge"
-PATCH_LOAD_MERGE_CONFIG = "worker.dispatcher.load_merge_config"
-PATCH_READ_INTENT_DISPATCH = "worker.dispatcher.read_intent"
+PATCH_LOAD_DEPLOY_CONFIG = "worker.pipelines.merge.load_deployment_config"
+PATCH_SQUASH_MERGE = "worker.pipelines.merge.squash_merge"
+PATCH_LOAD_MERGE_CONFIG = "worker.pipelines.merge.load_merge_config"
+PATCH_READ_INTENT_DISPATCH = "worker.pipelines.merge.read_intent"
 
 
 async def test_merge_once_returns_idle_when_no_tasks() -> None:

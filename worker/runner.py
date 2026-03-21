@@ -15,16 +15,12 @@ from uuid import UUID
 from core import events as ev
 from core.invoker import ClaudeCodeInvoker
 from core.store import Store
-from worker.dispatcher import (  # noqa: F401 — re-exported for backwards compat
-    ProjectDispatcher,
-    QAWorktreeError,
-    _create_baseline_worktree,
-    _create_qa_worktree,
-    _has_pending_baseline_qa_failure,
-    _remove_qa_worktree,
-    _should_skip_baseline_qa,
-)
+from worker.dispatcher import ProjectDispatcher  # noqa: F401 — re-exported for backwards compat
 from worker.listener import NotificationListener
+from worker.worktree import QAWorktreeError  # noqa: F401
+from worker.worktree import create_baseline_worktree as _create_baseline_worktree  # noqa: F401
+from worker.worktree import create_qa_worktree as _create_qa_worktree  # noqa: F401
+from worker.worktree import remove_qa_worktree as _remove_qa_worktree  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

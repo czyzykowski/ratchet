@@ -12,10 +12,10 @@ from core.store import InMemoryStore
 from worker.runner import merge_once
 
 PATCH_VALIDATE_REPO = "core.project_manager.validate_repo"
-PATCH_LOAD_DEPLOYMENT = "worker.dispatcher.load_deployment_config"
-PATCH_SQUASH_MERGE = "worker.dispatcher.squash_merge"
-PATCH_READ_INTENT = "worker.dispatcher.read_intent"
-PATCH_LOAD_MERGE_CONFIG = "worker.dispatcher.load_merge_config"
+PATCH_LOAD_DEPLOYMENT = "worker.pipelines.merge.load_deployment_config"
+PATCH_SQUASH_MERGE = "worker.pipelines.merge.squash_merge"
+PATCH_READ_INTENT = "worker.pipelines.merge.read_intent"
+PATCH_LOAD_MERGE_CONFIG = "worker.pipelines.merge.load_merge_config"
 
 FAKE_REPO_PATH = "/fake/repo"
 
