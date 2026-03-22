@@ -558,7 +558,7 @@ async def get_board_tasks(conn: Any) -> list[dict[str, Any]]:
                       AND e.sequence > COALESCE(
                           (SELECT MAX(e2.sequence)
                            FROM events e2
-                           WHERE e2.aggregate_id = t.id::text
+                           WHERE e2.aggregate_id = t.id
                              AND e2.aggregate_type = 'task'
                              AND e2.event_type IN (
                                  'task.baseline_qa_retry', 'task.force_execute')),
