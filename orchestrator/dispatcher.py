@@ -129,7 +129,14 @@ async def dispatch_loop(
 ) -> None:
     """Run dispatch_pending repeatedly at the given interval until cancelled."""
     while True:
-        await dispatch_pending(store, registry)
+        try:
+            await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("dispatch_pending timed out")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("dispatch_pending failed, will retry", exc_info=True)
         await asyncio.sleep(interval_seconds)
 
 

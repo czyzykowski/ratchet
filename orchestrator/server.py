@@ -218,10 +218,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("DATABASE_URL environment variable is not set")
         raise RuntimeError("DATABASE_URL environment variable is required")
 
-    store = PostgresStore()
     registry = WorkerRegistry()
     dispatcher = JobDispatcher(registry)
-    dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
+
+    store = PostgresStore()
+    # Skip dispatch loop when DISPATCH_ENABLED=false (tests use fake DATABASE_URL)
+    dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "true").lower() in (
+        "true", "1", "yes",
+    )
+    dispatch_task: asyncio.Task[None] | None = None
+    if dispatch_enabled:
+        dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
 
     app.state.store = store
     app.state.registry = registry
@@ -230,11 +237,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    dispatch_task.cancel()
-    try:
-        await dispatch_task
-    except asyncio.CancelledError:
-        pass
+    if dispatch_task is not None:
+        dispatch_task.cancel()
+        try:
+            await dispatch_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
