@@ -138,6 +138,11 @@ class CommandExecutor:
             else:
                 path = os.path.expanduser(request.path)
             path = os.path.abspath(path)
+            # Remove stale directory from a previous failed setup
+            if os.path.exists(path):
+                import shutil
+
+                shutil.rmtree(path)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             bundle_bytes = base64.b64decode(request.bundle_b64)
             git_transfer.extract_bundle(bundle_bytes, path)
