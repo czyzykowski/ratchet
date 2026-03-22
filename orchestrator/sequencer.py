@@ -355,8 +355,8 @@ class PipelineSequencer:
                 f"# Execution Trace: {execution_id}\n"
                 f"# Task: {task_id}\n"
                 f"# Returncode: {claude_resp.returncode}\n\n"
-                f"## Claude Output\n{stdout}\n{stderr}\n\n"
-                f"## Session Transcript (JSONL)\n{session_jsonl}"
+                f"## Claude Output\n\n```\n{stdout}\n{stderr}\n```\n\n"
+                f"## Session Transcript (JSONL)\n\n```jsonl\n{session_jsonl}\n```"
             )
             now = datetime.now(UTC)
             trace = ExecutionTrace(
