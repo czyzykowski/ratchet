@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Stateless command-executing remote worker (`worker/executor.py`, `worker/remote.py`) implementing full command protocol
 - `current_tasks` materialized view now includes `depends_on` JSONB column (migration `d5e6f7a8b9c0`)
 - `web/queries.py`: `get_task_detail()`, `get_board_tasks()`, `get_task_baseline_qa_failure()`, `get_task_pr_and_deploy_info()`, `get_task_feature_backlink()` — direct materialized view queries replacing event-replay managers
 
