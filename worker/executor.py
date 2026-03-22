@@ -188,13 +188,27 @@ class CommandExecutor:
             worktree_path = os.path.join(
                 project_path, ".worktrees", request.execution_id
             )
+            branch_name = f"execution/{request.execution_id}"
             os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
+            # Try creating a new branch from base_commit first.
+            # If the branch already exists (e.g. QA re-run), check it out directly.
             result = subprocess.run(
-                ["git", "worktree", "add", worktree_path, request.base_commit],
+                [
+                    "git", "worktree", "add", worktree_path,
+                    "-b", branch_name, request.base_commit,
+                ],
                 cwd=project_path,
                 capture_output=True,
                 text=True,
             )
+            if result.returncode != 0 and "already exists" in result.stderr:
+                # Branch exists — check out directly
+                result = subprocess.run(
+                    ["git", "worktree", "add", worktree_path, branch_name],
+                    cwd=project_path,
+                    capture_output=True,
+                    text=True,
+                )
             if result.returncode != 0:
                 return CreateWorktreeResponse(
                     type="create_worktree_response",
