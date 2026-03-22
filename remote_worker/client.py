@@ -97,7 +97,7 @@ class RemoteWorkerClient:
         ws_url = ws_url.replace("http://", "ws://")
         ws_url = ws_url.rstrip("/") + "/ws/worker"
 
-        async with websockets.asyncio.client.connect(ws_url) as ws:
+        async with websockets.asyncio.client.connect(ws_url, max_size=50 * 1024 * 1024) as ws:
             hello = WorkerHelloMessage(
                 type="worker_hello",
                 worker_id=self._worker_id,

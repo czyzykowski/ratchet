@@ -69,9 +69,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     count = 0
     for task, project, spec in candidates:
         required = list(effective_capabilities(task, project))
-        if not required:
-            # No special capabilities needed — leave for local worker
-            continue
         worker = registry.find_available(required)
         if worker is None:
             continue
