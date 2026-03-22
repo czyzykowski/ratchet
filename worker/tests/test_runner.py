@@ -117,7 +117,9 @@ def _make_dispatcher(
 ) -> ProjectDispatcher:
     if invoker is None:
         invoker = _make_invoker("completed")
-    return ProjectDispatcher(store, invoker, local_capabilities)
+    d = ProjectDispatcher(store, invoker, local_capabilities)
+    d.orphan_grace_seconds = 0  # disable grace period in tests
+    return d
 
 
 # ---------------------------------------------------------------------------
