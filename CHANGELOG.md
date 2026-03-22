@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Crash recovery: orchestrator replays events on startup to find orphaned in-progress tasks and resets them after a configurable grace period (`RECOVERY_GRACE_PERIOD_SECONDS`, default 60s)
+- Disconnect grace period: workers have a configurable timeout (`WORKER_RECONNECT_TIMEOUT_SECONDS`, default 30s) to reconnect before their in-progress task is reset
+- `TASK_ASSIGNED_TO_WORKER` events now record the real `execution_id` (not `"pending"`) on all pipeline types (impl, QA, merge)
+- `get_in_progress_task_ids()` in `web/queries.py` queries the `current_tasks` materialized view for tasks in `in_progress` status
 - `web/routes/api/ws_worker.py` — `/ws/worker` WebSocket endpoint for worker registration and message handling, moved from `orchestrator/server.py`
 - `web/local_worker.py` — `LocalWorkerManager` spawns and manages a local `python -m worker --remote` subprocess; replaces embedded `WorkerService`
 - `web/routes/api/workers.py` — `GET /api/workers` returns all connected workers from `WorkerRegistry`

@@ -42,6 +42,8 @@ async def test_refresh_task_calls_refresh_views() -> None:
         await _real_sleep(0)  # yield without waiting
 
     worker_mock = _make_worker_mock()
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -50,6 +52,7 @@ async def test_refresh_task_calls_refresh_views() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         async with lifespan(app):
             await asyncio.wait_for(called_event.wait(), timeout=2.0)
@@ -62,6 +65,8 @@ async def test_refresh_errors_do_not_crash_lifespan() -> None:
     store_mock.refresh_views.side_effect = RuntimeError("db error")
 
     worker_mock = _make_worker_mock()
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -70,6 +75,7 @@ async def test_refresh_errors_do_not_crash_lifespan() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         # Should not raise even though refresh_views always raises
         async with lifespan(app):
@@ -84,6 +90,8 @@ async def test_background_task_cancelled_on_lifespan_exit() -> None:
     store_mock.refresh_views.return_value = None
 
     worker_mock = _make_worker_mock()
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -91,6 +99,7 @@ async def test_background_task_cancelled_on_lifespan_exit() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         async with lifespan(app):
             tasks_during = [t for t in asyncio.all_tasks() if not t.done()]
@@ -109,6 +118,8 @@ async def test_should_start_local_worker_during_lifespan_startup() -> None:
     store_mock = AsyncMock()
     worker_mock = _make_worker_mock()
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -116,6 +127,7 @@ async def test_should_start_local_worker_during_lifespan_startup() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         async with lifespan(app):
             pass
@@ -129,6 +141,8 @@ async def test_should_stop_local_worker_during_lifespan_shutdown() -> None:
     store_mock = AsyncMock()
     worker_mock = _make_worker_mock()
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -136,6 +150,7 @@ async def test_should_stop_local_worker_during_lifespan_shutdown() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         async with lifespan(app):
             pass
@@ -156,6 +171,8 @@ async def test_should_read_local_worker_settings_from_env_vars() -> None:
         "DATABASE_URL": "postgresql+psycopg://ratchet@localhost/ratchet",
     }
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -163,6 +180,7 @@ async def test_should_read_local_worker_settings_from_env_vars() -> None:
         patch("web.app.LocalWorkerManager", return_value=worker_mock) as lw_cls,
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
         patch.dict("os.environ", env, clear=False),
     ):
         async with lifespan(app):
@@ -190,6 +208,8 @@ async def test_should_use_default_local_worker_settings_when_env_vars_unset() ->
     clean_env = {k: v for k, v in os.environ.items() if k not in remove_keys}
     clean_env.update(env_overrides)
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -197,6 +217,7 @@ async def test_should_use_default_local_worker_settings_when_env_vars_unset() ->
         patch("web.app.LocalWorkerManager", return_value=worker_mock) as lw_cls,
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
         patch.dict("os.environ", clean_env, clear=True),
     ):
         async with lifespan(app):
@@ -226,6 +247,8 @@ async def test_should_not_start_worker_when_disabled_via_env() -> None:
         settings=LocalWorkerSettings(enabled=False),
     )
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -233,6 +256,7 @@ async def test_should_not_start_worker_when_disabled_via_env() -> None:
         patch("web.app.LocalWorkerManager", return_value=real_manager),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
         patch.dict("os.environ", env, clear=False),
     ):
         async with lifespan(app):
@@ -249,6 +273,8 @@ async def test_should_expose_log_buffer_on_app_state() -> None:
 
     captured_app_state: dict = {}
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -257,6 +283,7 @@ async def test_should_expose_log_buffer_on_app_state() -> None:
         patch("web.app.LogBuffer", return_value=shared_log_buffer),
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
     ):
         async with lifespan(app):
             captured_app_state["worker_log_buffer"] = app.state.worker_log_buffer
@@ -277,6 +304,8 @@ async def test_should_parse_worker_capabilities_from_comma_separated_env() -> No
         "DATABASE_URL": "postgresql+psycopg://ratchet@localhost/ratchet",
     }
 
+    recovery_mock = MagicMock()
+    recovery_mock.recover_in_progress_tasks = AsyncMock(return_value=[])
     with (
         patch("web.app.PostgresStore", return_value=store_mock),
         patch("core.db.get_pool", new=AsyncMock(return_value=_FakePool())),
@@ -284,6 +313,7 @@ async def test_should_parse_worker_capabilities_from_comma_separated_env() -> No
         patch("web.app.LocalWorkerManager", return_value=worker_mock) as lw_cls,
         patch("web.app.WorkerRegistry"),
         patch("web.app.dispatch_loop", new=AsyncMock()),
+        patch("web.app.RecoveryManager", return_value=recovery_mock),
         patch.dict("os.environ", env, clear=False),
     ):
         async with lifespan(app):

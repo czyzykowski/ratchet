@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from uuid import UUID, uuid4
@@ -17,6 +18,8 @@ from core.remote_protocol import (
     ExecutionCompletedMessage,
     ExecutionFailedMessage,
     ExecutionStartedMessage,
+    GetStatusRequest,
+    GetStatusResponse,
     HeartbeatMessage,
     LogLineMessage,
     OrchestratorAckMessage,
@@ -27,9 +30,13 @@ from core.remote_protocol import (
 from core.state_machine import TaskStateMachine
 from core.store import Store
 from core.task_manager import TaskManager
+from orchestrator.channel import WebSocketWorkerChannel
 from orchestrator.registry import WorkerConnection, WorkerRegistry
 
 logger = logging.getLogger(__name__)
+
+# Maps execution_id → pending delayed-cleanup asyncio.Task
+_pending_disconnects: dict[str, asyncio.Task[None]] = {}
 
 router = APIRouter()
 
@@ -136,10 +143,10 @@ async def _handle_execution_failed(
     )
 
 
-async def handle_disconnect(
+async def _do_disconnect_cleanup(
     worker_conn: WorkerConnection, store: Store, registry: WorkerRegistry
 ) -> None:
-    """Handle worker disconnect: fail active execution, return task to ready_for_implementation."""
+    """Execute disconnect cleanup: fail the execution, return task to ready_for_implementation."""
     if worker_conn.current_execution_id is None:
         return
 
@@ -209,6 +216,90 @@ async def handle_disconnect(
         )
 
 
+async def _find_worker_with_execution(
+    registry: WorkerRegistry, execution_id: str
+) -> bool:
+    """Return True if any connected worker reports currently executing execution_id."""
+    for conn in registry.all_workers():
+        channel = WebSocketWorkerChannel(conn.websocket, conn.worker_id)
+        try:
+            resp = await channel.send_command(
+                GetStatusRequest(type="get_status", request_id=str(uuid4()))
+            )
+            if (
+                isinstance(resp, GetStatusResponse)
+                and resp.current_execution_id == execution_id
+            ):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+async def _delayed_disconnect_cleanup(
+    worker_conn: WorkerConnection,
+    store: Store,
+    registry: WorkerRegistry,
+    timeout: float,
+) -> None:
+    """Wait for reconnect window then reset task if no worker resumed."""
+    execution_id = worker_conn.current_execution_id
+    assert execution_id is not None
+
+    try:
+        await asyncio.sleep(timeout)
+
+        # Check if any connected worker resumed this execution
+        if await _find_worker_with_execution(registry, execution_id):
+            logger.info(
+                "handle_disconnect: worker resumed execution %s, cancelling cleanup",
+                execution_id,
+            )
+            return
+
+        logger.info(
+            "handle_disconnect: no worker resumed execution %s after %.0fs, resetting task",
+            execution_id,
+            timeout,
+        )
+        await _do_disconnect_cleanup(worker_conn, store, registry)
+    except asyncio.CancelledError:
+        logger.info(
+            "handle_disconnect: pending cleanup for execution %s was cancelled",
+            execution_id,
+        )
+    finally:
+        _pending_disconnects.pop(execution_id, None)
+
+
+async def handle_disconnect(
+    worker_conn: WorkerConnection, store: Store, registry: WorkerRegistry
+) -> None:
+    """Handle worker disconnect with configurable grace period before resetting task.
+
+    Schedules a delayed cleanup task. If the worker reconnects and resumes the
+    execution within WORKER_RECONNECT_TIMEOUT_SECONDS, the cleanup is skipped.
+    """
+    if worker_conn.current_execution_id is None:
+        return
+
+    execution_id = worker_conn.current_execution_id
+    timeout = float(os.environ.get("WORKER_RECONNECT_TIMEOUT_SECONDS", "30"))
+
+    logger.info(
+        "handle_disconnect: worker %s disconnected with execution %s,"
+        " scheduling cleanup in %.0fs",
+        worker_conn.worker_id,
+        execution_id,
+        timeout,
+    )
+
+    cleanup_task = asyncio.create_task(
+        _delayed_disconnect_cleanup(worker_conn, store, registry, timeout)
+    )
+    _pending_disconnects[execution_id] = cleanup_task
+
+
 @router.websocket("/ws/worker")
 async def ws_worker(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -240,6 +331,28 @@ async def ws_worker(websocket: WebSocket) -> None:
         type="orchestrator_ack", worker_id=worker_id, accepted=True, message="registered"
     )
     await websocket.send_text(ack.model_dump_json())
+
+    # Check if this worker is resuming an execution whose cleanup is pending
+    if _pending_disconnects:
+        channel = WebSocketWorkerChannel(websocket, worker_id)
+        try:
+            status_req = GetStatusRequest(type="get_status", request_id=str(uuid4()))
+            status_resp = await channel.send_command(status_req)
+            if (
+                isinstance(status_resp, GetStatusResponse)
+                and status_resp.current_execution_id
+                and status_resp.current_execution_id in _pending_disconnects
+            ):
+                pending_task = _pending_disconnects.pop(status_resp.current_execution_id)
+                pending_task.cancel()
+                logger.info(
+                    "ws_worker: reconnected worker %s cancelled pending cleanup"
+                    " for execution %s",
+                    worker_id,
+                    status_resp.current_execution_id,
+                )
+        except Exception:
+            pass
 
     try:
         while True:

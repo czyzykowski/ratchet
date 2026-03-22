@@ -14,7 +14,7 @@ from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
 from core.task_manager import TaskManager
 from orchestrator.registry import WorkerConnection, WorkerRegistry
-from orchestrator.server import handle_disconnect
+from web.routes.api.ws_worker import _do_disconnect_cleanup, handle_disconnect
 
 
 def _make_store() -> InMemoryStore:
@@ -109,7 +109,7 @@ async def test_handle_disconnect_idle_worker_is_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_records_audit_event() -> None:
-    """Disconnect should append a TASK_WORKER_DISCONNECTED event on the task aggregate."""
+    """Disconnect cleanup should append a TASK_WORKER_DISCONNECTED event on the task aggregate."""
     store = _make_store()
     registry = WorkerRegistry()
     task_id, execution_id, _ = await _seed_running_task(store)
@@ -117,7 +117,7 @@ async def test_handle_disconnect_records_audit_event() -> None:
     conn = _make_worker_conn(execution_id=str(execution_id))
 
     with patch("core.execution_manager.cleanup_task_environment"):
-        await handle_disconnect(conn, store, registry)
+        await _do_disconnect_cleanup(conn, store, registry)
 
     task_events = await store.get_events(task_id, "task")
     disconnect_events = [
@@ -130,7 +130,7 @@ async def test_handle_disconnect_records_audit_event() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_task_returns_to_ready_for_implementation() -> None:
-    """Task should be transitioned back to ready_for_implementation after disconnect."""
+    """Task should be transitioned back to ready_for_implementation after disconnect cleanup."""
     store = _make_store()
     registry = WorkerRegistry()
     task_id, execution_id, _ = await _seed_running_task(store)
@@ -138,7 +138,7 @@ async def test_handle_disconnect_task_returns_to_ready_for_implementation() -> N
     conn = _make_worker_conn(execution_id=str(execution_id))
 
     with patch("core.execution_manager.cleanup_task_environment"):
-        await handle_disconnect(conn, store, registry)
+        await _do_disconnect_cleanup(conn, store, registry)
 
     status = await TaskStateMachine(store).get_current_status(task_id)
     assert status == ev.READY_FOR_IMPLEMENTATION
@@ -146,7 +146,7 @@ async def test_handle_disconnect_task_returns_to_ready_for_implementation() -> N
 
 @pytest.mark.asyncio
 async def test_handle_disconnect_execution_is_failed() -> None:
-    """Execution should be marked as failed after worker disconnect."""
+    """Execution should be marked as failed after worker disconnect cleanup."""
     store = _make_store()
     registry = WorkerRegistry()
     task_id, execution_id, _ = await _seed_running_task(store)
@@ -154,7 +154,7 @@ async def test_handle_disconnect_execution_is_failed() -> None:
     conn = _make_worker_conn(execution_id=str(execution_id))
 
     with patch("core.execution_manager.cleanup_task_environment"):
-        await handle_disconnect(conn, store, registry)
+        await _do_disconnect_cleanup(conn, store, registry)
 
     em = ExecutionManager(store, "/fake/path")
     execution = await em.get_current_execution(task_id)

@@ -17,6 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from core.store import PostgresStore, Store
 from orchestrator.dispatcher import dispatch_loop
+from orchestrator.recovery import RecoveryManager
 from orchestrator.registry import WorkerRegistry
 from web.local_worker import LocalWorkerManager, LocalWorkerSettings
 from web.routes import blocked as blocked_router
@@ -96,6 +97,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.worker_service = local_worker
     app.state.worker_log_buffer = log_buffer
     await local_worker.start()
+
+    # Crash recovery — identify orphaned in-progress tasks and wait for reconnects
+    recovery_manager = RecoveryManager(
+        store,
+        registry,
+        grace_period=float(os.environ.get("RECOVERY_GRACE_PERIOD_SECONDS", "60")),
+    )
+    recovery_actions = await recovery_manager.recover_in_progress_tasks(pool)
+    if recovery_actions:
+        asyncio.create_task(recovery_manager.wait_and_resolve(recovery_actions))
 
     # Dispatch loop — routes ready tasks to connected workers
     dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "true").lower() in (

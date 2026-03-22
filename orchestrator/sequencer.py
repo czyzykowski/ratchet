@@ -261,22 +261,22 @@ class PipelineSequencer:
         project_id = project.id
         execution_id: UUID | None = None
 
-        # Step 1: record assignment
-        await self._store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_ASSIGNED_TO_WORKER,
-            payload={"worker_id": channel.worker_id, "execution_id": "pending"},
-        )
-
         try:
-            # Step 2: ensure worker has the project
+            # Step 1: ensure worker has the project
             head_commit = await self._ensure_project_on_worker(channel, project)
 
-            # Step 3: record execution start
+            # Step 2: record execution start
             branch_name = f"execution/{uuid4()}"
             execution_id = await self._record_execution_start(
                 task_id, spec.id, branch_name
+            )
+
+            # Step 3: record assignment with real execution_id
+            await self._store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_ASSIGNED_TO_WORKER,
+                payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
             )
 
             # Step 4: transition to IN_PROGRESS
@@ -439,6 +439,12 @@ class PipelineSequencer:
             qa_branch_name = f"qa/{uuid4()}"
             execution_id = await self._record_execution_start(
                 task_id, spec.id, qa_branch_name
+            )
+            await self._store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_ASSIGNED_TO_WORKER,
+                payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
             )
 
             # Step 3: CreateWorktree on execution branch
@@ -702,6 +708,12 @@ class PipelineSequencer:
                 task_id,
                 spec_id_val or uuid4(),
                 qa_branch_name,
+            )
+            await self._store.append_event(
+                aggregate_id=task_id,
+                aggregate_type="task",
+                event_type=ev.TASK_ASSIGNED_TO_WORKER,
+                payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
             )
 
             # Step 3: CreateWorktree on merge-verify branch

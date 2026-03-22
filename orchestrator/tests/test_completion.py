@@ -15,7 +15,7 @@ from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
 from core.task_manager import TaskManager
 from orchestrator.registry import WorkerRegistry
-from orchestrator.server import _handle_execution_completed, _handle_execution_failed
+from web.routes.api.ws_worker import _handle_execution_completed, _handle_execution_failed
 
 # ---------------------------------------------------------------------------
 # Helpers

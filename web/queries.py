@@ -516,6 +516,20 @@ async def get_task_detail(conn: Any, task_id: UUID) -> dict[str, Any] | None:
     }
 
 
+async def get_in_progress_task_ids(pool: Any) -> list[UUID]:
+    """Return IDs of all tasks currently in 'in_progress' status.
+
+    Queries the current_tasks materialized view directly.
+    """
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id FROM current_tasks WHERE status = 'in_progress'"
+            )
+            rows = await cur.fetchall()
+    return [UUID(str(row[0])) for row in rows]
+
+
 async def get_board_tasks(conn: Any) -> list[dict[str, Any]]:
     """Return all non-terminal tasks with project names in a single query.
 
