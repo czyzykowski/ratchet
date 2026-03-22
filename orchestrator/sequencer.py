@@ -87,13 +87,15 @@ class PipelineSequencer:
     # ------------------------------------------------------------------
 
     async def _record_execution_start(
-        self, task_id: UUID, spec_id: UUID, branch_name: str
+        self, task_id: UUID, spec_id: UUID, branch_name: str,
+        execution_id: UUID | None = None,
     ) -> UUID:
         """Record EXECUTION_STARTED events without creating a local worktree.
 
-        Returns the new execution_id.
+        Returns the execution_id (generated if not provided).
         """
-        execution_id = uuid4()
+        if execution_id is None:
+            execution_id = uuid4()
         worktree_path = f"remote/{execution_id}"
         payload = {
             "execution_id": str(execution_id),
@@ -267,10 +269,11 @@ class PipelineSequencer:
             # Step 1: ensure worker has the project
             head_commit = await self._ensure_project_on_worker(channel, project)
 
-            # Step 2: record execution start
-            branch_name = f"execution/{uuid4()}"
+            # Step 2: record execution start (branch name uses execution_id for consistency)
+            exec_uuid = uuid4()
+            branch_name = f"execution/{exec_uuid}"
             execution_id = await self._record_execution_start(
-                task_id, spec.id, branch_name
+                task_id, spec.id, branch_name, execution_id=exec_uuid
             )
 
             # Step 3: record assignment with real execution_id
