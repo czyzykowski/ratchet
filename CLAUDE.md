@@ -53,6 +53,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - `PostgresStore` uses lazy import of `core.db` to avoid psycopg import during test collection
 - Events are append-only — never update or delete rows in the `events` table
 - State is always derived from event replay — do not trust materialized views for correctness
+- **Read path separation**: `web/routes/` handlers must read data via `web/queries.py` (materialized view queries), NOT via `core/` managers (event replay). `core/` managers are for the worker/dispatch path where real-time correctness matters. Do not import `TaskManager`, `SpecManager`, `ExecutionManager`, `ProjectManager`, or `FeatureManager` in `web/routes/` for read operations. Writes (state transitions) may still use `core/state_machine.py` directly.
 - `ContextAssembler` assembles execution prompt from INTENT.md, spec content, and knowledge placeholder
 - `ClaudeCodeInvoker` runs `claude -p <prompt>` as subprocess in worktree, detects COMPLETED/BLOCKED markers
 - Traces written to `$XDG_DATA_HOME/ratchet/traces/` (default `~/.local/share/ratchet/traces/`)
