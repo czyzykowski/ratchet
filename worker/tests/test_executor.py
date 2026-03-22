@@ -423,9 +423,10 @@ class TestHandleSetupEnvironment:
             request_id=_rid(),
             project_id="proj1",
             execution_id="exec-1",
-            symlinks={"/repo/.venv": "/repo/.worktrees/exec-1/.venv"},
+            symlinks=[".venv"],
         )
-        with patch("worker.executor.safe_symlink") as mock_symlink:
+        with patch("worker.executor.safe_symlink") as mock_symlink, \
+             patch("os.makedirs"):
             resp = await ex.handle(req)
         mock_symlink.assert_called_once_with(
             "/repo/.venv", "/repo/.worktrees/exec-1/.venv"
@@ -439,11 +440,11 @@ class TestHandleSetupEnvironment:
             request_id=_rid(),
             project_id="proj1",
             execution_id="exec-1",
-            symlinks={"/src": "/dst"},
+            symlinks=[".venv"],
         )
         with patch(
             "worker.executor.safe_symlink", side_effect=OSError("permission denied")
-        ):
+        ), patch("os.makedirs"):
             resp = await ex.handle(req)
         assert resp.success is False
         assert "permission denied" in (resp.error or "")

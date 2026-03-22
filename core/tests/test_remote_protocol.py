@@ -461,11 +461,11 @@ def test_setup_environment_request_round_trip():
         request_id="req-10",
         project_id="proj-uuid",
         execution_id="exec-uuid",
-        symlinks={"/target": "/link"},
+        symlinks=[".venv", "node_modules"],
     )
     parsed = parse_command_request(msg.model_dump_json())
     assert isinstance(parsed, SetupEnvironmentRequest)
-    assert parsed.symlinks == {"/target": "/link"}
+    assert parsed.symlinks == [".venv", "node_modules"]
 
 
 def test_get_status_request_round_trip():
