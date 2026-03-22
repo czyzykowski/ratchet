@@ -71,7 +71,7 @@ class RemoteWorker:
         ws_url = _to_ws_url(self._orchestrator_url)
 
         async with websockets.asyncio.client.connect(
-            ws_url, max_size=100 * 1024 * 1024
+            ws_url, max_size=100 * 1024 * 1024, open_timeout=10,
         ) as ws:
             hello = WorkerHelloMessage(
                 type="worker_hello",
@@ -141,5 +141,6 @@ class RemoteWorker:
             try:
                 await ws.send(heartbeat.model_dump_json())
             except Exception as exc:
-                logger.warning("Failed to send heartbeat: %s", exc)
+                logger.warning("Failed to send heartbeat: %s — closing connection", exc)
+                await ws.close()
                 break
