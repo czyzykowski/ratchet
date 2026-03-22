@@ -190,12 +190,29 @@ class CommandExecutor:
             )
             branch_name = f"execution/{request.execution_id}"
             os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
-            # Try creating a new branch from base_commit first.
+            # Resolve base_commit: if it's a branch/ref that exists, use it.
+            # If not, fall back to HEAD.
+            resolve = subprocess.run(
+                ["git", "rev-parse", "--verify", request.base_commit],
+                cwd=project_path,
+                capture_output=True,
+                text=True,
+            )
+            base = resolve.stdout.strip() if resolve.returncode == 0 else "HEAD"
+            logger.info(
+                "create_worktree: project=%s branch=%s base=%s (resolved from %s) path=%s",
+                request.project_id[:8],
+                branch_name,
+                base[:12],
+                request.base_commit[:20],
+                worktree_path,
+            )
+            # Try creating a new branch from base first.
             # If the branch already exists (e.g. QA re-run), check it out directly.
             result = subprocess.run(
                 [
                     "git", "worktree", "add", worktree_path,
-                    "-b", branch_name, request.base_commit,
+                    "-b", branch_name, base,
                 ],
                 cwd=project_path,
                 capture_output=True,
