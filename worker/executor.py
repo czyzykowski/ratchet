@@ -50,9 +50,10 @@ class CommandExecutor:
     projects dict. Each handler is independently testable.
     """
 
-    def __init__(self, worker_id: str, projects: dict[str, str]) -> None:
+    def __init__(self, worker_id: str, projects: dict[str, str], workspace: str = "") -> None:
         self._worker_id = worker_id
         self._projects: dict[str, str] = dict(projects)
+        self._workspace = workspace
         self._current_execution_id: str | None = None
 
     async def handle(self, request: AnyCommandRequest) -> AnyCommandResponse:
@@ -131,7 +132,12 @@ class CommandExecutor:
         self, request: SetupProjectRequest
     ) -> SetupProjectResponse:
         try:
-            path = os.path.expanduser(request.path)
+            # Resolve path: use workspace root if set, otherwise expand as-is
+            if self._workspace:
+                path = os.path.join(self._workspace, request.path)
+            else:
+                path = os.path.expanduser(request.path)
+            path = os.path.abspath(path)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             bundle_bytes = base64.b64decode(request.bundle_b64)
             git_transfer.extract_bundle(bundle_bytes, path)

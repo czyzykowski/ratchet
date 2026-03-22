@@ -207,20 +207,15 @@ class PipelineSequencer:
 
         if not status_resp.exists:
             # SetupProject: bundle the local repo.
-            # Use a worker-local path — the orchestrator's local_path may not
-            # exist on the remote worker.
-            import os
-
-            worker_project_path = os.path.join(
-                "~/ratchet-projects", project.name
-            )
+            # Send project name as the path hint — the worker resolves it
+            # relative to its --workspace directory.
             bundle_b64 = _create_patch_bundle_b64(project.local_path)
             setup_req = SetupProjectRequest(
                 type="setup_project",
                 request_id=str(uuid4()),
                 project_id=str(project.id),
                 bundle_b64=bundle_b64,
-                path=worker_project_path,
+                path=project.name,
             )
             await channel.send_command(setup_req)
             # Re-query to get head_commit

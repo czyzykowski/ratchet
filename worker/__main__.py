@@ -21,6 +21,11 @@ parser.add_argument(
     default="",
     help="Comma-separated project_id:path pairs",
 )
+parser.add_argument(
+    "--workspace",
+    default="~/ratchet-projects",
+    help="Root directory for new project clones (default: ~/ratchet-projects)",
+)
 args = parser.parse_args()
 capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
 
@@ -31,5 +36,9 @@ for pair in args.projects.split(","):
         project_id, path = pair.split(":", 1)
         projects[project_id.strip()] = path.strip()
 
-worker = RemoteWorker(args.remote, capabilities, projects)
+import os
+
+workspace = os.path.expanduser(args.workspace)
+
+worker = RemoteWorker(args.remote, capabilities, projects, workspace=workspace)
 asyncio.run(worker.run())

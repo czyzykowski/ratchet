@@ -44,10 +44,12 @@ class RemoteWorker:
         orchestrator_url: str,
         capabilities: list[str],
         projects: dict[str, str],
+        workspace: str = "",
     ) -> None:
         self._orchestrator_url = orchestrator_url
         self._capabilities = capabilities
         self._projects = projects
+        self._workspace = workspace
         self._worker_id = str(uuid4())
 
     async def run(self) -> None:
@@ -85,7 +87,7 @@ class RemoteWorker:
             if not ack.accepted:
                 raise RuntimeError(f"Registration rejected: {ack.message}")
 
-            executor = CommandExecutor(self._worker_id, self._projects)
+            executor = CommandExecutor(self._worker_id, self._projects, workspace=self._workspace)
             heartbeat_task = asyncio.create_task(self._heartbeat_loop(ws))
 
             try:
