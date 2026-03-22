@@ -131,7 +131,7 @@ async def dispatch_loop(
     while True:
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("dispatch_pending timed out")
         except asyncio.CancelledError:
             raise

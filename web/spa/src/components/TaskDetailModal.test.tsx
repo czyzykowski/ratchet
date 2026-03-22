@@ -246,6 +246,82 @@ describe('TaskDetailModal Archive action', () => {
   })
 })
 
+describe('TaskDetailModal execution links', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(qaApi.fetchTaskQA).mockResolvedValue({ history: [], pending: null })
+  })
+
+  const taskResponseWithExecutions = {
+    task: {
+      id: taskId,
+      title: 'Test Task',
+      status: 'ready_for_qa',
+      project_id: 'proj-1',
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: null,
+      current_spec_id: null,
+      refinement_count: 0,
+      depends_on: [],
+    },
+    project_name: 'Test Project',
+    specs: [],
+    executions: [
+      {
+        id: 'exec-aaa',
+        status: 'completed',
+        failure_reason: null as null | string,
+        branch_name: 'task/exec-aaa',
+        started_at: '2024-01-01T00:00:00Z',
+        completed_at: '2024-01-01T01:00:00Z',
+      },
+      {
+        id: 'exec-bbb',
+        status: 'failed',
+        failure_reason: 'something went wrong' as null | string,
+        branch_name: 'task/exec-bbb',
+        started_at: '2024-01-01T02:00:00Z',
+        completed_at: '2024-01-01T03:00:00Z',
+      },
+    ],
+    dependencies: [],
+    qa_failure: null,
+    baseline_qa_failure: null,
+  }
+
+  function renderWithExecutions() {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(taskResponseWithExecutions),
+    }))
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <TaskDetailModal taskId={taskId} onClose={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  it('should render last execution badge as a link to the execution detail page', async () => {
+    renderWithExecutions()
+    await screen.findByText('Test Task')
+    const links = screen.getAllByRole('link')
+    const execLinks = links.filter(l => l.getAttribute('href')?.startsWith('/executions/'))
+    expect(execLinks.some(l => l.getAttribute('href') === '/executions/exec-bbb')).toBe(true)
+  })
+
+  it('should render execution history row badges as links to execution detail pages', async () => {
+    renderWithExecutions()
+    await screen.findByText('Test Task')
+    const links = screen.getAllByRole('link')
+    const execLinks = links.filter(l => l.getAttribute('href')?.startsWith('/executions/'))
+    expect(execLinks.some(l => l.getAttribute('href') === '/executions/exec-aaa')).toBe(true)
+    expect(execLinks.some(l => l.getAttribute('href') === '/executions/exec-bbb')).toBe(true)
+  })
+})
+
 describe('TaskDetailModal Q&A panel', () => {
   beforeEach(() => {
     vi.clearAllMocks()

@@ -394,7 +394,9 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                 <div className="modal-field">
                   <div className="modal-label">Last Execution</div>
                   <div className="modal-value modal-value-sm">
-                    <span className={`badge badge-${latestExecution.status}`}>{latestExecution.status}</span>
+                    <Link to={`/executions/${latestExecution.id}`} style={{ color: '#7eb8f7' }}>
+                      <span className={`badge badge-${latestExecution.status}`}>{latestExecution.status}</span>
+                    </Link>
                     {latestExecution.branch_name && (
                       <span style={{ marginLeft: '0.5rem', color: '#a0a0a0', fontSize: '0.75rem' }}>
                         {latestExecution.branch_name}
@@ -511,7 +513,9 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                     {[...data.executions].reverse().map(ex => (
                       <tr key={ex.id}>
                         <td>
-                          <span className={`badge badge-${ex.status}`}>{ex.status}</span>
+                          <Link to={`/executions/${ex.id}`} style={{ color: '#7eb8f7' }}>
+                            <span className={`badge badge-${ex.status}`}>{ex.status}</span>
+                          </Link>
                         </td>
                         <td style={{ color: '#a0a0a0', fontSize: '0.75rem' }}>
                           {ex.branch_name ?? '—'}
