@@ -332,12 +332,22 @@ async def ws_worker(websocket: WebSocket) -> None:
     )
     await websocket.send_text(ack.model_dump_json())
 
-    # Check if this worker is resuming an execution whose cleanup is pending
+    # Create the channel BEFORE the main loop starts. The GetStatus check below
+    # uses direct websocket recv (no main loop yet), but subsequent commands from
+    # the sequencer go through the queue-based channel.
+    channel = WebSocketWorkerChannel(websocket, worker_id)
+    conn_entry = registry.get_worker(worker_id)
+    if conn_entry is not None:
+        conn_entry.channel = channel
+
+    # Check if this worker is resuming an execution whose cleanup is pending.
+    # This runs before the main loop, so direct recv is safe here.
     if _pending_disconnects:
-        channel = WebSocketWorkerChannel(websocket, worker_id)
         try:
             status_req = GetStatusRequest(type="get_status", request_id=str(uuid4()))
-            status_resp = await channel.send_command(status_req)
+            await websocket.send_text(status_req.model_dump_json())
+            raw_status = await websocket.receive_text()
+            status_resp = parse_worker_message(raw_status)
             if (
                 isinstance(status_resp, GetStatusResponse)
                 and status_resp.current_execution_id
@@ -359,7 +369,10 @@ async def ws_worker(websocket: WebSocket) -> None:
             raw = await websocket.receive_text()
             msg = parse_worker_message(raw)
 
-            if isinstance(msg, ExecutionStartedMessage):
+            # Command responses have a request_id field — route to the channel
+            if hasattr(msg, "request_id"):
+                await channel.deliver_response(raw)
+            elif isinstance(msg, ExecutionStartedMessage):
                 logger.debug(
                     "execution started: worker=%s execution=%s", worker_id, msg.execution_id
                 )

@@ -12,6 +12,7 @@ class WorkerConnection:
     current_execution_id: str | None
     websocket: Any
     connected_at: datetime
+    channel: Any = None  # WebSocketWorkerChannel, set after registration
 
 
 class WorkerRegistry:
@@ -50,6 +51,9 @@ class WorkerRegistry:
         if worker_id not in self._workers:
             raise KeyError(worker_id)
         self._workers[worker_id].current_execution_id = None
+
+    def get_worker(self, worker_id: str) -> WorkerConnection | None:
+        return self._workers.get(worker_id)
 
     def all_workers(self) -> list[WorkerConnection]:
         return list(self._workers.values())

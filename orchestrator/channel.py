@@ -6,6 +6,7 @@ decoupling the pipeline sequencer from raw WebSocket transport details.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Protocol, runtime_checkable
 
 from core.remote_protocol import AnyCommandRequest, AnyCommandResponse, parse_command_response
@@ -47,21 +48,32 @@ class WorkerChannel(Protocol):
 
 
 class WebSocketWorkerChannel:
-    """WorkerChannel implementation backed by a raw WebSocket connection."""
+    """WorkerChannel implementation backed by a raw WebSocket connection.
+
+    The main WebSocket loop must call deliver_response() when it receives
+    a command response message. send_command() sends requests directly on
+    the websocket but awaits responses via an internal asyncio.Queue,
+    avoiding concurrent recv() calls on the same socket.
+    """
 
     def __init__(self, websocket: Any, worker_id: str) -> None:
         self._websocket = websocket
         self._worker_id = worker_id
+        self._response_queue: asyncio.Queue[str] = asyncio.Queue()
 
     @property
     def worker_id(self) -> str:
         return self._worker_id
 
+    async def deliver_response(self, raw: str) -> None:
+        """Called by the main WebSocket loop to route a response to the waiting command."""
+        await self._response_queue.put(raw)
+
     async def send_command(self, request: AnyCommandRequest) -> AnyCommandResponse:
-        """Serialize request, send over WebSocket, receive response, validate."""
+        """Serialize request, send over WebSocket, await response from queue, validate."""
         try:
             await self._websocket.send_text(request.model_dump_json())
-            raw = await self._websocket.receive_text()
+            raw = await self._response_queue.get()
         except Exception as exc:
             raise PipelineAbort(
                 step_name=request.type,

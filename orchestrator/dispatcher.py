@@ -20,7 +20,6 @@ from core.remote_protocol import (
 from core.spec_manager import SpecManager
 from core.store import Store
 from core.task_manager import TaskManager
-from orchestrator.channel import WebSocketWorkerChannel
 from orchestrator.registry import WorkerRegistry
 from orchestrator.sequencer import PipelineSequencer
 
@@ -125,7 +124,11 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         registry.assign_job(worker.worker_id, reservation_id)
         dispatched_projects.add(project_t.id)
 
-        channel = WebSocketWorkerChannel(worker.websocket, worker.worker_id)
+        channel = worker.channel
+        if channel is None:
+            logger.warning("Worker %s has no channel, skipping", worker.worker_id)
+            registry.clear_job(worker.worker_id)
+            return False
 
         if pipeline_type == "merge":
             coro = sequencer.run_merge_pipeline(channel, task_t, project_t)

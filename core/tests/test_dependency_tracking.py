@@ -89,7 +89,11 @@ def _make_registry_with_worker() -> WorkerRegistry:
     ws = AsyncMock()
     ws.send_text = AsyncMock()
     ws.receive_text = AsyncMock()
-    registry.register("worker-1", [], ws)
+    conn = registry.register("worker-1", [], ws)
+    # Set a mock channel so dispatch_pending can use it
+    mock_channel = AsyncMock()
+    mock_channel.worker_id = "worker-1"
+    conn.channel = mock_channel
     return registry
 
 
