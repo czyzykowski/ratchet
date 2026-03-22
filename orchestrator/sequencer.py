@@ -324,7 +324,7 @@ class PipelineSequencer:
                 execution_id=str(execution_id),
                 prompt=prompt,
                 model=WORKER_MODEL,
-                tools=[],
+                tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
                 cwd=worktree_path,
             )
             claude_resp = await channel.send_command(run_claude_req)
@@ -576,7 +576,7 @@ class PipelineSequencer:
                 execution_id=str(execution_id),
                 prompt=fix_prompt,
                 model=WORKER_MODEL,
-                tools=[],
+                tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
                 cwd=worktree_path,
             )
             await channel.send_command(fix_req)
