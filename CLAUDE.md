@@ -14,6 +14,7 @@ core/
   store.py         — Store protocol, InMemoryStore, PostgresStore
   state_machine.py — InvalidTransitionError, TaskStateMachine
   spec_manager.py  — SpecManager
+  event_queries.py — has_pending_baseline_qa_failure (core event query helpers)
   db.py            — async connection pool, reads DATABASE_URL from environment
   execution_manager.py — ExecutionManager, prepare/cleanup worktree environment
   context_assembler.py — ContextAssembler, ExecutionContext, assembles Claude Code prompt
@@ -40,14 +41,13 @@ web/
     workers.py     — GET /api/workers (list connected workers from registry)
   tests/           — web API tests
 worker/
-  __init__.py
-  __main__.py     — enables python -m worker (--remote, --projects, --capabilities)
-  runner.py       — get_next_task, run_once, main — single-pass task executor
-  service.py      — WorkerService (legacy, kept for local notification loop)
-  log_buffer.py   — LogBuffer ring buffer with pub/sub for worker log streaming
-  remote.py       — RemoteWorker, connects to /ws/worker via WebSocket
-  executor.py     — CommandExecutor, handles orchestrator command requests
-  tests/          — integration tests
+  __init__.py      — exports LogBuffer, LogEntry only
+  __main__.py      — CLI: requires --remote URL, connects to orchestrator
+  remote.py        — RemoteWorker, connects to /ws/worker via WebSocket
+  executor.py      — CommandExecutor, handles orchestrator command requests
+  log_buffer.py    — LogBuffer ring buffer with pub/sub for worker log streaming
+  worktree.py      — git worktree lifecycle helpers (safe_symlink used by executor)
+  tests/           — worker tests (test_remote, test_executor, test_log_buffer)
 pyproject.toml     — dependencies
 flake.nix          — reproducible dev shell (nix develop)
 .env.example       — connection string templates
@@ -79,6 +79,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - `WorkerRegistry` (on `app.state.registry`) tracks all connected workers (local subprocess + any remote workers)
 - Dispatch loop runs as async task in lifespan, controlled by `DISPATCH_ENABLED` env var (default `true`)
 - Auto-merge: on each dispatch cycle, the worker attempts a local squash merge for one `ready_for_merge` task per project; `TASK_AUTO_MERGE_FAILED` prevents retry — use `scripts/merge-task.py` for manual merge
+- **Workers run in remote mode only**: `python -m worker` requires `--remote <URL>`; the orchestrator's `dispatch_loop` discovers tasks and drives workers via WebSocket commands — there is no local dispatch fallback
 
 ## Running Things
 
@@ -98,13 +99,13 @@ python db/smoke_test.py
 # Execute a spec
 scripts/run-spec.sh specs/10-update-claude-md.md
 
-# Run worker single pass (dispatch priority: QA → merge → implementation → compilation)
-.venv/bin/python -m worker
-
 # Run web UI with orchestrator + local worker subprocess (single process)
 .venv/bin/python -m web
 # Optional flags:
 .venv/bin/python -m web --port 9000 --no-dispatch
+
+# Connect a remote worker to an orchestrator
+.venv/bin/python -m worker --remote ws://localhost:8000/ws/worker --capabilities default
 
 # Run operational scripts (must use .venv/bin/python)
 .venv/bin/python scripts/board.py
@@ -118,7 +119,6 @@ scripts/
   add-project.py    — register a repo as a managed project
   add-task.py       — create a task in ready_for_spec status
   add-spec.py       — add and assign a spec, advance task to ready_for_implementation
-  run-next.py       — execute next ready task via worker
   board.py          — display task board grouped by status
   review-blocked.py — show blocked tasks with failure reasons
   archive-task.py   — abandon a task, transitioning it to the terminal 'abandoned' status
@@ -138,11 +138,6 @@ python scripts/add-task.py --project-id <uuid> --title <title>
 
 # Add a spec file and advance task to ready_for_implementation
 python scripts/add-spec.py --task-id <uuid> --file <spec_file_path>
-
-# Run the next ready_for_implementation task
-python scripts/run-next.py
-#   or equivalently:
-python -m worker
 
 # View task board
 python scripts/board.py
@@ -178,10 +173,8 @@ python scripts/add-task.py --project-id <project-uuid> --title "My task"
 # 3. Write a spec file and assign it
 python scripts/add-spec.py --task-id <task-uuid> --file path/to/spec.md
 
-# 4. Run the worker to execute the task
-python scripts/run-next.py
-#   or equivalently:
-python -m worker
+# 4. Start the web process (runs orchestrator + local worker automatically)
+.venv/bin/python -m web
 
 # 5. Check the board
 python scripts/board.py

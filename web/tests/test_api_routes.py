@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -12,7 +11,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core import events as ev
-from core.models import Project, Spec, Task
 from core.store import InMemoryStore
 from web.routes.api import events as api_events_router
 from web.routes.api.router import api_router
@@ -335,74 +333,6 @@ def test_should_stream_task_updated_event_via_sse(
 
     media_type = asyncio.get_event_loop().run_until_complete(_get_media_type())
     assert "text/event-stream" in media_type
-
-
-# --- Worker endpoint tests ---
-
-def test_should_return_json_from_post_run_next_when_no_tasks(
-    client: TestClient, store: InMemoryStore
-) -> None:
-    with patch(
-        "web.routes.api.worker.get_next_task",
-        new_callable=AsyncMock,
-        return_value=None,
-    ):
-        response = client.post("/api/worker/run-next")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "no_tasks_ready"
-
-
-def test_should_return_json_from_post_run_next_when_task_found(
-    client: TestClient, store: InMemoryStore
-) -> None:
-    task_id = uuid4()
-    project_id = uuid4()
-    spec_id = uuid4()
-    now = datetime.now(UTC)
-
-    fake_task = Task(
-        id=task_id,
-        project_id=project_id,
-        title="My Ready Task",
-        status=ev.READY_FOR_IMPLEMENTATION,
-        current_spec_id=spec_id,
-        refinement_count=0,
-        created_at=now,
-        updated_at=now,
-    )
-    fake_project = Project(
-        id=project_id,
-        name="Test Project",
-        repo_url="/tmp/repo",
-        local_path="/tmp/repo",
-        status="active",
-        created_at=now,
-        updated_at=now,
-    )
-    fake_spec = Spec(
-        id=spec_id,
-        task_id=task_id,
-        content="Do the thing",
-        previous_spec_id=None,
-        created_at=now,
-    )
-
-    with (
-        patch(
-            "web.routes.api.worker.get_next_task",
-            new_callable=AsyncMock,
-            return_value=(fake_task, fake_project, fake_spec),
-        ),
-        patch("web.routes.api.worker.run_once", new_callable=AsyncMock, return_value=True),
-    ):
-        response = client.post("/api/worker/run-next")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "started"
-    assert data["task_id"] == str(task_id)
 
 
 # --- Archive task endpoint tests ---

@@ -1,15 +1,13 @@
-"""Unit tests for LogBuffer, WorkerLogHandler, and WorkerService log lifecycle."""
+"""Unit tests for LogBuffer and WorkerLogHandler."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from worker.log_buffer import LogBuffer, LogEntry, WorkerLogHandler
-from worker.service import WorkerService
 
 # ---------------------------------------------------------------------------
 # LogBuffer tests
@@ -116,58 +114,3 @@ def test_handler_emits_to_buffer():
         assert "test message" in recent[0].message
     finally:
         test_logger.removeHandler(handler)
-
-
-# ---------------------------------------------------------------------------
-# WorkerService handler lifecycle tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def mock_postgres_store():
-    with patch("worker.service.PostgresStore") as m:
-        yield m
-
-
-@pytest.fixture()
-def mock_invoker():
-    with patch("worker.service.ClaudeCodeInvoker") as m:
-        instance = MagicMock()
-        instance.terminate = MagicMock()
-        m.return_value = instance
-        yield m, instance
-
-
-def _make_service() -> WorkerService:
-    pool = MagicMock()
-    return WorkerService(pool=pool, dsn="postgresql://localhost/test")
-
-
-def _blocking_loop_factory():
-    fut: asyncio.Future = asyncio.Future()
-
-    async def _loop(*args, **kwargs):
-        await fut
-
-    from unittest.mock import AsyncMock
-    mock = AsyncMock(side_effect=_loop)
-    return fut, mock
-
-
-@pytest.mark.asyncio
-async def test_handler_installed_on_start_removed_on_stop(mock_postgres_store, mock_invoker):
-    fut, loop_mock = _blocking_loop_factory()
-    with patch("worker.service.notification_loop", loop_mock):
-        svc = _make_service()
-        worker_logger = logging.getLogger("worker")
-
-        await svc.start()
-        handlers_after_start = list(worker_logger.handlers)
-        assert svc._log_handler is not None
-        assert svc._log_handler in handlers_after_start
-
-        await svc.stop(graceful=False)
-        handlers_after_stop = list(worker_logger.handlers)
-        assert svc._log_handler is None
-        worker_log_handlers = [h for h in handlers_after_stop if isinstance(h, WorkerLogHandler)]
-        assert not any(h not in handlers_after_start for h in worker_log_handlers)

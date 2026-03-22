@@ -106,7 +106,9 @@ async def main() -> None:
         print("=== RATCHET BOARD ===")
 
         # Show tasks with pending baseline QA failures (from events, no live re-run)
-        from worker.dispatcher import _has_pending_baseline_qa_failure
+        from core.event_queries import (  # noqa: PLC0415
+            has_pending_baseline_qa_failure as _has_pending_baseline_qa_failure,
+        )
         baseline_blocked: list[str] = []
         for task in all_tasks:
             if task["status"] not in (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT):

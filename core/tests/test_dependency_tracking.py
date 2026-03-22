@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from core import events as ev
 from core.project_manager import ProjectManager
@@ -11,7 +11,8 @@ from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
 from core.task_manager import TaskManager
-from worker.runner import get_next_task
+from orchestrator.dispatcher import dispatch_pending
+from orchestrator.registry import WorkerRegistry
 
 FAKE_REPO_PATH = "/fake/repo"
 
@@ -80,6 +81,16 @@ async def _deploy_task(store: InMemoryStore, task_id: uuid.UUID) -> None:
     await sm.transition(task_id, ev.READY_FOR_QA)
     await sm.transition(task_id, ev.READY_FOR_DEPLOYMENT)
     await sm.transition(task_id, ev.DEPLOYED)
+
+
+def _make_registry_with_worker() -> WorkerRegistry:
+    """Return a registry with one idle worker available."""
+    registry = WorkerRegistry()
+    ws = AsyncMock()
+    ws.send_text = AsyncMock()
+    ws.receive_text = AsyncMock()
+    registry.register("worker-1", [], ws)
+    return registry
 
 
 # ---------------------------------------------------------------------------
@@ -169,49 +180,18 @@ async def test_depends_on_empty_when_no_dependency_events() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Worker skips tasks with unmet deps
+# Orchestrator dispatches tasks with depends_on populated
 # ---------------------------------------------------------------------------
 
 
-async def test_worker_skips_task_when_dep_not_deployed() -> None:
-    """should skip task when dependency is not yet deployed."""
+async def test_dispatch_pending_dispatches_task_with_depends_on_populated() -> None:
+    """should dispatch task and have depends_on field populated from events."""
     store = InMemoryStore()
-    pm, project = await _setup_project(store)
-    spec_manager = SpecManager(store)
-    state_machine = TaskStateMachine(store)
+    _pm, project = await _setup_project(store)
 
-    # Create upstream task (not deployed)
-    upstream_id = await _setup_task(store, project.id, title="Upstream")
-
-    # Create downstream task with dep on upstream
-    downstream_id = await _setup_task(store, project.id, title="Downstream")
-    await store.append_event(
-        aggregate_id=downstream_id,
-        aggregate_type="task",
-        event_type=ev.TASK_DEPENDENCY_ADDED,
-        payload={"depends_on": [str(upstream_id)]},
-    )
-    await _advance_to_ready(store, downstream_id)
-    await _setup_spec(store, downstream_id)
-
-    result = await get_next_task(store, pm, spec_manager, state_machine)
-
-    # Downstream should be skipped; upstream has no spec so also skipped
-    assert result is None
-
-
-async def test_worker_picks_task_when_all_deps_deployed() -> None:
-    """should pick task when all dependencies are deployed."""
-    store = InMemoryStore()
-    pm, project = await _setup_project(store)
-    spec_manager = SpecManager(store)
-    state_machine = TaskStateMachine(store)
-
-    # Create upstream and deploy it
     upstream_id = await _setup_task(store, project.id, title="Upstream")
     await _deploy_task(store, upstream_id)
 
-    # Create downstream with dep on upstream
     downstream_id = await _setup_task(store, project.id, title="Downstream")
     await store.append_event(
         aggregate_id=downstream_id,
@@ -222,38 +202,43 @@ async def test_worker_picks_task_when_all_deps_deployed() -> None:
     await _advance_to_ready(store, downstream_id)
     await _setup_spec(store, downstream_id)
 
-    result = await get_next_task(store, pm, spec_manager, state_machine)
+    registry = _make_registry_with_worker()
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline", new_callable=AsyncMock
+    ):
+        count = await dispatch_pending(store, registry)
 
-    assert result is not None
-    task, _project, _spec = result
-    assert task.id == downstream_id
+    assert count == 1
+
+    task = await TaskManager(store).get_task(downstream_id)
+    assert task is not None
+    assert str(upstream_id) in task.depends_on
 
 
-async def test_worker_skips_downstream_picks_upstream_when_ready() -> None:
-    """should pick upstream (ready) over downstream (blocked by dep) when both are ready."""
+async def test_dispatch_pending_returns_zero_when_no_ready_tasks() -> None:
+    """should return 0 when no tasks are ready for dispatch."""
     store = InMemoryStore()
-    pm, project = await _setup_project(store)
-    spec_manager = SpecManager(store)
-    state_machine = TaskStateMachine(store)
+    _pm, project = await _setup_project(store)
 
-    # Upstream task — ready for implementation with a spec
-    upstream_id = await _setup_task(store, project.id, title="Upstream")
-    await _advance_to_ready(store, upstream_id)
-    await _setup_spec(store, upstream_id)
+    # Task exists but not ready for implementation (no spec assigned, not advanced)
+    await _setup_task(store, project.id, title="Draft task")
 
-    # Downstream task — depends on upstream (not yet deployed)
-    downstream_id = await _setup_task(store, project.id, title="Downstream")
-    await store.append_event(
-        aggregate_id=downstream_id,
-        aggregate_type="task",
-        event_type=ev.TASK_DEPENDENCY_ADDED,
-        payload={"depends_on": [str(upstream_id)]},
-    )
-    await _advance_to_ready(store, downstream_id)
-    await _setup_spec(store, downstream_id)
+    registry = _make_registry_with_worker()
+    count = await dispatch_pending(store, registry)
 
-    result = await get_next_task(store, pm, spec_manager, state_machine)
+    assert count == 0
 
-    assert result is not None
-    task, _project, _spec = result
-    assert task.id == upstream_id
+
+async def test_dispatch_pending_returns_zero_when_no_workers_available() -> None:
+    """should return 0 when no workers are available in the registry."""
+    store = InMemoryStore()
+    _pm, project = await _setup_project(store)
+
+    task_id = await _setup_task(store, project.id, title="Ready task")
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    registry = WorkerRegistry()  # empty — no workers
+    count = await dispatch_pending(store, registry)
+
+    assert count == 0

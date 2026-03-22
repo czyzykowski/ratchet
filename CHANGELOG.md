@@ -3,6 +3,25 @@
 ## [Unreleased]
 
 ### Added
+- `core/event_queries.py` — `has_pending_baseline_qa_failure()` migrated from `worker/event_helpers.py`
+
+### Removed
+- `worker/dispatcher.py` — `ProjectDispatcher`, `DispatchResult` (replaced by `orchestrator/dispatcher.py`)
+- `worker/pipelines/` — `ImplPipeline`, `QAPipeline`, `MergePipeline` (replaced by `orchestrator/sequencer.py`)
+- `worker/task_finder.py` — task discovery (replaced by orchestrator dispatch logic)
+- `worker/event_helpers.py` — stateless helpers (`has_pending_baseline_qa_failure` moved to `core/event_queries.py`)
+- `worker/runner.py` — `notification_loop`, `get_next_task`, `run_once` (replaced by orchestrator)
+- `worker/service.py` — `WorkerService` wrapping `notification_loop` (replaced by `LocalWorkerManager`)
+- `worker/listener.py` — Postgres LISTEN/NOTIFY (only used by `notification_loop`)
+- `worker/__init__.py` exports: `WorkerService`, `WorkerSettings` removed; only `LogBuffer`, `LogEntry` remain
+- `worker/__main__.py` — `--once` mode removed; `--remote` is now required
+- `web/routes/api/worker.py` — `POST /worker/run-next` endpoint removed (dispatch is automatic via orchestrator)
+- `web/routes/worker.py` — `POST /worker/run-next` HTML route removed
+- `scripts/run-next.py` — manual dispatch trigger removed (orchestrator dispatch loop runs automatically)
+- `scripts/run-qa.py` — manual QA trigger removed (QA is driven by orchestrator pipeline)
+- Old worker tests: `test_loop`, `test_notification_loop_refresh`, `test_dispatcher`, `test_runner`, `test_dispatch_merge`, `test_merge_once`, `test_run_qa`, `test_poll_pr_merges`, `test_module_imports`, `test_service`, `test_listener`
+
+### Added
 - Crash recovery: orchestrator replays events on startup to find orphaned in-progress tasks and resets them after a configurable grace period (`RECOVERY_GRACE_PERIOD_SECONDS`, default 60s)
 - Disconnect grace period: workers have a configurable timeout (`WORKER_RECONNECT_TIMEOUT_SECONDS`, default 30s) to reconnect before their in-progress task is reset
 - `TASK_ASSIGNED_TO_WORKER` events now record the real `execution_id` (not `"pending"`) on all pipeline types (impl, QA, merge)
