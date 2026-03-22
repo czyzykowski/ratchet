@@ -50,7 +50,7 @@ def _heartbeat_msg() -> str:
 
 def test_health_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
@@ -59,7 +59,7 @@ def test_health_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_workers_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         response = client.get("/workers")
     assert response.status_code == 200
@@ -73,7 +73,7 @@ def test_workers_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_websocket_registration_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg(["python", "git"]))
@@ -86,7 +86,7 @@ def test_websocket_registration_success(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_websocket_wrong_first_message(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_heartbeat_msg())
@@ -98,7 +98,7 @@ def test_websocket_wrong_first_message(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_health_shows_connected_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg())
@@ -109,7 +109,7 @@ def test_health_shows_connected_worker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_workers_shows_registered_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg(["python"]))
@@ -125,7 +125,7 @@ def test_workers_shows_registered_worker(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_execution_completed_clears_job(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg())
@@ -147,7 +147,7 @@ def test_execution_completed_clears_job(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_disconnect_removes_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg())
@@ -161,7 +161,7 @@ def test_disconnect_removes_worker(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_health_after_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
-    monkeypatch.setenv("DISPATCH_ENABLED", "false")
+
     with TestClient(app) as client:
         with client.websocket_connect("/ws/worker") as ws:
             ws.send_text(_hello_msg())

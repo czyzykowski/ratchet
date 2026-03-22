@@ -222,8 +222,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dispatcher = JobDispatcher(registry)
 
     store = PostgresStore()
-    # Skip dispatch loop when DISPATCH_ENABLED=false (tests use fake DATABASE_URL)
-    dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "true").lower() in (
+    # Dispatch loop only runs when explicitly enabled. This prevents the loop
+    # from starting in test subprocesses or when the orchestrator server module
+    # is imported by tests that don't intend to dispatch.
+    dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "false").lower() in (
         "true", "1", "yes",
     )
     dispatch_task: asyncio.Task[None] | None = None
