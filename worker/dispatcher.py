@@ -34,6 +34,10 @@ class DispatchResult:
 
 
 class ProjectDispatcher:
+    # Grace period before recovering in_progress tasks as orphans.
+    # Tasks that became in_progress recently may be running on a remote worker.
+    orphan_grace_seconds: float = 300
+
     def __init__(
         self,
         store: Store,
@@ -75,9 +79,22 @@ class ProjectDispatcher:
         )
 
     async def recover_orphans(self) -> int:
+        from datetime import UTC, datetime, timedelta
+
         orphans = await self._find_tasks(statuses={ev.IN_PROGRESS})
         reset_count = 0
+        now = datetime.now(UTC)
         for task, project, _ in orphans:
+            # Skip tasks that became in_progress recently — they may be running
+            # on a remote worker via the orchestrator. Only recover tasks that
+            # have been stuck for > 5 minutes (likely true orphans from crashes).
+            if task.updated_at and (now - task.updated_at).total_seconds() < self.orphan_grace_seconds:
+                logger.debug(
+                    "Skipping recent in_progress task=%s (updated %s ago)",
+                    task.id,
+                    now - task.updated_at,
+                )
+                continue
             logger.warning(
                 "Orphaned in_progress task at startup: task=%s project=%s"
                 " — resetting to ready_for_implementation",
