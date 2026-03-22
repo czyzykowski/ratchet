@@ -7,9 +7,12 @@ decoupling the pipeline sequencer from raw WebSocket transport details.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Protocol, runtime_checkable
 
 from core.remote_protocol import AnyCommandRequest, AnyCommandResponse, parse_command_response
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineAbort(Exception):
@@ -52,14 +55,14 @@ class WebSocketWorkerChannel:
 
     The main WebSocket loop must call deliver_response() when it receives
     a command response message. send_command() sends requests directly on
-    the websocket but awaits responses via an internal asyncio.Queue,
-    avoiding concurrent recv() calls on the same socket.
+    the websocket but awaits responses via per-request asyncio.Future objects,
+    matched by request_id. This handles out-of-order responses correctly.
     """
 
     def __init__(self, websocket: Any, worker_id: str) -> None:
         self._websocket = websocket
         self._worker_id = worker_id
-        self._response_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._pending: dict[str, asyncio.Future[str]] = {}
 
     @property
     def worker_id(self) -> str:
@@ -67,14 +70,32 @@ class WebSocketWorkerChannel:
 
     async def deliver_response(self, raw: str) -> None:
         """Called by the main WebSocket loop to route a response to the waiting command."""
-        await self._response_queue.put(raw)
+        try:
+            response = parse_command_response(raw)
+        except Exception:
+            logger.warning("Failed to parse command response, dropping: %s", raw[:200])
+            return
+
+        future = self._pending.pop(response.request_id, None)
+        if future is not None and not future.done():
+            future.set_result(raw)
+        else:
+            logger.warning(
+                "No pending request for response request_id=%s, dropping",
+                response.request_id,
+            )
 
     async def send_command(self, request: AnyCommandRequest) -> AnyCommandResponse:
-        """Serialize request, send over WebSocket, await response from queue, validate."""
+        """Serialize request, send over WebSocket, await matched response, validate."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+        self._pending[request.request_id] = future
+
         try:
             await self._websocket.send_text(request.model_dump_json())
-            raw = await self._response_queue.get()
+            raw = await future
         except Exception as exc:
+            self._pending.pop(request.request_id, None)
             raise PipelineAbort(
                 step_name=request.type,
                 error=str(exc),
@@ -82,16 +103,6 @@ class WebSocketWorkerChannel:
             ) from exc
 
         response = parse_command_response(raw)
-
-        if response.request_id != request.request_id:
-            raise PipelineAbort(
-                step_name=request.type,
-                error=(
-                    f"Request ID mismatch: expected {request.request_id!r},"
-                    f" got {response.request_id!r}"
-                ),
-                request_id=request.request_id,
-            )
 
         if not response.success:
             raise PipelineAbort(
