@@ -131,9 +131,11 @@ class CommandExecutor:
         self, request: SetupProjectRequest
     ) -> SetupProjectResponse:
         try:
+            path = os.path.expanduser(request.path)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             bundle_bytes = base64.b64decode(request.bundle_b64)
-            git_transfer.extract_bundle(bundle_bytes, request.path)
-            self._projects[request.project_id] = request.path
+            git_transfer.extract_bundle(bundle_bytes, path)
+            self._projects[request.project_id] = path
             return SetupProjectResponse(
                 type="setup_project_response",
                 request_id=request.request_id,
