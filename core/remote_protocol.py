@@ -234,7 +234,7 @@ class SetupEnvironmentRequest(BaseModel):
     request_id: str
     project_id: str
     execution_id: str
-    symlinks: dict[str, str]
+    symlinks: list[str]  # relative paths from project root to symlink into worktree
 
 
 class GetStatusRequest(BaseModel):

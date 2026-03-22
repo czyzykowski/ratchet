@@ -45,6 +45,17 @@ from orchestrator.channel import PipelineAbort, WorkerChannel
 
 logger = logging.getLogger(__name__)
 
+# Relative paths to symlink from project root into each worktree.
+# Keys are names relative to project root; the executor resolves
+# them to absolute src (project_root/name) → dst (worktree/name).
+_STANDARD_SYMLINKS = [
+    ".venv",
+    "node_modules",
+    ".env",
+    ".deno",
+    "web/spa/node_modules",
+]
+
 
 @dataclass
 class PipelineResult:
@@ -301,13 +312,13 @@ class PipelineSequencer:
             assert isinstance(create_wt_resp, CreateWorktreeResponse)
             worktree_path = create_wt_resp.worktree_path or f"/remote/{execution_id}"
 
-            # Step 6: SetupEnvironment
+            # Step 6: SetupEnvironment — symlink shared deps into worktree
             setup_env_req = SetupEnvironmentRequest(
                 type="setup_environment",
                 request_id=str(uuid4()),
                 project_id=str(project_id),
                 execution_id=str(execution_id),
-                symlinks={},
+                symlinks=_STANDARD_SYMLINKS,
             )
             await channel.send_command(setup_env_req)
 
@@ -490,7 +501,7 @@ class PipelineSequencer:
                 request_id=str(uuid4()),
                 project_id=str(project_id),
                 execution_id=str(execution_id),
-                symlinks={},
+                symlinks=_STANDARD_SYMLINKS,
             )
             await channel.send_command(setup_env_req)
 
@@ -759,7 +770,7 @@ class PipelineSequencer:
                 request_id=str(uuid4()),
                 project_id=str(project_id),
                 execution_id=str(execution_id),
-                symlinks={},
+                symlinks=_STANDARD_SYMLINKS,
             )
             await channel.send_command(setup_env_req)
 

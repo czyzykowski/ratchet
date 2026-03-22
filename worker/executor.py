@@ -397,7 +397,12 @@ class CommandExecutor:
         self, request: SetupEnvironmentRequest
     ) -> SetupEnvironmentResponse:
         try:
-            for src, dst in request.symlinks.items():
+            project_path = self._projects[request.project_id]
+            worktree_path = self._worktree_path(request.project_id, request.execution_id)
+            for name in request.symlinks:
+                src = os.path.join(project_path, name)
+                dst = os.path.join(worktree_path, name)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
                 safe_symlink(src, dst)
             return SetupEnvironmentResponse(
                 type="setup_environment_response",
