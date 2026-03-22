@@ -304,6 +304,29 @@ class CommandExecutor:
                 error=str(exc),
             )
 
+    @staticmethod
+    def _read_session_jsonl(cwd: str) -> str | None:
+        """Read the most recent Claude session JSONL for the given working directory."""
+        import glob as _glob
+
+        slug = os.path.abspath(cwd).replace("/", "-").replace(".", "-")
+        project_dir = os.path.join(
+            os.path.expanduser("~"), ".claude", "projects", slug
+        )
+        if not os.path.isdir(project_dir):
+            return None
+        jsonl_files = sorted(
+            _glob.glob(os.path.join(project_dir, "*.jsonl")),
+            key=os.path.getmtime,
+        )
+        if not jsonl_files:
+            return None
+        try:
+            with open(jsonl_files[-1]) as f:
+                return f.read()
+        except OSError:
+            return None
+
     async def _handle_run_claude(self, request: RunClaudeRequest) -> RunClaudeResponse:
         try:
             claude_request = ClaudeRequest(
@@ -315,6 +338,7 @@ class CommandExecutor:
             self._current_execution_id = request.execution_id
             result = await asyncio.to_thread(claude_subprocess.run, claude_request)
             status = "completed" if result.returncode == 0 else "failed"
+            session_jsonl = self._read_session_jsonl(request.cwd)
             return RunClaudeResponse(
                 type="run_claude_response",
                 request_id=request.request_id,
@@ -323,6 +347,7 @@ class CommandExecutor:
                 stderr=result.stderr,
                 returncode=result.returncode,
                 status=status,
+                session_jsonl=session_jsonl,
             )
         except Exception as exc:
             return RunClaudeResponse(

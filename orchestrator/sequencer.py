@@ -350,11 +350,13 @@ class PipelineSequencer:
             from core.models import ExecutionTrace
             from datetime import UTC, datetime
 
+            session_jsonl = claude_resp.session_jsonl or ""
             trace_content = (
                 f"# Execution Trace: {execution_id}\n"
                 f"# Task: {task_id}\n"
                 f"# Returncode: {claude_resp.returncode}\n\n"
-                f"{stdout}\n{stderr}"
+                f"## Claude Output\n{stdout}\n{stderr}\n\n"
+                f"## Session Transcript (JSONL)\n{session_jsonl}"
             )
             now = datetime.now(UTC)
             trace = ExecutionTrace(

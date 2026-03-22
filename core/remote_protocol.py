@@ -319,6 +319,7 @@ class RunClaudeResponse(BaseModel):
     stdout: str | None = None
     stderr: str | None = None
     returncode: int | None = None
+    session_jsonl: str | None = None  # full Claude session transcript
 
 
 class RunCommandResponse(BaseModel):
