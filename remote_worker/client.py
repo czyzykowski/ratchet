@@ -32,6 +32,9 @@ from core.store import InMemoryStore
 
 logger = logging.getLogger(__name__)
 
+# Git bundles can be large; default websockets limit is 1MB.
+WS_MAX_MESSAGE_SIZE = 100 * 1024 * 1024  # 100 MB
+
 
 class ClaudeAuthError(Exception):
     """Raised when Claude binary authentication or API check fails."""
@@ -97,7 +100,7 @@ class RemoteWorkerClient:
         ws_url = ws_url.replace("http://", "ws://")
         ws_url = ws_url.rstrip("/") + "/ws/worker"
 
-        async with websockets.asyncio.client.connect(ws_url, max_size=100 * 1024 * 1024) as ws:
+        async with websockets.asyncio.client.connect(ws_url, max_size=WS_MAX_MESSAGE_SIZE) as ws:
             hello = WorkerHelloMessage(
                 type="worker_hello",
                 worker_id=self._worker_id,
