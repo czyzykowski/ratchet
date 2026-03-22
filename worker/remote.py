@@ -66,8 +66,7 @@ class RemoteWorker:
 
     async def _connect_and_loop(self) -> None:
         """Single connection lifecycle: connect, handshake, command loop."""
-        base_url = _to_ws_url(self._orchestrator_url)
-        ws_url = base_url.rstrip("/") + "/ws/worker"
+        ws_url = _to_ws_url(self._orchestrator_url)
 
         async with websockets.asyncio.client.connect(
             ws_url, max_size=100 * 1024 * 1024
