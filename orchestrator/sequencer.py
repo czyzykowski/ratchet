@@ -333,8 +333,28 @@ class PipelineSequencer:
             claude_resp = await channel.send_command(run_claude_req)
             assert isinstance(claude_resp, RunClaudeResponse)
 
-            # Step 9: parse output for COMPLETED/BLOCKED markers
+            # Step 9: save trace and parse output for COMPLETED/BLOCKED markers
             stdout = claude_resp.stdout or ""
+            stderr = claude_resp.stderr or ""
+            from core.models import ExecutionTrace
+            from datetime import UTC, datetime
+
+            trace_content = (
+                f"# Execution Trace: {execution_id}\n"
+                f"# Task: {task_id}\n"
+                f"# Returncode: {claude_resp.returncode}\n\n"
+                f"{stdout}\n{stderr}"
+            )
+            now = datetime.now(UTC)
+            trace = ExecutionTrace(
+                execution_id=execution_id,
+                task_id=task_id,
+                spec_id=spec.id,
+                content=trace_content,
+                started_at=now,
+                created_at=now,
+            )
+            self._store.save_trace(trace)
             is_blocked = (
                 "BLOCKED" in stdout
                 or claude_resp.status == "blocked"
