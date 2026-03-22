@@ -16,6 +16,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from core.store import PostgresStore, Store
+from orchestrator.dispatcher import dispatch_loop
+from orchestrator.registry import WorkerRegistry
+from web.local_worker import LocalWorkerManager, LocalWorkerSettings
 from web.routes import blocked as blocked_router
 from web.routes import board as board_router
 from web.routes import worker as worker_router
@@ -24,25 +27,23 @@ from web.routes.api import events as api_events_router
 from web.routes.api import feature_sessions as feature_sessions_router
 from web.routes.api import spec_sessions as spec_sessions_router
 from web.routes.api.router import api_router
+from web.routes.api.ws_worker import router as ws_worker_router
 from web.templating import templates  # noqa: F401
 from worker.log_buffer import LogBuffer
-from worker.service import WorkerService, WorkerSettings
 
 logger = logging.getLogger(__name__)
 
 
-def _worker_settings_from_env() -> WorkerSettings:
-    """Read worker configuration from environment variables."""
-    watchdog_timeout = int(os.environ.get("WORKER_WATCHDOG_TIMEOUT", "300"))
-    max_workers = int(os.environ.get("WORKER_MAX_WORKERS", "1"))
+def _local_worker_settings_from_env() -> LocalWorkerSettings:
+    """Read local worker configuration from environment variables."""
     capabilities_raw = os.environ.get("WORKER_CAPABILITIES", "")
-    local_capabilities = [c.strip() for c in capabilities_raw.split(",") if c.strip()]
+    capabilities = [c.strip() for c in capabilities_raw.split(",") if c.strip()]
     enabled = os.environ.get("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")
-    return WorkerSettings(
-        watchdog_timeout=watchdog_timeout,
-        max_workers=max_workers,
-        local_capabilities=local_capabilities,
+    port = int(os.environ.get("WEB_PORT", "8000"))
+    return LocalWorkerSettings(
         enabled=enabled,
+        capabilities=capabilities,
+        port=port,
     )
 
 
@@ -79,15 +80,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.spec_sessions = {}
     app.state.feature_sessions = {}
 
-    database_url = os.environ["DATABASE_URL"]
-    dsn = database_url.replace("postgresql+psycopg://", "postgresql://")
+    # Worker registry shared between WebSocket endpoint and dispatch loop
+    registry = WorkerRegistry()
+    app.state.registry = registry
+
+    # Local worker subprocess
     log_buffer = LogBuffer()
-    worker_service = WorkerService(
-        pool=pool, dsn=dsn, settings=_worker_settings_from_env(), log_buffer=log_buffer
+    local_worker = LocalWorkerManager(
+        store=store,
+        settings=_local_worker_settings_from_env(),
+        log_buffer=log_buffer,
     )
-    app.state.worker_service = worker_service
+    app.state.local_worker = local_worker
+    # Backward-compat alias used by existing worker API routes
+    app.state.worker_service = local_worker
     app.state.worker_log_buffer = log_buffer
-    await worker_service.start()
+    await local_worker.start()
+
+    # Dispatch loop — routes ready tasks to connected workers
+    dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "true").lower() in (
+        "true", "1", "yes",
+    )
+    dispatch_task: asyncio.Task[None] | None = None
+    if dispatch_enabled:
+        dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
 
     async def _refresh_loop() -> None:
         while True:
@@ -104,18 +120,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         refresh_task.cancel()
         listen_task.cancel()
-        for task in (refresh_task, listen_task):
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        if dispatch_task is not None:
+            dispatch_task.cancel()
+        for task in (refresh_task, listen_task, dispatch_task):
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
         for session in list(app.state.spec_sessions.values()):
             await session.close()
         app.state.spec_sessions.clear()
         for session in list(app.state.feature_sessions.values()):
             await session.close()
         app.state.feature_sessions.clear()
-        await worker_service.stop(graceful=True)
+        await local_worker.stop(graceful=True)
         await close_pool()
 
 
@@ -133,6 +152,7 @@ app.include_router(blocked_router.router)
 app.include_router(board_router.router)
 app.include_router(worker_router.router)
 app.include_router(api_router)
+app.include_router(ws_worker_router)
 app.include_router(api_events_router.router)
 app.include_router(spec_sessions_router.router, prefix="/api")
 app.include_router(feature_sessions_router.router, prefix="/api")

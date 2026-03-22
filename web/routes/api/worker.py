@@ -12,9 +12,9 @@ from pydantic import BaseModel
 from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
+from web.local_worker import LocalWorkerManager
 from web.sse import broadcast_task_updated
 from worker.runner import get_next_task, run_once
-from worker.service import WorkerService
 
 router = APIRouter(prefix="/worker")
 
@@ -24,22 +24,22 @@ class StopBody(BaseModel):
 
 
 class SettingsBody(BaseModel):
-    watchdog_timeout: int | None = None
-    max_workers: int | None = None
-    local_capabilities: list[str] | None = None
     enabled: bool | None = None
+    capabilities: list[str] | None = None
+    port: int | None = None
 
 
-def _status_response(ws: WorkerService) -> dict[str, object]:
-    started_at = ws.started_at
+def _status_response(lw: LocalWorkerManager) -> dict[str, object]:
+    started_at = lw.started_at
     uptime_seconds = None
     if started_at is not None:
         uptime_seconds = (datetime.now(UTC) - started_at).total_seconds()
     return {
-        "status": ws.status,
+        "status": lw.status,
         "started_at": started_at.isoformat() if started_at is not None else None,
-        "error_message": ws.error_message,
-        "settings": dataclasses.asdict(ws.settings),
+        "error_message": lw.error_message,
+        "pid": lw.pid,
+        "settings": dataclasses.asdict(lw.settings),
         "uptime_seconds": uptime_seconds,
     }
 
@@ -63,41 +63,41 @@ async def run_next(request: Request, background_tasks: BackgroundTasks) -> JSONR
 
 @router.get("/status")
 async def get_status(request: Request) -> JSONResponse:
-    ws: WorkerService = request.app.state.worker_service
-    return JSONResponse(_status_response(ws))
+    lw: LocalWorkerManager = request.app.state.worker_service
+    return JSONResponse(_status_response(lw))
 
 
 @router.post("/start")
 async def start_worker(request: Request) -> JSONResponse:
-    ws: WorkerService = request.app.state.worker_service
+    lw: LocalWorkerManager = request.app.state.worker_service
     try:
-        await ws.start()
+        await lw.start()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return JSONResponse(_status_response(ws))
+    return JSONResponse(_status_response(lw))
 
 
 @router.post("/stop")
 async def stop_worker(request: Request, body: StopBody = StopBody()) -> JSONResponse:
-    ws: WorkerService = request.app.state.worker_service
-    if ws.status == "stopped":
+    lw: LocalWorkerManager = request.app.state.worker_service
+    if lw.status == "stopped":
         raise HTTPException(status_code=409, detail="Worker is already stopped")
-    await ws.stop(graceful=body.graceful)
-    return JSONResponse(_status_response(ws))
+    await lw.stop(graceful=body.graceful)
+    return JSONResponse(_status_response(lw))
 
 
 @router.post("/restart")
 async def restart_worker(request: Request, body: StopBody = StopBody()) -> JSONResponse:
-    ws: WorkerService = request.app.state.worker_service
-    await ws.restart(graceful=body.graceful)
-    return JSONResponse(_status_response(ws))
+    lw: LocalWorkerManager = request.app.state.worker_service
+    await lw.restart(graceful=body.graceful)
+    return JSONResponse(_status_response(lw))
 
 
 @router.patch("/settings")
 async def update_settings(request: Request, body: SettingsBody) -> JSONResponse:
-    ws: WorkerService = request.app.state.worker_service
-    current = ws.settings
+    lw: LocalWorkerManager = request.app.state.worker_service
+    current = lw.settings
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     merged = dataclasses.replace(current, **updates)
-    await ws.update_settings(merged)
-    return JSONResponse(dataclasses.asdict(ws.settings))
+    await lw.update_settings(merged)
+    return JSONResponse(dataclasses.asdict(lw.settings))

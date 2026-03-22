@@ -1,14 +1,12 @@
-"""FastAPI orchestrator server — health, worker status, and WebSocket worker endpoint."""
+"""WebSocket endpoint for worker connections — /ws/worker."""
+
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core import events as ev
 from core import git_transfer
@@ -27,12 +25,13 @@ from core.remote_protocol import (
     parse_worker_message,
 )
 from core.state_machine import TaskStateMachine
-from core.store import PostgresStore, Store
+from core.store import Store
 from core.task_manager import TaskManager
-from orchestrator.dispatcher import JobDispatcher, dispatch_loop
 from orchestrator.registry import WorkerConnection, WorkerRegistry
 
 logger = logging.getLogger(__name__)
+
+router = APIRouter()
 
 
 async def _handle_execution_completed(
@@ -140,8 +139,7 @@ async def _handle_execution_failed(
 async def handle_disconnect(
     worker_conn: WorkerConnection, store: Store, registry: WorkerRegistry
 ) -> None:
-    """Handle worker disconnect: fail active execution and return task to ready_for_implementation.
-    """
+    """Handle worker disconnect: fail active execution, return task to ready_for_implementation."""
     if worker_conn.current_execution_id is None:
         return
 
@@ -211,70 +209,12 @@ async def handle_disconnect(
         )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
-        logger.error("DATABASE_URL environment variable is not set")
-        raise RuntimeError("DATABASE_URL environment variable is required")
-
-    registry = WorkerRegistry()
-    dispatcher = JobDispatcher(registry)
-
-    store = PostgresStore()
-    # Dispatch loop only runs when explicitly enabled. This prevents the loop
-    # from starting in test subprocesses or when the orchestrator server module
-    # is imported by tests that don't intend to dispatch.
-    dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "false").lower() in (
-        "true", "1", "yes",
-    )
-    dispatch_task: asyncio.Task[None] | None = None
-    if dispatch_enabled:
-        dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
-
-    app.state.store = store
-    app.state.registry = registry
-    app.state.dispatcher = dispatcher
-    app.state.dispatch_task = dispatch_task
-
-    yield
-
-    if dispatch_task is not None:
-        dispatch_task.cancel()
-        try:
-            await dispatch_task
-        except asyncio.CancelledError:
-            pass
-
-
-app = FastAPI(lifespan=lifespan)
-
-
-@app.get("/health")
-async def health() -> dict[str, object]:
-    workers = len(app.state.registry.all_workers())
-    return {"status": "ok", "workers": workers}
-
-
-@app.get("/workers")
-async def workers() -> list[dict[str, object]]:
-    return [
-        {
-            "id": w.worker_id,
-            "capabilities": w.capabilities,
-            "current_execution_id": w.current_execution_id,
-            "connected_at": w.connected_at.isoformat(),
-        }
-        for w in app.state.registry.all_workers()
-    ]
-
-
-@app.websocket("/ws/worker")
+@router.websocket("/ws/worker")
 async def ws_worker(websocket: WebSocket) -> None:
     await websocket.accept()
     worker_id = str(uuid4())
-    registry: WorkerRegistry = app.state.registry
-    dispatcher: JobDispatcher = app.state.dispatcher
+    registry: WorkerRegistry = websocket.app.state.registry
+    store: Store = websocket.app.state.store
 
     raw = await websocket.receive_text()
     incoming = parse_worker_message(raw)
@@ -307,11 +247,13 @@ async def ws_worker(websocket: WebSocket) -> None:
             msg = parse_worker_message(raw)
 
             if isinstance(msg, ExecutionStartedMessage):
-                dispatcher.handle_execution_started(worker_id, msg)
+                logger.debug(
+                    "execution started: worker=%s execution=%s", worker_id, msg.execution_id
+                )
             elif isinstance(msg, ExecutionCompletedMessage):
-                await _handle_execution_completed(app.state.store, registry, worker_id, msg)
+                await _handle_execution_completed(store, registry, worker_id, msg)
             elif isinstance(msg, ExecutionFailedMessage):
-                await _handle_execution_failed(app.state.store, registry, worker_id, msg)
+                await _handle_execution_failed(store, registry, worker_id, msg)
             elif isinstance(msg, HeartbeatMessage | LogLineMessage | QuestionAskedMessage):
                 logger.debug("received %s from worker %s", type(msg).__name__, worker_id)
             else:
@@ -321,5 +263,4 @@ async def ws_worker(websocket: WebSocket) -> None:
     finally:
         conn = registry.unregister(worker_id)
         if conn is not None:
-            store: Store = app.state.store
             await handle_disconnect(conn, store, registry)

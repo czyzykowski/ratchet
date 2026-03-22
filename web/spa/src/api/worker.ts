@@ -13,6 +13,7 @@ export interface WorkerStatus {
   error_message: string | null
   settings: WorkerSettings
   uptime_seconds: number | null
+  pid: number | null
 }
 
 export interface LogEntry {

@@ -3,6 +3,26 @@
 ## [Unreleased]
 
 ### Added
+- `web/routes/api/ws_worker.py` — `/ws/worker` WebSocket endpoint for worker registration and message handling, moved from `orchestrator/server.py`
+- `web/local_worker.py` — `LocalWorkerManager` spawns and manages a local `python -m worker --remote` subprocess; replaces embedded `WorkerService`
+- `web/routes/api/workers.py` — `GET /api/workers` returns all connected workers from `WorkerRegistry`
+- `GET /api/worker/status` now includes `pid` field for the local worker subprocess
+- `orchestrator/registry.py`, `dispatcher.py`, `sequencer.py`, `channel.py` retained as library code; `orchestrator/__main__.py` and `orchestrator/server.py` removed
+- Dispatch loop (`dispatch_loop`) runs as async task in web app lifespan, controlled by `DISPATCH_ENABLED` env var
+- `WorkerRegistry` stored on `app.state.registry`, shared between WebSocket endpoint and dispatch loop
+- `python -m web` now accepts `--port` and `--dispatch/--no-dispatch` flags
+
+### Changed
+- `python -m web` starts everything: web API, `/ws/worker` WebSocket, dispatch loop, and local worker subprocess
+- Embedded in-process `WorkerService` replaced by `LocalWorkerManager` (subprocess-based)
+- Worker settings env vars changed: `WORKER_CAPABILITIES`, `WORKER_ENABLED`, `WEB_PORT` (removed `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`)
+- SPA workers page now shows connected worker table (from `GET /api/workers`) with auto-refresh every 5 seconds
+
+### Removed
+- `orchestrator/__main__.py` — orchestrator is no longer a separate process
+- `orchestrator/server.py` — server functionality merged into web process
+- `orchestrator/tests/test_server.py` — covered by new `web/tests/test_ws_worker.py`
+
 - Stateless command-executing remote worker (`worker/executor.py`, `worker/remote.py`) implementing full command protocol
 - `current_tasks` materialized view now includes `depends_on` JSONB column (migration `d5e6f7a8b9c0`)
 - `web/queries.py`: `get_task_detail()`, `get_board_tasks()`, `get_task_baseline_qa_failure()`, `get_task_pr_and_deploy_info()`, `get_task_feature_backlink()` — direct materialized view queries replacing event-replay managers

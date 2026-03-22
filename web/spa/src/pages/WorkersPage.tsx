@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   useRestartWorker,
   useStartWorker,
@@ -8,6 +9,8 @@ import {
 } from '../hooks/useWorkerStatus'
 import { useWorkerLogs } from '../hooks/useWorkerLogs'
 import type { WorkerSettings } from '../api/worker'
+import { fetchConnectedWorkers } from '../api/workers'
+import type { ConnectedWorker } from '../api/workers'
 
 function formatUptime(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -25,6 +28,14 @@ function formatLogTime(timestamp: string): string {
     return d.toLocaleTimeString('en-GB', { hour12: false })
   } catch {
     return timestamp
+  }
+}
+
+function formatConnectedAt(isoString: string): string {
+  try {
+    return new Date(isoString).toLocaleTimeString('en-GB', { hour12: false })
+  } catch {
+    return isoString
   }
 }
 
@@ -48,8 +59,52 @@ function logLevelClass(level: string): string {
   }
 }
 
+function useConnectedWorkers() {
+  return useQuery({
+    queryKey: ['connected-workers'],
+    queryFn: fetchConnectedWorkers,
+    refetchInterval: 5_000,
+    staleTime: 4_000,
+  })
+}
+
+function ConnectedWorkersTable({ workers }: { workers: ConnectedWorker[] }) {
+  if (workers.length === 0) {
+    return <p className="log-level-debug" style={{ padding: '0.5rem 0' }}>No workers connected.</p>
+  }
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+      <thead>
+        <tr>
+          <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Worker ID</th>
+          <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Capabilities</th>
+          <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Status</th>
+          <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Current Task</th>
+          <th style={{ textAlign: 'left', padding: '0.25rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Connected At</th>
+        </tr>
+      </thead>
+      <tbody>
+        {workers.map(w => (
+          <tr key={w.id}>
+            <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace', fontSize: '0.75rem' }}>{w.id.slice(0, 8)}…</td>
+            <td style={{ padding: '0.25rem 0.5rem' }}>{w.capabilities.join(', ') || '—'}</td>
+            <td style={{ padding: '0.25rem 0.5rem' }}>
+              <span className={w.status === 'busy' ? 'log-level-warning' : 'log-level-debug'}>{w.status}</span>
+            </td>
+            <td style={{ padding: '0.25rem 0.5rem', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+              {w.current_execution_id ? w.current_execution_id.slice(0, 8) + '…' : '—'}
+            </td>
+            <td style={{ padding: '0.25rem 0.5rem' }}>{formatConnectedAt(w.connected_at)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export function WorkersPage() {
   const { data: workerStatus, isLoading } = useWorkerStatus()
+  const { data: connectedWorkers = [] } = useConnectedWorkers()
   const { logs } = useWorkerLogs()
   const startWorker = useStartWorker()
   const stopWorker = useStopWorker()
@@ -103,15 +158,29 @@ export function WorkersPage() {
         <h1>Workers</h1>
       </div>
 
+      {/* Connected workers table */}
+      <div className="worker-card-grid" style={{ marginBottom: '1.5rem' }}>
+        <div className="worker-card">
+          <div className="worker-card-header">
+            <span className="worker-card-title">Connected Workers</span>
+            <span className="worker-status-text">{connectedWorkers.length} connected</span>
+          </div>
+          <ConnectedWorkersTable workers={connectedWorkers} />
+        </div>
+      </div>
+
       <div className="worker-card-grid">
         <div className="worker-card">
           {/* Header row */}
           <div className="worker-card-header">
-            <span className="worker-card-title">Embedded Worker</span>
+            <span className="worker-card-title">Local Worker Subprocess</span>
             <span className={statusDotClass(status)} />
             <span className="worker-status-text">{status}</span>
             {workerStatus?.uptime_seconds != null && (
               <span className="worker-uptime">up {formatUptime(workerStatus.uptime_seconds)}</span>
+            )}
+            {workerStatus?.pid != null && (
+              <span className="worker-uptime">pid {workerStatus.pid}</span>
             )}
           </div>
 

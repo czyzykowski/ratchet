@@ -24,14 +24,29 @@ db/
   smoke_test.py    — integration test, requires TEST_DATABASE_URL
 docs/
   INTENT.md        — project intent statement (injected by orchestrator at runtime)
+orchestrator/      — library code only (no entry point)
+  registry.py      — WorkerRegistry, WorkerConnection
+  dispatcher.py    — dispatch_pending, dispatch_loop
+  sequencer.py     — PipelineSequencer (drives remote workers through multi-step commands)
+  channel.py       — WebSocketWorkerChannel, PipelineAbort
+  tests/           — orchestrator library tests
 scripts/
   run-spec.sh      — execute a spec file via Claude Code
+web/
+  app.py           — FastAPI app with lifespan (registry, dispatch loop, local worker)
+  local_worker.py  — LocalWorkerManager, spawns python -m worker --remote subprocess
+  routes/api/
+    ws_worker.py   — /ws/worker WebSocket endpoint for worker connections
+    workers.py     — GET /api/workers (list connected workers from registry)
+  tests/           — web API tests
 worker/
   __init__.py
-  __main__.py     — enables python -m worker
+  __main__.py     — enables python -m worker (--remote, --projects, --capabilities)
   runner.py       — get_next_task, run_once, main — single-pass task executor
-  service.py      — WorkerService, managed async lifecycle for embedded worker
+  service.py      — WorkerService (legacy, kept for local notification loop)
   log_buffer.py   — LogBuffer ring buffer with pub/sub for worker log streaming
+  remote.py       — RemoteWorker, connects to /ws/worker via WebSocket
+  executor.py     — CommandExecutor, handles orchestrator command requests
   tests/          — integration tests
 pyproject.toml     — dependencies
 flake.nix          — reproducible dev shell (nix develop)
@@ -59,7 +74,10 @@ flake.nix          — reproducible dev shell (nix develop)
 - Traces written to `$XDG_DATA_HOME/ratchet/traces/` (default `~/.local/share/ratchet/traces/`)
 - `flake.nix` shellHook sets `LD_LIBRARY_PATH` for libpq — required for psycopg to find PostgreSQL client library
 - All scripts must be run with `.venv/bin/python` — system Python does not have dependencies
-- The embedded worker in the web process shares its connection pool and is controlled via `app.state.worker_service`; configured by `WORKER_ENABLED`, `WORKER_WATCHDOG_TIMEOUT`, `WORKER_MAX_WORKERS`, `WORKER_CAPABILITIES` env vars
+- `python -m web` runs everything: web API on port 8000, `/ws/worker` WebSocket endpoint, orchestrator dispatch loop, and a local worker subprocess that connects back via WebSocket
+- `LocalWorkerManager` spawns `python -m worker --remote ws://localhost:{port}/ws/worker` as a subprocess; controlled via `app.state.local_worker` (aliased as `app.state.worker_service`); configured by `WORKER_ENABLED`, `WORKER_CAPABILITIES`, `WEB_PORT` env vars
+- `WorkerRegistry` (on `app.state.registry`) tracks all connected workers (local subprocess + any remote workers)
+- Dispatch loop runs as async task in lifespan, controlled by `DISPATCH_ENABLED` env var (default `true`)
 - Auto-merge: on each dispatch cycle, the worker attempts a local squash merge for one `ready_for_merge` task per project; `TASK_AUTO_MERGE_FAILED` prevents retry — use `scripts/merge-task.py` for manual merge
 
 ## Running Things
@@ -83,8 +101,10 @@ scripts/run-spec.sh specs/10-update-claude-md.md
 # Run worker single pass (dispatch priority: QA → merge → implementation → compilation)
 .venv/bin/python -m worker
 
-# Run web UI with embedded worker (starts both uvicorn and worker service)
+# Run web UI with orchestrator + local worker subprocess (single process)
 .venv/bin/python -m web
+# Optional flags:
+.venv/bin/python -m web --port 9000 --no-dispatch
 
 # Run operational scripts (must use .venv/bin/python)
 .venv/bin/python scripts/board.py
