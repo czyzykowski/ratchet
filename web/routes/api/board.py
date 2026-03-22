@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core import events as ev
-from web.board_builder import STATUS_LABELS, STATUS_ORDER, get_task_status, load_board
+from web import queries
+from web.board_builder import STATUS_LABELS, STATUS_ORDER, load_board
 
 router = APIRouter()
 
@@ -51,8 +51,12 @@ async def get_activity(request: Request) -> JSONResponse:
 
 @router.get("/board")
 async def get_board(request: Request) -> JSONResponse:
-    store = request.app.state.store
-    all_tasks, project_by_id, task_events_cache = await load_board(store)
+    pool = request.app.state.pool
+    async with pool.connection() as conn:
+        all_tasks = await queries.get_board_tasks(conn)
+
+    # Build a status map for dependency checking (tasks not in map are terminal: merged/abandoned)
+    status_by_task_id: dict[str, str] = {str(task["id"]): task["status"] for task in all_tasks}
 
     groups_dict: dict[str, list[dict[str, Any]]] = {status: [] for status in STATUS_ORDER}
 
@@ -61,42 +65,15 @@ async def get_board(request: Request) -> JSONResponse:
         if status not in groups_dict:
             continue
 
-        project_id: UUID = task["project_id"]
-        project = project_by_id.get(project_id)
-        project_name = project.name if project is not None else str(project_id)
-
         unmet: list[str] = []
         for dep_id_str in task.get("depends_on", []):
-            try:
-                dep_id = UUID(dep_id_str)
-            except ValueError:
-                unmet.append(dep_id_str)
-                continue
-            dep_status = get_task_status(dep_id, task_events_cache)
-            if dep_status != ev.DEPLOYED:
+            dep_status = status_by_task_id.get(str(dep_id_str))
+            # If dep not in map it's terminal (merged/abandoned — treat as met)
+            if dep_status is not None and dep_status != ev.DEPLOYED:
                 unmet.append(dep_id_str)
 
         updated_at = task.get("updated_at")
         updated_at_str = updated_at.isoformat() if updated_at is not None else None
-
-        # Surface baseline QA failure for ready_for_implementation tasks
-        baseline_qa_failure: str | None = None
-        if status == ev.READY_FOR_IMPLEMENTATION:
-            task_events = task_events_cache.get(task["id"], [])
-            last_failed_seq: int | None = None
-            last_cleared_seq: int | None = None
-            failure_output: str | None = None
-            for e in task_events:
-                if e.event_type == ev.TASK_BASELINE_QA_FAILED:
-                    last_failed_seq = e.sequence
-                    failure_output = e.payload.get("failure_output")
-                elif e.event_type in (ev.TASK_BASELINE_QA_RETRY, ev.TASK_FORCE_EXECUTE):
-                    last_cleared_seq = max(last_cleared_seq or 0, e.sequence)
-            if (
-                last_failed_seq is not None
-                and (last_cleared_seq is None or last_failed_seq > last_cleared_seq)
-            ):
-                baseline_qa_failure = failure_output
 
         groups_dict[status].append(
             {
@@ -104,12 +81,12 @@ async def get_board(request: Request) -> JSONResponse:
                 "title": task["title"],
                 "status": task["status"],
                 "project_id": str(task["project_id"]),
-                "project_name": project_name,
+                "project_name": task["project_name"],
                 "updated_at": updated_at_str,
                 "has_spec": task.get("has_spec", False),
                 "refinement_count": task.get("refinement_count", 0),
                 "unmet_deps": unmet,
-                "baseline_qa_failure": baseline_qa_failure,
+                "baseline_qa_failure": task.get("baseline_qa_failure"),
                 "required_capabilities": task.get("required_capabilities", []),
             }
         )

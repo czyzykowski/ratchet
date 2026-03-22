@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,13 +16,52 @@ from web.routes.api.router import api_router
 _REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _make_pool_mock() -> MagicMock:
+    """Return a mock pool whose connection() supports async with."""
+    mock_conn = MagicMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    mock_pool = MagicMock()
+    mock_pool.connection.return_value = cm
+    return mock_pool
+
+
 def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
-    app.state.pool = MagicMock()
+    app.state.pool = _make_pool_mock()
     app.state.sse_clients = []
     app.include_router(api_router)
     return app
+
+
+def _board_task(
+    task_id: UUID,
+    project_id: UUID,
+    project_name: str = "Test Project",
+    title: str = "My Task",
+    status: str = ev.READY_FOR_SPEC,
+    has_spec: bool = False,
+    refinement_count: int = 0,
+    depends_on: list | None = None,
+    required_capabilities: list | None = None,
+    baseline_qa_failure: str | None = None,
+) -> dict:
+    """Build a board task dict matching what get_board_tasks() returns."""
+    return {
+        "id": task_id,
+        "project_id": project_id,
+        "project_name": project_name,
+        "title": title,
+        "status": status,
+        "has_spec": has_spec,
+        "refinement_count": refinement_count,
+        "updated_at": None,
+        "depends_on": depends_on or [],
+        "required_capabilities": required_capabilities or [],
+        "baseline_qa_failure": baseline_qa_failure,
+    }
 
 
 @pytest.fixture
@@ -36,66 +74,16 @@ def client(store: InMemoryStore) -> TestClient:
     return TestClient(_make_test_app(store))
 
 
-async def _seed_project(store: InMemoryStore, project_id: UUID, name: str = "Test Project") -> None:
-    payload = {
-        "project_id": str(project_id),
-        "name": name,
-        "repo_url": "/tmp/test",
-        "local_path": "/tmp/test",
-        "status": "active",
-    }
-    await store.append_event(
-        aggregate_id=_REGISTRY_ID,
-        aggregate_type="projects",
-        event_type=ev.PROJECT_CREATED,
-        payload=payload,
-    )
-    await store.append_event(
-        aggregate_id=project_id,
-        aggregate_type="project",
-        event_type=ev.PROJECT_CREATED,
-        payload=payload,
-    )
-
-
-async def _seed_task(
-    store: InMemoryStore,
-    task_id: UUID,
-    project_id: UUID,
-    title: str,
-    status: str = ev.READY_FOR_SPEC,
-) -> None:
-    await store.append_event(
-        aggregate_id=project_id,
-        aggregate_type="project_tasks",
-        event_type=ev.TASK_CREATED,
-        payload={"task_id": str(task_id), "project_id": str(project_id), "title": title},
-    )
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={
-            "task_id": str(task_id),
-            "project_id": str(project_id),
-            "title": title,
-            "status": status,
-        },
-    )
-
-
 def test_should_return_board_grouped_by_status_when_tasks_exist(
     client: TestClient, store: InMemoryStore
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
+    tasks = [_board_task(task_id, project_id, title="My Task", status=ev.READY_FOR_SPEC)]
 
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task_id, project_id, "My Task", ev.READY_FOR_SPEC)
-    )
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=tasks)):
+        response = client.get("/api/board")
 
-    response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
 
@@ -114,7 +102,9 @@ def test_should_return_board_grouped_by_status_when_tasks_exist(
 def test_should_return_empty_groups_when_no_tasks(
     client: TestClient, store: InMemoryStore
 ) -> None:
-    response = client.get("/api/board")
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=[])):
+        response = client.get("/api/board")
+
     assert response.status_code == 200
     data = response.json()
 
@@ -123,52 +113,29 @@ def test_should_return_empty_groups_when_no_tasks(
         assert col["tasks"] == []
 
 
-async def _seed_task_with_capabilities(
-    store: InMemoryStore,
-    task_id: UUID,
-    project_id: UUID,
-    title: str,
-    capabilities: list[str],
-) -> None:
-    await store.append_event(
-        aggregate_id=project_id,
-        aggregate_type="project_tasks",
-        event_type=ev.TASK_CREATED,
-        payload={"task_id": str(task_id), "project_id": str(project_id), "title": title},
-    )
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task",
-        event_type=ev.TASK_CREATED,
-        payload={
-            "task_id": str(task_id),
-            "project_id": str(project_id),
-            "title": title,
-            "status": ev.READY_FOR_SPEC,
-            "required_capabilities": capabilities,
-        },
-    )
-
-
 def test_should_return_required_capabilities_when_task_has_capabilities(
     client: TestClient, store: InMemoryStore
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
+    tasks = [
+        _board_task(
+            task_id, project_id, title="GPU Task",
+            status=ev.READY_FOR_SPEC,
+            required_capabilities=["gpu", "linux"],
+        )
+    ]
 
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task_with_capabilities(store, task_id, project_id, "GPU Task", ["gpu", "linux"])
-    )
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=tasks)):
+        response = client.get("/api/board")
 
-    response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
 
     columns = {c["status"]: c for c in data["columns"]}
-    tasks = columns[ev.READY_FOR_SPEC]["tasks"]
-    assert len(tasks) == 1
-    assert tasks[0]["required_capabilities"] == ["gpu", "linux"]
+    board_tasks = columns[ev.READY_FOR_SPEC]["tasks"]
+    assert len(board_tasks) == 1
+    assert board_tasks[0]["required_capabilities"] == ["gpu", "linux"]
 
 
 def test_should_return_empty_required_capabilities_when_task_has_none(
@@ -176,17 +143,15 @@ def test_should_return_empty_required_capabilities_when_task_has_none(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
+    tasks = [_board_task(task_id, project_id, title="Plain Task", status=ev.READY_FOR_SPEC)]
 
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task_id, project_id, "Plain Task", ev.READY_FOR_SPEC)
-    )
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=tasks)):
+        response = client.get("/api/board")
 
-    response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
 
     columns = {c["status"]: c for c in data["columns"]}
-    tasks = columns[ev.READY_FOR_SPEC]["tasks"]
-    assert len(tasks) == 1
-    assert tasks[0]["required_capabilities"] == []
+    board_tasks = columns[ev.READY_FOR_SPEC]["tasks"]
+    assert len(board_tasks) == 1
+    assert board_tasks[0]["required_capabilities"] == []

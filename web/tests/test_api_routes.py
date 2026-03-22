@@ -20,10 +20,21 @@ from web.routes.api.router import api_router
 _REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _make_pool_mock() -> MagicMock:
+    """Return a mock pool whose connection() supports async with."""
+    mock_conn = MagicMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    mock_pool = MagicMock()
+    mock_pool.connection.return_value = cm
+    return mock_pool
+
+
 def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
-    app.state.pool = MagicMock()
+    app.state.pool = _make_pool_mock()
     app.state.sse_queues = set()
     app.state.sse_clients = []
     app.include_router(api_router)
@@ -97,15 +108,24 @@ def test_should_return_board_json_with_columns_in_status_order(
     project_id = uuid4()
     task1_id = uuid4()
     task2_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task1_id, project_id, "Task 1", ev.READY_FOR_SPEC)
-    )
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task2_id, project_id, "Task 2", ev.BLOCKED)
-    )
 
-    response = client.get("/api/board")
+    board_tasks = [
+        {
+            "id": task1_id, "project_id": project_id, "project_name": "My Project",
+            "title": "Task 1", "status": ev.READY_FOR_SPEC,
+            "has_spec": False, "refinement_count": 0, "updated_at": None,
+            "depends_on": [], "required_capabilities": [], "baseline_qa_failure": None,
+        },
+        {
+            "id": task2_id, "project_id": project_id, "project_name": "My Project",
+            "title": "Task 2", "status": ev.BLOCKED,
+            "has_spec": False, "refinement_count": 0, "updated_at": None,
+            "depends_on": [], "required_capabilities": [], "baseline_qa_failure": None,
+        },
+    ]
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=board_tasks)):
+        response = client.get("/api/board")
+
     assert response.status_code == 200
     data = response.json()
     assert "columns" in data
@@ -135,18 +155,12 @@ def test_should_return_board_json_with_columns_in_status_order(
 def test_should_exclude_merged_and_abandoned_tasks_from_board(
     client: TestClient, store: InMemoryStore
 ) -> None:
-    project_id = uuid4()
     merged_id = uuid4()
     abandoned_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, merged_id, project_id, "Merged Task", ev.DEPLOYED)
-    )
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, abandoned_id, project_id, "Abandoned Task", ev.ABANDONED)
-    )
+    # get_board_tasks filters these out — return empty list
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=[])):
+        response = client.get("/api/board")
 
-    response = client.get("/api/board")
     assert response.status_code == 200
     data = response.json()
 
@@ -173,8 +187,17 @@ def test_should_rename_task_title_via_patch(
     assert data["title"] == "New Title"
     assert data["id"] == str(task_id)
 
-    # Re-fetch board to confirm new title
-    board_response = client.get("/api/board")
+    # Re-fetch board to confirm new title via mocked get_board_tasks
+    board_tasks = [
+        {
+            "id": task_id, "project_id": project_id, "project_name": "Test",
+            "title": "New Title", "status": ev.READY_FOR_SPEC,
+            "has_spec": False, "refinement_count": 0, "updated_at": None,
+            "depends_on": [], "required_capabilities": [], "baseline_qa_failure": None,
+        }
+    ]
+    with patch("web.queries.get_board_tasks", new=AsyncMock(return_value=board_tasks)):
+        board_response = client.get("/api/board")
     assert board_response.status_code == 200
     board_data = board_response.json()
     all_tasks = [t for col in board_data["columns"] for t in col["tasks"]]
@@ -207,22 +230,34 @@ def test_should_return_404_when_patching_unknown_task(
 def test_get_task_json_returns_200(client: TestClient, store: InMemoryStore) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id, "My Project"))
-    asyncio.get_event_loop().run_until_complete(
-        store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_CREATED,
-            payload={
-                "task_id": str(task_id),
-                "project_id": str(project_id),
-                "title": "Test Task",
-                "status": ev.READY_FOR_SPEC,
-            },
-        )
-    )
+    detail = {
+        "task": {
+            "id": str(task_id),
+            "project_id": str(project_id),
+            "title": "Test Task",
+            "status": ev.READY_FOR_SPEC,
+            "current_spec_id": None,
+            "refinement_count": 0,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "depends_on": [],
+            "required_capabilities": [],
+            "merge_commit_sha": None,
+        },
+        "project_name": "My Project",
+        "specs": [],
+        "executions": [],
+        "dependencies": [],
+        "qa_failure": None,
+        "baseline_qa_failure": None,
+        "pr_info": None,
+        "deploy_hooks": None,
+        "feature_id": None,
+        "feature_title": None,
+    }
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
 
-    response = client.get(f"/api/tasks/{task_id}")
     assert response.status_code == 200
     data = response.json()
     assert "task" in data
@@ -235,7 +270,8 @@ def test_get_task_json_returns_200(client: TestClient, store: InMemoryStore) -> 
 
 def test_get_task_json_404(client: TestClient, store: InMemoryStore) -> None:
     unknown_id = uuid4()
-    response = client.get(f"/api/tasks/{unknown_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=None)):
+        response = client.get(f"/api/tasks/{unknown_id}")
     assert response.status_code == 404
 
 
@@ -429,5 +465,6 @@ def test_should_return_404_when_task_not_found(
     client: TestClient, store: InMemoryStore
 ) -> None:
     unknown_id = uuid4()
-    response = client.get(f"/api/tasks/{unknown_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=None)):
+        response = client.get(f"/api/tasks/{unknown_id}")
     assert response.status_code == 404

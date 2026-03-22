@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- `current_tasks` materialized view now includes `depends_on` JSONB column (migration `d5e6f7a8b9c0`)
+- `web/queries.py`: `get_task_detail()`, `get_board_tasks()`, `get_task_baseline_qa_failure()`, `get_task_pr_and_deploy_info()`, `get_task_feature_backlink()` — direct materialized view queries replacing event-replay managers
+
+### Changed
+- GET `/api/tasks/{task_id}` uses `queries.get_task_detail()` instead of 5+ manager round trips
+- GET `/api/board` uses `queries.get_board_tasks()` (1 SQL query) instead of N event replays via `board_builder.load_board()`
+- `PostgresStore.append_event()` now calls `refresh_views()` after every event insert so materialized views are always current
+
 - `core/claude_subprocess.py` — unified Claude subprocess invocation with `run()` (blocking) and `start()` (non-blocking with activity tracking)
 
 ### Changed

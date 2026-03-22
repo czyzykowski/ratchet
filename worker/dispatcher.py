@@ -79,7 +79,7 @@ class ProjectDispatcher:
         )
 
     async def recover_orphans(self) -> int:
-        from datetime import UTC, datetime, timedelta
+        from datetime import UTC, datetime
 
         orphans = await self._find_tasks(statuses={ev.IN_PROGRESS})
         reset_count = 0
@@ -88,7 +88,8 @@ class ProjectDispatcher:
             # Skip tasks that became in_progress recently — they may be running
             # on a remote worker via the orchestrator. Only recover tasks that
             # have been stuck for > 5 minutes (likely true orphans from crashes).
-            if task.updated_at and (now - task.updated_at).total_seconds() < self.orphan_grace_seconds:
+            elapsed = (now - task.updated_at).total_seconds() if task.updated_at else None
+            if elapsed is not None and elapsed < self.orphan_grace_seconds:
                 logger.debug(
                     "Skipping recent in_progress task=%s (updated %s ago)",
                     task.id,

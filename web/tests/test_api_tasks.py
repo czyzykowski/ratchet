@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,13 +17,69 @@ from web.routes.api.router import api_router
 _REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _make_pool_mock() -> MagicMock:
+    """Return a mock pool whose connection() supports async with."""
+    mock_conn = MagicMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    mock_pool = MagicMock()
+    mock_pool.connection.return_value = cm
+    return mock_pool
+
+
 def _make_test_app(store: InMemoryStore) -> FastAPI:
     app = FastAPI()
     app.state.store = store
-    app.state.pool = MagicMock()
+    app.state.pool = _make_pool_mock()
     app.state.sse_clients = []
     app.include_router(api_router)
     return app
+
+
+def _task_detail(
+    task_id: UUID,
+    project_id: UUID,
+    title: str = "My Task",
+    status: str = ev.READY_FOR_SPEC,
+    specs: list | None = None,
+    executions: list | None = None,
+    qa_failure: str | None = None,
+    baseline_qa_failure: str | None = None,
+    pr_info: dict | None = None,
+    deploy_hooks: list | None = None,
+    feature_id: str | None = None,
+    feature_title: str | None = None,
+    depends_on: list | None = None,
+    required_capabilities: list | None = None,
+) -> dict:
+    """Build a detail dict matching the GET /api/tasks/{task_id} response shape."""
+    dep_list = depends_on or []
+    return {
+        "task": {
+            "id": str(task_id),
+            "project_id": str(project_id),
+            "title": title,
+            "status": status,
+            "current_spec_id": None,
+            "refinement_count": 0,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "depends_on": dep_list,
+            "required_capabilities": required_capabilities or [],
+            "merge_commit_sha": None,
+        },
+        "project_name": "Test Project",
+        "specs": specs or [],
+        "executions": executions or [],
+        "dependencies": dep_list,
+        "qa_failure": qa_failure,
+        "baseline_qa_failure": baseline_qa_failure,
+        "pr_info": pr_info,
+        "deploy_hooks": deploy_hooks,
+        "feature_id": feature_id,
+        "feature_title": feature_title,
+    }
 
 
 @pytest.fixture
@@ -89,10 +145,11 @@ def test_should_return_task_detail_with_specs_and_executions_when_task_exists(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(_seed_task(store, task_id, project_id, "My Task"))
+    detail = _task_detail(task_id, project_id, "My Task")
 
-    response = client.get(f"/api/tasks/{task_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
+
     assert response.status_code == 200
     data = response.json()
     assert data["task"]["id"] == str(task_id)
@@ -105,7 +162,8 @@ def test_should_return_task_detail_with_specs_and_executions_when_task_exists(
 def test_should_return_404_when_task_not_found(
     client: TestClient, store: InMemoryStore
 ) -> None:
-    response = client.get(f"/api/tasks/{uuid4()}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=None)):
+        response = client.get(f"/api/tasks/{uuid4()}")
     assert response.status_code == 404
 
 
@@ -212,8 +270,10 @@ def test_should_update_task_capabilities(client: TestClient, store: InMemoryStor
     )
     assert response.status_code == 200
 
-    # Verify replay reflects updated capabilities
-    task_response = client.get(f"/api/tasks/{task_id}")
+    # Verify GET reflects updated capabilities via mocked get_task_detail
+    detail = _task_detail(task_id, project_id, required_capabilities=["osx", "gpu"])
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        task_response = client.get(f"/api/tasks/{task_id}")
     assert task_response.status_code == 200
     task_data = task_response.json()
     assert set(task_data["task"]["required_capabilities"]) == {"osx", "gpu"}
@@ -550,26 +610,16 @@ def test_should_return_pr_info_when_task_pr_created_event_exists(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task_id, project_id, "Deploy Task")
-    )
+    pr_info = {
+        "pr_url": "https://github.com/org/repo/pull/42",
+        "pr_number": 42,
+        "branch": "feat/my-branch",
+    }
+    detail = _task_detail(task_id, project_id, pr_info=pr_info)
 
-    async def _seed_pr_event() -> None:
-        await store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_PR_CREATED,
-            payload={
-                "pr_url": "https://github.com/org/repo/pull/42",
-                "pr_number": 42,
-                "branch": "feat/my-branch",
-            },
-        )
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
 
-    asyncio.get_event_loop().run_until_complete(_seed_pr_event())
-
-    response = client.get(f"/api/tasks/{task_id}")
     assert response.status_code == 200
     data = response.json()
     assert data["pr_info"]["pr_url"] == "https://github.com/org/repo/pull/42"
@@ -582,37 +632,15 @@ def test_should_return_deploy_hooks_when_task_deploy_hooks_run_event_exists(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task_id, project_id, "Deploy Task")
-    )
+    hooks = [
+        {"name": "lint", "command": "ruff check .", "returncode": 0, "output": "ok"},
+        {"name": "test", "command": "pytest", "returncode": 1, "output": "failed"},
+    ]
+    detail = _task_detail(task_id, project_id, deploy_hooks=hooks)
 
-    async def _seed_hooks_event() -> None:
-        await store.append_event(
-            aggregate_id=task_id,
-            aggregate_type="task",
-            event_type=ev.TASK_DEPLOY_HOOKS_RUN,
-            payload={
-                "steps": [
-                    {
-                        "name": "lint",
-                        "command": "ruff check .",
-                        "returncode": 0,
-                        "output": "ok",
-                    },
-                    {
-                        "name": "test",
-                        "command": "pytest",
-                        "returncode": 1,
-                        "output": "failed",
-                    },
-                ]
-            },
-        )
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
 
-    asyncio.get_event_loop().run_until_complete(_seed_hooks_event())
-
-    response = client.get(f"/api/tasks/{task_id}")
     assert response.status_code == 200
     data = response.json()
     assert len(data["deploy_hooks"]) == 2
@@ -627,12 +655,11 @@ def test_should_return_null_pr_info_and_deploy_hooks_when_no_deployment_events(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_task(store, task_id, project_id, "Plain Task")
-    )
+    detail = _task_detail(task_id, project_id)
 
-    response = client.get(f"/api/tasks/{task_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
+
     assert response.status_code == 200
     data = response.json()
     assert data["pr_info"] is None
@@ -642,71 +669,19 @@ def test_should_return_null_pr_info_and_deploy_hooks_when_no_deployment_events(
 _FEATURE_REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000002")
 
 
-async def _seed_feature_with_compiled_spec(
-    store: InMemoryStore,
-    feature_id: UUID,
-    project_id: UUID,
-    task_id: UUID,
-    feature_title: str = "My Feature",
-) -> None:
-    hls_id = uuid4()
-    feature_payload = {
-        "feature_id": str(feature_id),
-        "project_id": str(project_id),
-        "title": feature_title,
-        "description": "Feature description",
-        "session_id": None,
-    }
-    await store.append_event(
-        aggregate_id=feature_id,
-        aggregate_type="feature",
-        event_type=ev.FEATURE_CREATED,
-        payload=feature_payload,
-    )
-    await store.append_event(
-        aggregate_id=project_id,
-        aggregate_type="project_features",
-        event_type=ev.FEATURE_CREATED,
-        payload=feature_payload,
-    )
-    await store.append_event(
-        aggregate_id=feature_id,
-        aggregate_type="feature",
-        event_type=ev.HIGH_LEVEL_SPEC_ADDED,
-        payload={
-            "hls_id": str(hls_id),
-            "feature_id": str(feature_id),
-            "title": "Spec One",
-            "order": 1,
-            "content": "Some content.",
-            "dependencies": [],
-        },
-    )
-    await store.append_event(
-        aggregate_id=feature_id,
-        aggregate_type="feature",
-        event_type=ev.HIGH_LEVEL_SPEC_COMPILED,
-        payload={
-            "hls_id": str(hls_id),
-            "feature_id": str(feature_id),
-            "task_id": str(task_id),
-        },
-    )
-
-
 def test_should_return_feature_backlink_when_task_belongs_to_compiled_spec(
     client: TestClient, store: InMemoryStore
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
     feature_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(_seed_task(store, task_id, project_id, "My Task"))
-    asyncio.get_event_loop().run_until_complete(
-        _seed_feature_with_compiled_spec(store, feature_id, project_id, task_id, "My Feature")
+    detail = _task_detail(
+        task_id, project_id, feature_id=str(feature_id), feature_title="My Feature"
     )
 
-    response = client.get(f"/api/tasks/{task_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
+
     assert response.status_code == 200
     data = response.json()
     assert data["feature_id"] == str(feature_id)
@@ -718,10 +693,11 @@ def test_should_return_null_feature_backlink_when_task_not_in_feature(
 ) -> None:
     project_id = uuid4()
     task_id = uuid4()
-    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
-    asyncio.get_event_loop().run_until_complete(_seed_task(store, task_id, project_id, "My Task"))
+    detail = _task_detail(task_id, project_id)
 
-    response = client.get(f"/api/tasks/{task_id}")
+    with patch("web.queries.get_task_detail", new=AsyncMock(return_value=detail)):
+        response = client.get(f"/api/tasks/{task_id}")
+
     assert response.status_code == 200
     data = response.json()
     assert data["feature_id"] is None

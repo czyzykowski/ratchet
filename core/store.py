@@ -129,7 +129,7 @@ class PostgresStore:
                 )
                 row = await cur.fetchone()
         assert row is not None
-        return Event(
+        event = Event(
             id=row[0],
             aggregate_id=row[1],
             aggregate_type=row[2],
@@ -139,6 +139,8 @@ class PostgresStore:
             occurred_at=row[6],
             sequence=row[7],
         )
+        await self.refresh_views()
+        return event
 
     async def get_events(
         self,

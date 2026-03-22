@@ -15,14 +15,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from core import events as ev
-from core.execution_manager import ExecutionManager
-from core.feature_manager import FeatureManager
 from core.models import QAExchange
 from core.project_manager import ProjectManager
 from core.qa_manager import get_pending_question, get_qa_history
 from core.spec_manager import SpecManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
 from core.task_manager import TaskManager
+from web import queries
 from web.sse import broadcast_task_updated
 
 router = APIRouter()
@@ -30,118 +29,12 @@ router = APIRouter()
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: UUID, request: Request) -> JSONResponse:
-    store = request.app.state.store
-    task_manager = TaskManager(store)
-
-    task = await task_manager.get_task(task_id)
-    if task is None:
+    pool = request.app.state.pool
+    async with pool.connection() as conn:
+        detail = await queries.get_task_detail(conn, task_id)
+    if detail is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-
-    task_dict = task.model_dump(mode="json")
-
-    # Specs
-    spec_manager = SpecManager(store)
-    spec_lineage = await spec_manager.get_spec_lineage(task_id)
-    specs_data = [
-        {
-            "id": str(s.id),
-            "task_id": str(s.task_id),
-            "previous_spec_id": str(s.previous_spec_id) if s.previous_spec_id else None,
-            "content": s.content,
-            "created_at": s.created_at.isoformat(),
-        }
-        for s in spec_lineage
-    ]
-
-    # Executions
-    em = ExecutionManager(store, "")
-    executions = await em.get_execution_history(task_id)
-    executions_data = [
-        {
-            "id": str(e.id),
-            "task_id": str(e.task_id),
-            "spec_id": str(e.spec_id),
-            "status": e.status,
-            "failure_reason": e.failure_reason,
-            "branch_name": e.branch_name,
-            "started_at": e.started_at.isoformat(),
-            "completed_at": e.completed_at.isoformat() if e.completed_at else None,
-        }
-        for e in executions
-    ]
-
-    # QA failure reason from latest BLOCKED transition
-    task_events = await store.get_events(task_id, "task")
-    qa_failure: str | None = None
-    for event in reversed(task_events):
-        if (
-            event.event_type == ev.TASK_STATUS_CHANGED
-            and event.payload.get("to_status") == ev.BLOCKED
-        ):
-            qa_failure = event.payload.get("failure_reason")
-            break
-
-    # Baseline QA failure (pending, not overridden by force-execute)
-    baseline_qa_failure: str | None = None
-    last_failed_seq: int | None = None
-    last_cleared_seq: int | None = None
-    failure_output: str | None = None
-    for event in task_events:
-        if event.event_type == ev.TASK_BASELINE_QA_FAILED:
-            last_failed_seq = event.sequence
-            failure_output = event.payload.get("failure_output")
-        elif event.event_type in (ev.TASK_BASELINE_QA_RETRY, ev.TASK_FORCE_EXECUTE):
-            last_cleared_seq = max(last_cleared_seq or 0, event.sequence)
-    if (
-        last_failed_seq is not None
-        and (last_cleared_seq is None or last_failed_seq > last_cleared_seq)
-    ):
-        baseline_qa_failure = failure_output
-
-    # Deployment info
-    pr_info: dict[str, Any] | None = None
-    deploy_hooks: list[dict[str, Any]] | None = None
-    for event in task_events:
-        if event.event_type == ev.TASK_PR_CREATED:
-            pr_info = event.payload
-        elif event.event_type == ev.TASK_DEPLOY_HOOKS_RUN:
-            deploy_hooks = event.payload.get("steps")
-
-    # Project name
-    pm = ProjectManager(store)
-    project = await pm.get_project(task.project_id)
-    project_name = project.name if project is not None else None
-
-    # Feature backlink: scan all features for this project to find one containing this task
-    feature_id: str | None = None
-    feature_title: str | None = None
-    fm = FeatureManager(store)
-    project_features = await fm.list_features(task.project_id)
-    for feature in project_features:
-        specs = await fm.get_high_level_specs(feature.id)
-        for spec in specs:
-            if spec.task_id == task_id:
-                feature_id = str(feature.id)
-                feature_title = feature.title
-                break
-        if feature_id:
-            break
-
-    return JSONResponse(
-        {
-            "task": task_dict,
-            "project_name": project_name,
-            "specs": specs_data,
-            "executions": executions_data,
-            "dependencies": task_dict.get("depends_on", []),
-            "qa_failure": qa_failure,
-            "baseline_qa_failure": baseline_qa_failure,
-            "pr_info": pr_info,
-            "deploy_hooks": deploy_hooks,
-            "feature_id": feature_id,
-            "feature_title": feature_title,
-        }
-    )
+    return JSONResponse(detail)
 
 
 async def _task_status_generator(
