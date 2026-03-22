@@ -24,6 +24,8 @@ TASK_AUTO_MERGE_FAILED = "task.auto_merge_failed"
 # TASK_AUTO_MERGE_FAILED payload: {failure_reason: str}
 TASK_CAPABILITIES_UPDATED = "task.capabilities_updated"
 # TASK_CAPABILITIES_UPDATED payload: {required_capabilities: list[str]}
+TASK_ASSIGNED_TO_WORKER = "task.assigned_to_worker"
+# TASK_ASSIGNED_TO_WORKER payload: {worker_id: str, execution_id: str}
 
 # Spec events
 SPEC_CREATED = "spec.created"

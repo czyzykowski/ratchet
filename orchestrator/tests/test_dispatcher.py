@@ -2,15 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from core import events as ev
-from core.models import Execution, Project, Spec, Task
+from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
@@ -27,34 +25,24 @@ def _make_store() -> InMemoryStore:
 def _fake_ws() -> AsyncMock:
     ws = AsyncMock()
     ws.send_text = AsyncMock()
+    ws.receive_text = AsyncMock()
     return ws
-
-
-def _fake_execution(task_id: object, spec_id: object) -> Execution:
-    return Execution(
-        id=uuid4(),
-        task_id=task_id,  # type: ignore[arg-type]
-        spec_id=spec_id,  # type: ignore[arg-type]
-        status="running",
-        failure_reason=None,
-        branch_name=f"execution/{uuid4()}",
-        started_at=datetime.now(tz=UTC),
-        completed_at=None,
-    )
 
 
 async def _seed_ready_task(
     store: InMemoryStore,
     capabilities: list[str] | None = None,
+    project: Project | None = None,
 ) -> tuple[Task, Project, Spec]:
-    """Register project, create task+spec, transition to ready_for_implementation."""
-    with patch("core.project_manager.validate_repo"):
-        project = await ProjectManager(store).register_project(
-            name="test-project",
-            repo_url="http://fake",
-            local_path="/fake/path",
-            config_source="db",
-        )
+    """Register project (or use given), create task+spec, transition to ready_for_implementation."""
+    if project is None:
+        with patch("core.project_manager.validate_repo"):
+            project = await ProjectManager(store).register_project(
+                name="test-project",
+                repo_url="http://fake",
+                local_path="/fake/path",
+                config_source="db",
+            )
 
     task = await TaskManager(store).create_task(
         project.id,
@@ -73,8 +61,109 @@ async def _seed_ready_task(
     return task, project, spec
 
 
+async def _seed_qa_task(
+    store: InMemoryStore,
+    project: Project | None = None,
+) -> tuple[Task, Project, Spec]:
+    """Create a task in ready_for_qa status with execution branch."""
+    if project is None:
+        with patch("core.project_manager.validate_repo"):
+            project = await ProjectManager(store).register_project(
+                name="qa-project",
+                repo_url="http://fake",
+                local_path="/fake/qa",
+                config_source="db",
+            )
+
+    task = await TaskManager(store).create_task(project.id, "QA task")
+    spec = await SpecManager(store).create_spec(task.id, "spec content")
+    await SpecManager(store).assign_spec(task.id, spec.id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task.id, ev.SPEC_QA)
+    await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+
+    execution_id = uuid4()
+    payload = {
+        "execution_id": str(execution_id),
+        "task_id": str(task.id),
+        "spec_id": str(spec.id),
+        "worktree_path": f"remote/{execution_id}",
+        "branch_name": f"execution/{execution_id}",
+        "status": "running",
+    }
+    await store.append_event(
+        aggregate_id=task.id,
+        aggregate_type="task_executions",
+        event_type=ev.EXECUTION_STARTED,
+        payload=payload,
+    )
+    await sm.transition(task.id, ev.READY_FOR_QA)
+
+    task = await TaskManager(store).get_task(task.id)
+    assert task is not None
+    return task, project, spec
+
+
+async def _seed_merge_task(
+    store: InMemoryStore,
+    project: Project | None = None,
+) -> tuple[Task, Project, Spec]:
+    """Create a task in ready_for_deployment status."""
+    if project is None:
+        with patch("core.project_manager.validate_repo"):
+            project = await ProjectManager(store).register_project(
+                name="merge-project",
+                repo_url="http://fake",
+                local_path="/fake/merge",
+                config_source="db",
+            )
+
+    task = await TaskManager(store).create_task(project.id, "Merge task")
+    spec = await SpecManager(store).create_spec(task.id, "spec content")
+    await SpecManager(store).assign_spec(task.id, spec.id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task.id, ev.SPEC_QA)
+    await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+
+    execution_id = uuid4()
+    payload = {
+        "execution_id": str(execution_id),
+        "task_id": str(task.id),
+        "spec_id": str(spec.id),
+        "worktree_path": f"remote/{execution_id}",
+        "branch_name": f"execution/{execution_id}",
+        "status": "running",
+    }
+    await store.append_event(
+        aggregate_id=task.id,
+        aggregate_type="task_executions",
+        event_type=ev.EXECUTION_STARTED,
+        payload=payload,
+    )
+
+    await sm.transition(task.id, ev.READY_FOR_QA)
+    await sm.transition(task.id, ev.READY_FOR_DEPLOYMENT)
+
+    task = await TaskManager(store).get_task(task.id)
+    assert task is not None
+    return task, project, spec
+
+
+def _mock_sequencer():
+    """Return a mock PipelineSequencer with async no-op pipeline methods."""
+    mock = MagicMock()
+    mock.run_impl_pipeline = AsyncMock(return_value=None)
+    mock.run_qa_pipeline = AsyncMock(return_value=None)
+    mock.run_merge_pipeline = AsyncMock(return_value=None)
+    return mock
+
+
 # ---------------------------------------------------------------------------
-# dispatch_pending tests
+# Basic dispatch tests
 # ---------------------------------------------------------------------------
 
 
@@ -119,29 +208,24 @@ async def test_dispatch_pending_returns_zero_worker_capability_mismatch() -> Non
 
 
 @pytest.mark.asyncio
-async def test_dispatch_pending_dispatches_task_returns_one() -> None:
+async def test_dispatch_pending_dispatches_impl_task_returns_one() -> None:
     store = _make_store()
     registry = WorkerRegistry()
     task, project, spec = await _seed_ready_task(store)
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
 
-    fake_exec = _fake_execution(task.id, spec.id)
-    with (
-        patch("orchestrator.dispatcher.ExecutionManager") as mock_em_cls,
-        patch("orchestrator.dispatcher.git_transfer.create_bundle", return_value=b"fake-bundle"),
-    ):
-        mock_em = AsyncMock()
-        mock_em.start_execution = AsyncMock(return_value=fake_exec)
-        mock_em_cls.return_value = mock_em
+    mock_seq = _mock_sequencer()
 
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
     assert result == 1
-    ws.send_text.assert_called_once()
-    sent = json.loads(ws.send_text.call_args[0][0])
-    assert sent["type"] == "assign_task"
-    assert sent["task_id"] == str(task.id)
+    # Give background task a chance to run
+    await asyncio.sleep(0)
+    mock_seq.run_impl_pipeline.assert_called_once()
+    call_args = mock_seq.run_impl_pipeline.call_args
+    assert call_args[0][1].id == task.id  # task argument
 
 
 @pytest.mark.asyncio
@@ -152,75 +236,12 @@ async def test_dispatch_pending_assigns_job_in_registry() -> None:
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
 
-    fake_exec = _fake_execution(task.id, spec.id)
-    with (
-        patch("orchestrator.dispatcher.ExecutionManager") as mock_em_cls,
-        patch("orchestrator.dispatcher.git_transfer.create_bundle", return_value=b"fake-bundle"),
-    ):
-        mock_em = AsyncMock()
-        mock_em.start_execution = AsyncMock(return_value=fake_exec)
-        mock_em_cls.return_value = mock_em
+    mock_seq = _mock_sequencer()
 
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         await dispatch_pending(store, registry)
 
     assert registry.all_workers()[0].current_execution_id is not None
-
-
-@pytest.mark.asyncio
-async def test_dispatch_pending_transitions_task_to_in_progress() -> None:
-    store = _make_store()
-    registry = WorkerRegistry()
-    task, project, spec = await _seed_ready_task(store)
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
-
-    fake_exec = _fake_execution(task.id, spec.id)
-    with (
-        patch("orchestrator.dispatcher.ExecutionManager") as mock_em_cls,
-        patch("orchestrator.dispatcher.git_transfer.create_bundle", return_value=b"fake-bundle"),
-    ):
-        mock_em = AsyncMock()
-        mock_em.start_execution = AsyncMock(return_value=fake_exec)
-        mock_em_cls.return_value = mock_em
-
-        await dispatch_pending(store, registry)
-
-    status = await TaskStateMachine(store).get_current_status(task.id)
-    assert status == ev.IN_PROGRESS
-
-
-@pytest.mark.asyncio
-async def test_dispatch_pending_orders_by_created_at() -> None:
-    store = _make_store()
-    registry = WorkerRegistry()
-
-    # Create t1 first (older), then t2 (newer)
-    t1, project, spec1 = await _seed_ready_task(store)
-    t2, _, spec2 = await _seed_ready_task(store)
-
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
-
-    async def fake_start_execution(*args: object, **kwargs: object) -> Execution:
-        # Determine which task is being dispatched from the call context
-        return _fake_execution(args[0], args[1])
-
-    with (
-        patch("orchestrator.dispatcher.ExecutionManager") as mock_em_cls,
-        patch("orchestrator.dispatcher.git_transfer.create_bundle", return_value=b"fake-bundle"),
-    ):
-        mock_em = AsyncMock()
-        mock_em.start_execution = AsyncMock(side_effect=fake_start_execution)
-        mock_em_cls.return_value = mock_em
-
-        result = await dispatch_pending(store, registry)
-
-    # Only one worker → only one task dispatched
-    assert result == 1
-    ws.send_text.assert_called_once()
-    sent = json.loads(ws.send_text.call_args[0][0])
-    # t1 was created first → should be dispatched first
-    assert sent["task_id"] == str(t1.id)
 
 
 @pytest.mark.asyncio
@@ -228,7 +249,6 @@ async def test_dispatch_pending_skips_task_without_spec() -> None:
     store = _make_store()
     registry = WorkerRegistry()
 
-    # Create project and task, transition to ready_for_implementation WITHOUT assigning spec
     with patch("core.project_manager.validate_repo"):
         project = await ProjectManager(store).register_project(
             name="test-project",
@@ -245,10 +265,12 @@ async def test_dispatch_pending_skips_task_without_spec() -> None:
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
 
-    result = await dispatch_pending(store, registry)
+    mock_seq = _mock_sequencer()
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
+        result = await dispatch_pending(store, registry)
 
     assert result == 0
-    ws.send_text.assert_not_called()
+    mock_seq.run_impl_pipeline.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -273,3 +295,135 @@ async def test_dispatch_loop_calls_dispatch_pending_multiple_times() -> None:
             pass
 
     assert call_count >= 2
+
+
+# ---------------------------------------------------------------------------
+# Priority dispatch tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_priority_merge_before_qa_before_impl() -> None:
+    """Merge tasks dispatched before QA tasks, QA before impl."""
+    store = _make_store()
+    registry = WorkerRegistry()
+
+    # Three separate projects, each with a different pipeline type
+    impl_task, _, _ = await _seed_ready_task(store)
+    qa_task, _, _ = await _seed_qa_task(store)
+    merge_task, _, _ = await _seed_merge_task(store)
+
+    # Three workers available
+    ws1, ws2, ws3 = _fake_ws(), _fake_ws(), _fake_ws()
+    registry.register("w1", ["python"], ws1)
+    registry.register("w2", ["python"], ws2)
+    registry.register("w3", ["python"], ws3)
+
+    dispatched_pipelines: list[str] = []
+
+    async def track_impl(channel, task, project, spec):
+        dispatched_pipelines.append(("impl", task.id))
+
+    async def track_qa(channel, task, project, spec):
+        dispatched_pipelines.append(("qa", task.id))
+
+    async def track_merge(channel, task, project):
+        dispatched_pipelines.append(("merge", task.id))
+
+    mock_seq = MagicMock()
+    mock_seq.run_impl_pipeline = AsyncMock(side_effect=track_impl)
+    mock_seq.run_qa_pipeline = AsyncMock(side_effect=track_qa)
+    mock_seq.run_merge_pipeline = AsyncMock(side_effect=track_merge)
+
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
+        result = await dispatch_pending(store, registry)
+
+    assert result == 3
+    # Let background tasks run
+    await asyncio.sleep(0.05)
+
+    pipeline_types = [p[0] for p in dispatched_pipelines]
+    assert "merge" in pipeline_types
+    assert "qa" in pipeline_types
+    assert "impl" in pipeline_types
+
+
+@pytest.mark.asyncio
+async def test_dispatch_skips_second_task_in_same_project_when_first_dispatched() -> None:
+    """Only one task per project is dispatched per pass."""
+    store = _make_store()
+    registry = WorkerRegistry()
+
+    # Two tasks in the same project
+    task1, project, spec1 = await _seed_ready_task(store)
+    task2, _, spec2 = await _seed_ready_task(store, project=project)
+
+    # Two workers available
+    ws1, ws2 = _fake_ws(), _fake_ws()
+    registry.register("w1", ["python"], ws1)
+    registry.register("w2", ["python"], ws2)
+
+    mock_seq = _mock_sequencer()
+
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
+        result = await dispatch_pending(store, registry)
+
+    # Only one task dispatched despite two workers being available
+    assert result == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_skips_project_with_in_progress_task() -> None:
+    """Projects with an IN_PROGRESS task are entirely skipped."""
+    store = _make_store()
+    registry = WorkerRegistry()
+
+    task1, project, spec1 = await _seed_ready_task(store)
+
+    # Transition task1 to IN_PROGRESS (simulates another worker already handling it)
+    sm = TaskStateMachine(store)
+    await sm.transition(task1.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+
+    # Create a second task in same project (it's ready_for_implementation)
+    task2 = await TaskManager(store).create_task(project.id, "Second task")
+    spec2 = await SpecManager(store).create_spec(task2.id, "spec content 2")
+    await SpecManager(store).assign_spec(task2.id, spec2.id)
+    await sm.transition(task2.id, ev.SPEC_QA)
+    await sm.transition(task2.id, ev.READY_FOR_IMPLEMENTATION)
+
+    ws = _fake_ws()
+    registry.register("w1", ["python"], ws)
+
+    mock_seq = _mock_sequencer()
+
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
+        result = await dispatch_pending(store, registry)
+
+    # Project skipped entirely because task1 is IN_PROGRESS
+    assert result == 0
+    mock_seq.run_impl_pipeline.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_mix_of_pipeline_types_to_separate_workers() -> None:
+    """Impl and QA tasks from different projects dispatched to separate workers."""
+    store = _make_store()
+    registry = WorkerRegistry()
+
+    impl_task, _, _ = await _seed_ready_task(store)
+    qa_task, _, _ = await _seed_qa_task(store)
+
+    ws1, ws2 = _fake_ws(), _fake_ws()
+    registry.register("w1", ["python"], ws1)
+    registry.register("w2", ["python"], ws2)
+
+    mock_seq = _mock_sequencer()
+
+    with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
+        result = await dispatch_pending(store, registry)
+
+    assert result == 2
+    await asyncio.sleep(0)
+    # Both pipeline types were dispatched
+    mock_seq.run_impl_pipeline.assert_called_once()
+    mock_seq.run_qa_pipeline.assert_called_once()

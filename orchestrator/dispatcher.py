@@ -1,43 +1,52 @@
-"""Job dispatcher: matches ready tasks to available workers and initiates remote execution."""
+"""Job dispatcher: matches ready tasks to available workers and initiates remote execution.
+
+Priority dispatch: merge → QA → impl (one pipeline per project at a time).
+Uses PipelineSequencer to drive workers through multi-step command sequences.
+"""
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
-import os
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from core import events as ev
-from core import git_transfer
-from core.execution_manager import ExecutionManager
 from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
 from core.remote_protocol import (
-    AssignTaskMessage,
     ExecutionCompletedMessage,
     ExecutionFailedMessage,
     ExecutionStartedMessage,
 )
 from core.spec_manager import SpecManager
-from core.state_machine import TaskStateMachine
 from core.store import Store
 from core.task_manager import TaskManager
-from orchestrator.registry import WorkerConnection, WorkerRegistry
+from orchestrator.channel import WebSocketWorkerChannel
+from orchestrator.registry import WorkerRegistry
+from orchestrator.sequencer import PipelineSequencer
 
 logger = logging.getLogger(__name__)
 
 
 async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
-    """Discover ready tasks, match to available workers, and dispatch.
+    """Discover ready tasks in priority order and dispatch to available workers.
 
-    Returns the count of tasks dispatched in this pass.
+    Priority: merge (ready_for_deployment) → QA (ready_for_qa) → impl (ready_for_implementation).
+    Enforces one-pipeline-per-project: skips projects that already have an IN_PROGRESS task.
+    Returns count of tasks dispatched in this pass.
     """
     project_manager = ProjectManager(store)
     task_manager = TaskManager(store)
     spec_manager = SpecManager(store)
+    sequencer = PipelineSequencer(store)
 
     active_projects = await project_manager.list_projects()
-    candidates: list[tuple[Task, Project, Spec]] = []
+
+    # Candidates by pipeline type: (task, project, spec | None)
+    merge_candidates: list[tuple[Task, Project]] = []
+    qa_candidates: list[tuple[Task, Project, Spec]] = []
+    impl_candidates: list[tuple[Task, Project, Spec]] = []
+
+    from worker.capability_check import effective_capabilities
 
     for project in active_projects:
         project_task_events = await store.get_events(project.id, "project_tasks")
@@ -52,76 +61,119 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                     task_ids_seen.add(tid)
                     task_ids_ordered.append(tid)
 
+        # Skip project if any task is already IN_PROGRESS
+        project_in_progress = False
         for task_id in task_ids_ordered:
             task = await task_manager.get_task(task_id)
-            if task is None or task.status != ev.READY_FOR_IMPLEMENTATION:
-                continue
-            spec = await spec_manager.get_current_spec(task_id)
-            if spec is None:
-                logger.warning("Task %s has no spec assigned, skipping", task_id)
-                continue
-            candidates.append((task, project, spec))
+            if task is not None and task.status == ev.IN_PROGRESS:
+                project_in_progress = True
+                break
 
-    candidates.sort(key=lambda c: c[0].created_at)
+        if project_in_progress:
+            continue
 
-    from worker.capability_check import effective_capabilities
+        # Collect candidates for this project
+        for task_id in task_ids_ordered:
+            task = await task_manager.get_task(task_id)
+            if task is None:
+                continue
+
+            if task.status == ev.READY_FOR_DEPLOYMENT:
+                # Check not already failed auto-merge
+                task_events = await store.get_events(task_id, "task")
+                if not any(e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events):
+                    merge_candidates.append((task, project))
+
+            elif task.status == ev.READY_FOR_QA:
+                spec = await spec_manager.get_current_spec(task_id)
+                if spec is None:
+                    logger.warning("Task %s has no spec, skipping QA dispatch", task_id)
+                    continue
+                qa_candidates.append((task, project, spec))
+
+            elif task.status == ev.READY_FOR_IMPLEMENTATION:
+                spec = await spec_manager.get_current_spec(task_id)
+                if spec is None:
+                    logger.warning("Task %s has no spec assigned, skipping", task_id)
+                    continue
+                impl_candidates.append((task, project, spec))
+
+    # Sort each group by task creation time (oldest first)
+    merge_candidates.sort(key=lambda c: c[0].created_at)
+    qa_candidates.sort(key=lambda c: c[0].created_at)
+    impl_candidates.sort(key=lambda c: c[0].created_at)
 
     count = 0
-    for task, project, spec in candidates:
-        required = list(effective_capabilities(task, project))
+    dispatched_projects: set[UUID] = set()
+
+    def _start_pipeline(
+        pipeline_type: str,
+        task_t: Task,
+        project_t: Project,
+        spec_t: Spec | None,
+    ) -> bool:
+        """Try to dispatch one pipeline. Returns True if dispatched."""
+        nonlocal count
+        if project_t.id in dispatched_projects:
+            return False
+        required = list(effective_capabilities(task_t, project_t))
         worker = registry.find_available(required)
         if worker is None:
-            continue
-        try:
-            await _dispatch_one(task, project, spec, worker, store, registry)
-            count += 1
-        except Exception:
-            logger.exception(
-                "dispatch_pending: failed to dispatch task=%s to worker=%s",
-                task.id,
-                worker.worker_id,
-            )
+            return False
+
+        reservation_id = str(uuid4())
+        registry.assign_job(worker.worker_id, reservation_id)
+        dispatched_projects.add(project_t.id)
+
+        channel = WebSocketWorkerChannel(worker.websocket, worker.worker_id)
+
+        if pipeline_type == "merge":
+            coro = sequencer.run_merge_pipeline(channel, task_t, project_t)
+        elif pipeline_type == "qa":
+            assert spec_t is not None
+            coro = sequencer.run_qa_pipeline(channel, task_t, project_t, spec_t)
+        else:
+            assert spec_t is not None
+            coro = sequencer.run_impl_pipeline(channel, task_t, project_t, spec_t)
+
+        worker_id = worker.worker_id
+
+        async def _run_pipeline(
+            _coro: object = coro, _worker_id: str = worker_id
+        ) -> None:
+            try:
+                await _coro  # type: ignore[misc]
+            except Exception:
+                logger.exception(
+                    "Pipeline task failed unexpectedly for worker=%s", _worker_id
+                )
+            finally:
+                try:
+                    registry.clear_job(_worker_id)
+                except Exception:
+                    pass
+
+        asyncio.create_task(_run_pipeline())
+        count += 1
+        logger.info(
+            "Dispatched %s pipeline for task=%s to worker=%s",
+            pipeline_type,
+            task_t.id,
+            worker.worker_id,
+        )
+        return True
+
+    # Process in priority order: merge → QA → impl
+    for merge_task, merge_project in merge_candidates:
+        _start_pipeline("merge", merge_task, merge_project, None)
+
+    for qa_task, qa_project, qa_spec in qa_candidates:
+        _start_pipeline("qa", qa_task, qa_project, qa_spec)
+
+    for impl_task, impl_project, impl_spec in impl_candidates:
+        _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
     return count
-
-
-async def _dispatch_one(
-    task: Task,
-    project: Project,
-    spec: Spec,
-    worker: WorkerConnection,
-    store: Store,
-    registry: WorkerRegistry,
-) -> None:
-    """Dispatch a single task to a worker: create execution, bundle, send, assign, transition."""
-    execution_manager = ExecutionManager(store, project.local_path)
-    execution = await execution_manager.start_execution(task.id, spec.id, project=project)
-    worktree_path = os.path.join(project.local_path, ".worktrees", str(execution.id))
-    bundle_bytes = git_transfer.create_bundle(worktree_path)
-    git_bundle_b64 = base64.b64encode(bundle_bytes).decode()
-    msg = AssignTaskMessage(
-        type="assign_task",
-        task_id=str(task.id),
-        spec_id=str(spec.id),
-        spec_content=spec.content,
-        project_id=str(project.id),
-        project_name=project.name,
-        project_local_path=project.local_path,
-        project_intent_md=project.intent_md,
-        project_ratchet_yaml=project.ratchet_yaml,
-        project_config_source=project.config_source,
-        git_bundle_b64=git_bundle_b64,
-    )
-    await worker.websocket.send_text(msg.model_dump_json())
-    registry.assign_job(worker.worker_id, str(execution.id))
-    state_machine = TaskStateMachine(store)
-    await state_machine.transition(task.id, ev.IN_PROGRESS)
-    logger.info(
-        "Dispatched task %s to worker %s (execution %s)",
-        task.id,
-        worker.worker_id,
-        execution.id,
-    )
 
 
 async def dispatch_loop(

@@ -140,6 +140,18 @@ def load_qa_config(local_path: str, ratchet_yaml: str | None = None) -> QaConfig
     return QaConfig(steps=steps, max_fix_attempts=max_fix_attempts, auto_fix=auto_fix)
 
 
+def load_qa_config_from_string(yaml_content: str) -> QaConfig | None:
+    """Parse YAML string directly and return QaConfig, or None if absent/invalid.
+
+    Used by QA sequencer when it receives ratchet.yaml content from ReadFile.
+    Returns None for empty or invalid YAML that lacks a qa section.
+    """
+    try:
+        return load_qa_config("", ratchet_yaml=yaml_content)
+    except yaml.YAMLError:
+        return None
+
+
 def run_auto_fixes(config: QaConfig, cwd: str) -> bool:
     """Run auto-fix commands from config.auto_fix, commit any changes.
 

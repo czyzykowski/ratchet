@@ -14,6 +14,7 @@ from core.qa_runner import (
     load_deployment_config,
     load_merge_config,
     load_qa_config,
+    load_qa_config_from_string,
     parse_review_output,
     run_merge_steps,
     run_qa_steps,
@@ -465,3 +466,37 @@ def test_load_deployment_config_absent_section_from_ratchet_yaml_string() -> Non
     yaml_str = "qa:\n  steps:\n    test: pytest\n"
     config = load_deployment_config("/unused/path", ratchet_yaml=yaml_str)
     assert config == DeploymentConfig(mode="local", base_branch="develop")
+
+
+# ---------------------------------------------------------------------------
+# load_qa_config_from_string
+# ---------------------------------------------------------------------------
+
+
+def test_load_qa_config_from_string_valid_yaml_returns_config() -> None:
+    yaml_str = textwrap.dedent("""\
+    qa:
+      steps:
+        test: pytest
+        lint: ruff check .
+      max_fix_attempts: 2
+    """)
+    config = load_qa_config_from_string(yaml_str)
+    assert config is not None
+    assert len(config.steps) == 2
+    assert config.steps[0].name == "test"
+    assert config.steps[0].command == "pytest"
+    assert config.max_fix_attempts == 2
+
+
+def test_load_qa_config_from_string_empty_string_returns_none() -> None:
+    assert load_qa_config_from_string("") is None
+
+
+def test_load_qa_config_from_string_no_qa_section_returns_none() -> None:
+    yaml_str = "merge:\n  steps:\n    deploy: make deploy\n"
+    assert load_qa_config_from_string(yaml_str) is None
+
+
+def test_load_qa_config_from_string_invalid_yaml_returns_none() -> None:
+    assert load_qa_config_from_string("not: valid: yaml: [") is None
