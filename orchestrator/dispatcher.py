@@ -182,7 +182,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
 async def dispatch_loop(
     store: Store, registry: WorkerRegistry, interval_seconds: float = 2.0
 ) -> None:
-    """Run dispatch_pending repeatedly at the given interval until cancelled."""
+    """Run dispatch_pending + compile_all repeatedly at the given interval."""
     while True:
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
@@ -192,6 +192,17 @@ async def dispatch_loop(
             raise
         except Exception:
             logger.warning("dispatch_pending failed, will retry", exc_info=True)
+
+        # HLS compilation (runs locally, no worker needed)
+        try:
+            from core.compiler import compile_all
+
+            count = await compile_all(store)
+            if count > 0:
+                logger.info("compile_all: compiled %d HLS entries", count)
+        except Exception:
+            logger.warning("compile_all failed", exc_info=True)
+
         await asyncio.sleep(interval_seconds)
 
 
