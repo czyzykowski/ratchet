@@ -553,7 +553,7 @@ async def get_board_tasks(conn: Any) -> list[dict[str, Any]]:
                     SELECT e.payload->>'failure_output'
                     FROM events e
                     WHERE e.aggregate_type = 'task'
-                      AND e.aggregate_id = t.id::text
+                      AND e.aggregate_id = t.id
                       AND e.event_type = 'task.baseline_qa_failed'
                       AND e.sequence > COALESCE(
                           (SELECT MAX(e2.sequence)
