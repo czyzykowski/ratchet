@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 
 from worker.remote import RemoteWorker
 
@@ -35,8 +36,6 @@ for pair in args.projects.split(","):
     if ":" in pair:
         project_id, path = pair.split(":", 1)
         projects[project_id.strip()] = path.strip()
-
-import os
 
 workspace = os.path.expanduser(args.workspace)
 

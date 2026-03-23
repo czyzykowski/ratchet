@@ -11,6 +11,7 @@ import base64
 import logging
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,7 +19,7 @@ from core import events as ev
 from core import git_transfer
 from core.context_assembler import build_prompt, read_intent
 from core.merge import squash_merge
-from core.models import Project, Spec, Task
+from core.models import ExecutionTrace, Project, Spec, Task
 from core.models_config import WORKER_MODEL
 from core.qa_runner import load_qa_config_from_string
 from core.remote_protocol import (
@@ -336,10 +337,6 @@ class PipelineSequencer:
             # Step 9: save trace and parse output for COMPLETED/BLOCKED markers
             stdout = claude_resp.stdout or ""
             stderr = claude_resp.stderr or ""
-            from datetime import UTC, datetime
-
-            from core.models import ExecutionTrace
-
             session_jsonl = claude_resp.session_jsonl or ""
             trace_content = (
                 f"# Execution Trace: {execution_id}\n"
