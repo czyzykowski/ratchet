@@ -127,6 +127,8 @@ scripts/
   unblock-task.py   — unblock a task, transitioning it directly back to ready_for_implementation; --retry-baseline clears pending baseline QA failures
   task-reset.py     — reset a task to ready_for_spec (or ready_for_implementation with --reuse-spec)
   merge-task.py     — manually squash-merge a task's execution branch into develop
+  task-status.py    — detailed task inspector: execution history, failure reasons, worker assignment
+  workers.py        — show connected workers with capabilities and current execution
 ```
 
 ### Usage
@@ -161,6 +163,13 @@ python scripts/task-reset.py --task-id <uuid> --reuse-spec
 
 # Manually merge a task (fallback when auto-merge fails)
 python scripts/merge-task.py --task-id <uuid>
+
+# Inspect task status, execution history, and failure reasons
+python scripts/task-status.py                    # all active tasks
+python scripts/task-status.py --task-id <uuid>   # specific task detail
+
+# Show connected workers
+python scripts/workers.py
 ```
 
 ### Full Workflow
