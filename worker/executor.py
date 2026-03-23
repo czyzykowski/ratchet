@@ -424,11 +424,16 @@ class CommandExecutor:
         try:
             project_path = self._projects[request.project_id]
             worktree_path = self._worktree_path(request.project_id, request.execution_id)
+            logger.info(
+                "setup_environment: project=%s worktree=%s symlinks=%s",
+                project_path, worktree_path, request.symlinks,
+            )
             for name in request.symlinks:
                 src = os.path.join(project_path, name)
                 dst = os.path.join(worktree_path, name)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 safe_symlink(src, dst)
+                logger.info("  symlink: %s -> %s (exists=%s)", dst, src, os.path.lexists(dst))
             return SetupEnvironmentResponse(
                 type="setup_environment_response",
                 request_id=request.request_id,
