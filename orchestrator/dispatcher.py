@@ -196,10 +196,52 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     return count
 
 
+async def _recover_orphaned_tasks(store: Store, registry: WorkerRegistry) -> None:
+    """Reset in_progress tasks with no active worker back to ready_for_implementation.
+
+    Called once at dispatch loop startup to recover from orchestrator restarts.
+    """
+    task_manager = TaskManager(store)
+    project_manager = ProjectManager(store)
+    state_machine = TaskStateMachine(store)
+    active_worker_execs = {
+        w.current_execution_id for w in registry.all_workers() if w.current_execution_id
+    }
+
+    for project in await project_manager.list_projects():
+        tasks = await task_manager.list_tasks_by_project(project.id)
+        for task in tasks:
+            if task.status != ev.IN_PROGRESS:
+                continue
+            # Check if any worker is actively working on this task
+            task_events = await store.get_events(task.id, "task")
+            assigned_exec = None
+            for event in reversed(task_events):
+                if event.event_type == ev.TASK_ASSIGNED_TO_WORKER:
+                    assigned_exec = event.payload.get("execution_id")
+                    break
+            if assigned_exec and assigned_exec in active_worker_execs:
+                continue  # worker is still working on it
+            logger.info(
+                "Recovering orphaned in_progress task=%s project=%s",
+                task.id, project.name,
+            )
+            await state_machine.transition(
+                task.id, ev.READY_FOR_IMPLEMENTATION,
+                extra_payload={"reason": "orchestrator_restart_recovery"},
+            )
+
+
 async def dispatch_loop(
     store: Store, registry: WorkerRegistry, interval_seconds: float = 2.0
 ) -> None:
     """Run dispatch_pending + compile_all repeatedly at the given interval."""
+    # Startup: recover tasks orphaned by previous orchestrator crash
+    try:
+        await _recover_orphaned_tasks(store, registry)
+    except Exception:
+        logger.warning("Orphan recovery failed", exc_info=True)
+
     while True:
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
