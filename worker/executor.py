@@ -359,8 +359,14 @@ class CommandExecutor:
 
     def _handle_run_command(self, request: RunCommandRequest) -> RunCommandResponse:
         try:
+            from pathlib import Path
+
+            cmd = request.cmd
+            # Wrap with nix develop if flake.nix exists in the working directory
+            if request.cwd and (Path(request.cwd) / "flake.nix").exists():
+                cmd = ["nix", "develop", "--command"] + cmd
             result = subprocess.run(
-                request.cmd,
+                cmd,
                 cwd=request.cwd,
                 capture_output=True,
                 text=True,

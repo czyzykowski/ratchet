@@ -1,48 +1,35 @@
-"""Print connected workers from the orchestrator."""
+#!/usr/bin/env python3
+"""Show connected workers and their current state.
+
+Usage: python scripts/workers.py
+"""
 
 from __future__ import annotations
 
 import json
-import os
 import sys
-import urllib.error
 import urllib.request
 
 
 def main() -> None:
-    orchestrator_url = os.environ.get("ORCHESTRATOR_URL")
-    if not orchestrator_url:
-        print("Error: ORCHESTRATOR_URL environment variable is not set.", file=sys.stderr)
-        sys.exit(1)
-
-    url = orchestrator_url.rstrip("/") + "/workers"
-
+    base = "http://localhost:8000"
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            if response.status != 200:
-                print(f"Error: unexpected status {response.status} from {url}", file=sys.stderr)
-                sys.exit(1)
-            workers = json.loads(response.read())
-    except urllib.error.URLError as exc:
-        print(f"Error: could not reach orchestrator at {url}: {exc}", file=sys.stderr)
+        with urllib.request.urlopen(f"{base}/api/workers", timeout=5) as resp:
+            workers = json.loads(resp.read())
+    except Exception as exc:
+        print(f"Cannot reach {base}: {exc}", file=sys.stderr)
         sys.exit(1)
-
-    print("=== RATCHET WORKERS ===")
 
     if not workers:
-        print("\nNo workers connected.")
+        print("No workers connected.")
         return
 
     for w in workers:
-        worker_id = w["id"][:8]
-        capabilities = w.get("capabilities") or []
-        caps_str = ", ".join(capabilities)
+        caps = ", ".join(w.get("capabilities", [])) or "(none)"
+        status = w.get("status", "?")
         exec_id = w.get("current_execution_id")
-        status = f"executing {exec_id[:8]}" if exec_id else "idle"
-        connected_at_raw = w.get("connected_at", "")
-        # Strip microseconds: "2026-01-01T12:00:00.123456" -> "2026-01-01T12:00:00"
-        connected_at = connected_at_raw.split(".")[0] if connected_at_raw else connected_at_raw
-        print(f"  [{worker_id}] {caps_str}  —  {status}  —  connected {connected_at}")
+        exec_str = exec_id[:12] if exec_id else "idle"
+        print(f"  {w['id'][:12]}  caps=[{caps}]  {status:6s}  exec={exec_str}")
 
 
 if __name__ == "__main__":
