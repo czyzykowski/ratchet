@@ -18,6 +18,7 @@ from core.remote_protocol import (
     ExecutionStartedMessage,
 )
 from core.spec_manager import SpecManager
+from core.state_machine import TaskStateMachine
 from core.store import Store
 from core.task_manager import TaskManager
 from orchestrator.registry import WorkerRegistry
@@ -141,6 +142,8 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
 
         worker_id = worker.worker_id
 
+        task_id_for_recovery = task_t.id
+
         async def _run_pipeline(
             _coro: object = coro, _worker_id: str = worker_id
         ) -> None:
@@ -150,6 +153,20 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 logger.exception(
                     "Pipeline task failed unexpectedly for worker=%s", _worker_id
                 )
+                # Recover the task — transition to blocked so it doesn't stay in_progress
+                try:
+                    state_machine = TaskStateMachine(store)
+                    await state_machine.transition(
+                        task_id_for_recovery,
+                        ev.BLOCKED,
+                        extra_payload={"failure_reason": "pipeline crashed unexpectedly"},
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to recover task %s after pipeline crash",
+                        task_id_for_recovery,
+                        exc_info=True,
+                    )
             finally:
                 try:
                     registry.clear_job(_worker_id)
