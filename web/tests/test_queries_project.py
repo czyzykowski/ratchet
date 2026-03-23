@@ -69,8 +69,8 @@ async def test_get_tasks_for_project_passes_project_id_to_query() -> None:
 async def test_get_features_for_project_returns_title_description_counts() -> None:
     project_id = uuid4()
     rows = [
-        ("Auth", "Login flows", 3, 2),
-        ("Dashboard", "UI features", 1, 0),
+        ("Auth", "Login flows", 3, 2, False),
+        ("Dashboard", "UI features", 1, 0, False),
     ]
     conn = _make_mock_conn(rows)
 
@@ -82,12 +82,14 @@ async def test_get_features_for_project_returns_title_description_counts() -> No
         "description": "Login flows",
         "spec_count": 3,
         "compiled_count": 2,
+        "abandoned": False,
     }
     assert result[1] == {
         "title": "Dashboard",
         "description": "UI features",
         "spec_count": 1,
         "compiled_count": 0,
+        "abandoned": False,
     }
 
 

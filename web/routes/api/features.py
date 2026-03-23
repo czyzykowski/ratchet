@@ -35,6 +35,10 @@ class CreateSimpleFeatureBody(BaseModel):
     description: str | None = None
 
 
+class AbandonFeatureBody(BaseModel):
+    reason: str | None = None
+
+
 def _parse_feature_block(block: str) -> tuple[str, str, list[dict[str, Any]]]:
     title_m = re.search(r"^#\s+Feature:\s+(.+)$", block, re.MULTILINE)
     title = title_m.group(1).strip() if title_m else "Untitled Feature"
@@ -165,8 +169,32 @@ async def finalize_feature(
     return JSONResponse({"feature": updated.model_dump(mode="json")})  # type: ignore[union-attr]
 
 
+@router.post("/features/{feature_id}/abandon")
+async def abandon_feature(
+    feature_id: UUID, request: Request, body: AbandonFeatureBody = AbandonFeatureBody()
+) -> JSONResponse:
+    store = request.app.state.store
+    fm = FeatureManager(store)
+
+    feature = await fm.get_feature(feature_id)
+    if feature is None:
+        raise HTTPException(status_code=404, detail=f"Feature {feature_id} not found")
+
+    try:
+        await fm.abandon_feature(feature_id, reason=body.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    updated = await fm.get_feature(feature_id)
+    return JSONResponse({"feature": updated.model_dump(mode="json") if updated else None})
+
+
 @router.get("/features")
-async def list_features(request: Request, project_id: UUID | None = None) -> JSONResponse:
+async def list_features(
+    request: Request,
+    project_id: UUID | None = None,
+    include_abandoned: bool = False,
+) -> JSONResponse:
     store = request.app.state.store
     pm = ProjectManager(store)
     fm = FeatureManager(store)
@@ -177,6 +205,8 @@ async def list_features(request: Request, project_id: UUID | None = None) -> JSO
     features_list = []
     for project in projects:
         raw_features = await fm.list_features(project.id)
+        if not include_abandoned:
+            raw_features = [f for f in raw_features if not f.abandoned]
         for feature in raw_features:
             specs = await fm.get_high_level_specs(feature.id)
             compiled_count = sum(1 for s in specs if s.compiled)

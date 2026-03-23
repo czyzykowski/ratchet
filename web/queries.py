@@ -364,11 +364,12 @@ async def get_features_for_project(conn: Any, project_id: UUID) -> list[dict[str
                 f.title,
                 f.description,
                 COUNT(hls.id) AS spec_count,
-                COUNT(hls.id) FILTER (WHERE hls.compiled = true) AS compiled_count
+                COUNT(hls.id) FILTER (WHERE hls.compiled = true) AS compiled_count,
+                f.abandoned
             FROM current_features f
             LEFT JOIN current_high_level_specs hls ON hls.feature_id = f.id
             WHERE f.project_id = %s
-            GROUP BY f.id, f.title, f.description, f.created_at
+            GROUP BY f.id, f.title, f.description, f.created_at, f.abandoned
             ORDER BY f.created_at ASC
             """,
             (str(project_id),),
@@ -380,6 +381,7 @@ async def get_features_for_project(conn: Any, project_id: UUID) -> list[dict[str
             "description": row[1],
             "spec_count": row[2],
             "compiled_count": row[3],
+            "abandoned": row[4],
         }
         for row in rows
     ]

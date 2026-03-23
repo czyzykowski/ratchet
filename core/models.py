@@ -64,6 +64,7 @@ class Feature(BaseModel):
     session_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
+    abandoned: bool = False
 
 
 class HighLevelSpec(BaseModel):

@@ -21,7 +21,7 @@ interface FeaturesResponse {
 export function FeaturesPage() {
   const { data, isLoading, error } = useQuery<FeaturesResponse>({
     queryKey: ['features'],
-    queryFn: () => apiFetch<FeaturesResponse>('/api/features'),
+    queryFn: () => apiFetch<FeaturesResponse>('/api/features?include_abandoned=false'),
   })
 
   if (isLoading) return <div className="loading-state">Loading features...</div>

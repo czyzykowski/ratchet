@@ -98,6 +98,7 @@ class FeatureManager:
         """Return feature by id, or None if not found."""
         feature_events = await self._store.get_events(feature_id, "feature")
         result: Feature | None = None
+        abandoned = False
         for event in feature_events:
             if event.event_type in (ev.FEATURE_CREATED, ev.FEATURE_UPDATED):
                 p = event.payload
@@ -111,12 +112,48 @@ class FeatureManager:
                     created_at=result.created_at if result else event.occurred_at,
                     updated_at=event.occurred_at,
                 )
+            elif event.event_type == ev.FEATURE_ABANDONED:
+                abandoned = True
+        if result is not None:
+            result = result.model_copy(update={"abandoned": abandoned})
         return result
+
+    async def abandon_feature(self, feature_id: UUID, reason: str | None = None) -> None:
+        """Abandon a feature in idea or in_clarification status.
+
+        Appends FEATURE_ABANDONED event under both the feature aggregate and the
+        project_features registry. Raises ValueError if feature not found or in
+        an invalid status.
+        """
+        feature = await self.get_feature(feature_id)
+        if feature is None:
+            raise ValueError(f"Feature {feature_id} not found")
+        status = await self.get_feature_status(feature_id)
+        if status not in (ev.FEATURE_IDEA, ev.FEATURE_IN_CLARIFICATION):
+            raise ValueError(f"Cannot abandon feature in status '{status}'")
+        payload: dict[str, object] = {
+            "feature_id": str(feature_id),
+            "project_id": str(feature.project_id),
+            "reason": reason,
+        }
+        await self._store.append_event(
+            aggregate_id=feature_id,
+            aggregate_type="feature",
+            event_type=ev.FEATURE_ABANDONED,
+            payload=payload,
+        )
+        await self._store.append_event(
+            aggregate_id=feature.project_id,
+            aggregate_type="project_features",
+            event_type=ev.FEATURE_ABANDONED,
+            payload=payload,
+        )
 
     async def list_features(self, project_id: UUID) -> list[Feature]:
         """Return all features for a project ordered by created_at ascending."""
         registry_events = await self._store.get_events(project_id, "project_features")
         features: dict[UUID, Feature] = {}
+        abandoned_ids: set[UUID] = set()
         for event in registry_events:
             if event.event_type == ev.FEATURE_CREATED:
                 p = event.payload
@@ -146,7 +183,16 @@ class FeatureManager:
                         created_at=existing.created_at,
                         updated_at=event.occurred_at,
                     )
-        return sorted(features.values(), key=lambda f: f.created_at)
+            elif event.event_type == ev.FEATURE_ABANDONED:
+                p = event.payload
+                fid = UUID(p["feature_id"])
+                abandoned_ids.add(fid)
+        result = []
+        for fid, feature in features.items():
+            if fid in abandoned_ids:
+                feature = feature.model_copy(update={"abandoned": True})
+            result.append(feature)
+        return sorted(result, key=lambda f: f.created_at)
 
     async def add_high_level_spec(
         self,
@@ -256,6 +302,9 @@ class FeatureManager:
         - done: all tasks deployed
         """
         feature_events = await self._store.get_events(feature_id, "feature")
+
+        if any(e.event_type == ev.FEATURE_ABANDONED for e in feature_events):
+            return ev.FEATURE_ABANDONED_STATUS
 
         has_chat_session = any(e.event_type == ev.CHAT_SESSION_CREATED for e in feature_events)
         has_hls = any(e.event_type == ev.HIGH_LEVEL_SPEC_ADDED for e in feature_events)

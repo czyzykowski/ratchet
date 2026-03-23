@@ -492,3 +492,113 @@ async def test_dependency_eligibility_with_deps_not_compiled() -> None:
     # hls2 depends on hls1, which is not compiled, so it should not be eligible
     assert spec2.compiled is False
     assert hls1.id in spec2.dependencies
+
+
+# ---------------------------------------------------------------------------
+# abandon_feature
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_idea_sets_abandoned_true() -> None:
+    """should return abandoned=True after abandoning an idea feature"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.abandon_feature(feature.id)
+    found = await fm.get_feature(feature.id)
+    assert found is not None
+    assert found.abandoned is True
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_in_clarification_sets_abandoned_true() -> None:
+    """should return abandoned=True after abandoning an in_clarification feature"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    # Advance to in_clarification by adding a chat session event
+    await store.append_event(
+        aggregate_id=feature.id,
+        aggregate_type="feature",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={
+            "session_id": str(uuid.uuid4()),
+            "session_type": "feature",
+            "context_id": str(feature.id),
+            "context_type": "feature",
+        },
+    )
+    await fm.abandon_feature(feature.id, reason="No longer needed")
+    found = await fm.get_feature(feature.id)
+    assert found is not None
+    assert found.abandoned is True
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_raises_value_error_for_defined_status() -> None:
+    """should raise ValueError when feature is in defined status"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
+    with pytest.raises(ValueError, match="Cannot abandon feature in status 'defined'"):
+        await fm.abandon_feature(feature.id)
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_raises_value_error_for_nonexistent_feature() -> None:
+    """should raise ValueError when feature does not exist"""
+    fm, _ = _make_fm()
+    with pytest.raises(ValueError, match="not found"):
+        await fm.abandon_feature(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_get_feature_status_returns_abandoned_after_abandonment() -> None:
+    """should return 'abandoned' status after feature is abandoned"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.abandon_feature(feature.id)
+    status = await fm.get_feature_status(feature.id)
+    assert status == ev.FEATURE_ABANDONED_STATUS
+    assert status == "abandoned"
+
+
+@pytest.mark.asyncio
+async def test_list_features_includes_abandoned_feature_with_flag() -> None:
+    """should include abandoned features with abandoned=True in list_features"""
+    fm, _ = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.abandon_feature(feature.id)
+    result = await fm.list_features(project_id)
+    assert len(result) == 1
+    assert result[0].abandoned is True
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_reason_stored_in_event_payload() -> None:
+    """should store reason in event payload when reason is provided"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.abandon_feature(feature.id, reason="Superseded by feature X")
+    feature_events = await store.get_events(feature.id, "feature")
+    abandoned_events = [e for e in feature_events if e.event_type == ev.FEATURE_ABANDONED]
+    assert len(abandoned_events) == 1
+    assert abandoned_events[0].payload["reason"] == "Superseded by feature X"
+
+
+@pytest.mark.asyncio
+async def test_abandon_feature_reason_none_when_omitted() -> None:
+    """should store None reason when reason is not provided"""
+    fm, store = _make_fm()
+    project_id = uuid.uuid4()
+    feature = await fm.create_feature(project_id, "Feature", "desc")
+    await fm.abandon_feature(feature.id)
+    feature_events = await store.get_events(feature.id, "feature")
+    abandoned_events = [e for e in feature_events if e.event_type == ev.FEATURE_ABANDONED]
+    assert len(abandoned_events) == 1
+    assert abandoned_events[0].payload["reason"] is None

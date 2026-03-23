@@ -14,6 +14,7 @@ interface Feature {
   description: string
   session_id: string | null
   status: string
+  abandoned: boolean
 }
 
 interface HighLevelSpec {
@@ -38,6 +39,9 @@ export function FeatureDetailPage() {
   const queryClient = useQueryClient()
   const [showChat, setShowChat] = useState(false)
   const [chatMode, setChatMode] = useState<'clarification' | 'view'>('clarification')
+  const [showAbandonForm, setShowAbandonForm] = useState(false)
+  const [abandonReason, setAbandonReason] = useState('')
+  const [abandonError, setAbandonError] = useState<string | null>(null)
   const { data, isLoading, error } = useQuery<FeatureDetailResponse>({
     queryKey: ['feature', feature_id],
     queryFn: () => apiFetch<FeatureDetailResponse>(`/api/features/${feature_id}`),
@@ -55,10 +59,28 @@ export function FeatureDetailPage() {
   const compiledCount = compiledSpecs.length
   const totalCount = sortedSpecs.length
 
+  const canAbandon = feature.status === 'idea' || feature.status === 'in_clarification'
+
   function handleChatClose() {
     setShowChat(false)
     queryClient.invalidateQueries({ queryKey: ['feature', feature_id] })
     queryClient.invalidateQueries({ queryKey: ['features'] })
+  }
+
+  async function handleAbandonConfirm() {
+    setAbandonError(null)
+    try {
+      await apiFetch(`/api/features/${feature_id}/abandon`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: abandonReason || null }),
+      })
+      setShowAbandonForm(false)
+      setAbandonReason('')
+      queryClient.invalidateQueries({ queryKey: ['feature', feature_id] })
+      queryClient.invalidateQueries({ queryKey: ['features'] })
+    } catch (err) {
+      setAbandonError(err instanceof Error ? err.message : 'Failed to abandon feature')
+    }
   }
 
   if (showChat) {
@@ -101,9 +123,36 @@ export function FeatureDetailPage() {
               Start Clarification
             </button>
           )}
+          {canAbandon && !showAbandonForm && (
+            <button
+              className="btn btn-danger"
+              onClick={() => setShowAbandonForm(true)}
+            >
+              Abandon
+            </button>
+          )}
           <Link to="/features" className="btn btn-secondary">← Features</Link>
         </div>
       </header>
+
+      {showAbandonForm && (
+        <div className="modal-field" style={{ border: '1px solid #5a1a1a', borderRadius: 4, padding: '1rem', background: '#1a0a0a', marginBottom: '1rem' }}>
+          <div className="modal-label" style={{ color: '#f87171', marginBottom: '0.5rem' }}>Abandon Feature</div>
+          <textarea
+            placeholder="Reason for abandonment (optional)"
+            value={abandonReason}
+            onChange={e => setAbandonReason(e.target.value)}
+            style={{ width: '100%', minHeight: '4rem', background: '#111', color: '#e0e0e0', border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.5rem', boxSizing: 'border-box' }}
+          />
+          {abandonError && (
+            <div style={{ color: '#f87171', fontSize: '0.85rem', marginTop: '0.5rem' }}>{abandonError}</div>
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+            <button className="btn btn-danger" onClick={handleAbandonConfirm}>Confirm Abandon</button>
+            <button className="btn btn-secondary" onClick={() => { setShowAbandonForm(false); setAbandonReason(''); setAbandonError(null) }}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {totalCount > 0 && (
         <div className="modal-field">

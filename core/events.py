@@ -58,6 +58,7 @@ WAITING_FOR_INPUT = "waiting_for_input"
 # Feature events
 FEATURE_CREATED = "feature.created"
 FEATURE_UPDATED = "feature.updated"
+FEATURE_ABANDONED = "feature.abandoned"
 HIGH_LEVEL_SPEC_ADDED = "high_level_spec.added"
 HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
 
@@ -80,6 +81,7 @@ FEATURE_DEFINED = "defined"
 FEATURE_GENERATED = "generated"
 FEATURE_IN_PROGRESS = "in_progress"
 FEATURE_DONE = "done"
+FEATURE_ABANDONED_STATUS = "abandoned"
 
 TASK_STATUSES = (
     READY_FOR_SPEC,
