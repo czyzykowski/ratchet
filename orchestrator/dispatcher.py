@@ -158,8 +158,19 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
             logger.warning("Worker %s has no channel, skipping", worker.worker_id)
             return False
 
-        # Generate execution_id and record assignment BEFORE async task.
+        # Reserve worker FIRST (before any event writes) — if the worker
+        # disconnected between find_available and now, this fails fast
+        # before we've committed any state changes.
         execution_id = uuid4()
+        try:
+            registry.assign_job(worker.worker_id, str(execution_id))
+        except KeyError:
+            logger.warning(
+                "Worker %s disconnected before dispatch, skipping",
+                worker.worker_id,
+            )
+            return False
+
         await store.append_event(
             aggregate_id=task_t.id,
             aggregate_type="task",
@@ -178,8 +189,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 extra_payload={"qa_fix_attempts": 0},
             )
 
-        # Use the real execution_id as the worker reservation
-        registry.assign_job(worker.worker_id, str(execution_id))
         dispatched_projects.add(project_t.id)
 
         if pipeline_type == "merge":
