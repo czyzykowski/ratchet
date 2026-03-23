@@ -56,10 +56,16 @@ async def show_task(task_id: UUID) -> None:
 
     # Executions
     execs = await em.get_execution_history(task_id)
-    impl_ok = sum(1 for e in execs if "execution/" in (e.branch_name or "") and e.status == "completed")
-    impl_fail = sum(1 for e in execs if "execution/" in (e.branch_name or "") and e.status == "failed")
-    qa_ok = sum(1 for e in execs if "qa/" in (e.branch_name or "") and e.status == "completed")
-    qa_fail = sum(1 for e in execs if "qa/" in (e.branch_name or "") and e.status == "failed")
+    def _is_impl(e: object) -> bool:
+        return "execution/" in (getattr(e, "branch_name", None) or "")
+
+    def _is_qa(e: object) -> bool:
+        return "qa/" in (getattr(e, "branch_name", None) or "")
+
+    impl_ok = sum(1 for e in execs if _is_impl(e) and e.status == "completed")
+    impl_fail = sum(1 for e in execs if _is_impl(e) and e.status == "failed")
+    qa_ok = sum(1 for e in execs if _is_qa(e) and e.status == "completed")
+    qa_fail = sum(1 for e in execs if _is_qa(e) and e.status == "failed")
 
     print(f"Executions: {len(execs)} total")
     print(f"  Impl: {impl_ok} ok, {impl_fail} failed")
