@@ -96,6 +96,20 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 if spec is None:
                     logger.warning("Task %s has no spec assigned, skipping", task_id)
                     continue
+                # Check dependencies are met
+                if task.depends_on:
+                    unmet = False
+                    for dep_id_str in task.depends_on:
+                        try:
+                            dep_task = await task_manager.get_task(UUID(dep_id_str))
+                        except (ValueError, TypeError):
+                            unmet = True
+                            break
+                        if dep_task is None or dep_task.status != ev.DEPLOYED:
+                            unmet = True
+                            break
+                    if unmet:
+                        continue
                 impl_candidates.append((task, project, spec))
 
     # Sort each group by task creation time (oldest first)
@@ -105,14 +119,20 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
 
     count = 0
     dispatched_projects: set[UUID] = set()
+    state_machine = TaskStateMachine(store)
 
-    def _start_pipeline(
+    async def _start_pipeline(
         pipeline_type: str,
         task_t: Task,
         project_t: Project,
         spec_t: Spec | None,
     ) -> bool:
-        """Try to dispatch one pipeline. Returns True if dispatched."""
+        """Try to dispatch one pipeline. Returns True if dispatched.
+
+        Transitions the task to IN_PROGRESS and records the assignment
+        SYNCHRONOUSLY (before creating the async pipeline task) to prevent
+        duplicate dispatch on the next dispatch_pending cycle.
+        """
         nonlocal count
         if project_t.id in dispatched_projects:
             return False
@@ -121,15 +141,32 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         if worker is None:
             return False
 
-        reservation_id = str(uuid4())
-        registry.assign_job(worker.worker_id, reservation_id)
-        dispatched_projects.add(project_t.id)
-
         channel = worker.channel
         if channel is None:
             logger.warning("Worker %s has no channel, skipping", worker.worker_id)
-            registry.clear_job(worker.worker_id)
             return False
+
+        # Generate execution_id and record assignment BEFORE async task.
+        # This ensures the task is IN_PROGRESS when dispatch_pending returns,
+        # preventing duplicate dispatch on the next cycle.
+        execution_id = uuid4()
+        await store.append_event(
+            aggregate_id=task_t.id,
+            aggregate_type="task",
+            event_type=ev.TASK_ASSIGNED_TO_WORKER,
+            payload={
+                "worker_id": worker.worker_id,
+                "execution_id": str(execution_id),
+            },
+        )
+        await state_machine.transition(
+            task_t.id, ev.IN_PROGRESS,
+            extra_payload={"qa_fix_attempts": 0},
+        )
+
+        # Use the real execution_id as the worker reservation
+        registry.assign_job(worker.worker_id, str(execution_id))
+        dispatched_projects.add(project_t.id)
 
         if pipeline_type == "merge":
             coro = sequencer.run_merge_pipeline(channel, task_t, project_t)
@@ -141,7 +178,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
             coro = sequencer.run_impl_pipeline(channel, task_t, project_t, spec_t)
 
         worker_id = worker.worker_id
-
         task_id_for_recovery = task_t.id
 
         async def _run_pipeline(
@@ -153,9 +189,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 logger.exception(
                     "Pipeline task failed unexpectedly for worker=%s", _worker_id
                 )
-                # Recover the task — transition to blocked so it doesn't stay in_progress
                 try:
-                    state_machine = TaskStateMachine(store)
                     await state_machine.transition(
                         task_id_for_recovery,
                         ev.BLOCKED,
@@ -185,13 +219,13 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
 
     # Process in priority order: merge → QA → impl
     for merge_task, merge_project in merge_candidates:
-        _start_pipeline("merge", merge_task, merge_project, None)
+        await _start_pipeline("merge", merge_task, merge_project, None)
 
     for qa_task, qa_project, qa_spec in qa_candidates:
-        _start_pipeline("qa", qa_task, qa_project, qa_spec)
+        await _start_pipeline("qa", qa_task, qa_project, qa_spec)
 
     for impl_task, impl_project, impl_spec in impl_candidates:
-        _start_pipeline("impl", impl_task, impl_project, impl_spec)
+        await _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
     return count
 
@@ -242,6 +276,11 @@ async def dispatch_loop(
     except Exception:
         logger.warning("Orphan recovery failed", exc_info=True)
 
+    import time
+
+    _COMPILE_INTERVAL = 60  # seconds between HLS compilation runs
+    last_compile = 0.0
+
     while True:
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
@@ -252,15 +291,18 @@ async def dispatch_loop(
         except Exception:
             logger.warning("dispatch_pending failed, will retry", exc_info=True)
 
-        # HLS compilation (runs locally, no worker needed)
-        try:
-            from core.compiler import compile_all
+        # HLS compilation — throttled to once per minute
+        now = time.monotonic()
+        if now - last_compile >= _COMPILE_INTERVAL:
+            last_compile = now
+            try:
+                from core.compiler import compile_all
 
-            count = await compile_all(store)
-            if count > 0:
-                logger.info("compile_all: compiled %d HLS entries", count)
-        except Exception:
-            logger.warning("compile_all failed", exc_info=True)
+                count = await compile_all(store)
+                if count > 0:
+                    logger.info("compile_all: compiled %d HLS entries", count)
+            except Exception:
+                logger.warning("compile_all failed", exc_info=True)
 
         await asyncio.sleep(interval_seconds)
 

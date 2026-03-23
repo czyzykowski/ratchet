@@ -281,23 +281,12 @@ class PipelineSequencer:
             head_commit = await self._ensure_project_on_worker(channel, project)
 
             # Step 2: record execution start (branch name uses execution_id for consistency)
+            # Note: TASK_ASSIGNED_TO_WORKER and IN_PROGRESS transition are done
+            # by the dispatcher BEFORE this pipeline runs, to prevent duplicate dispatch.
             exec_uuid = uuid4()
             branch_name = f"execution/{exec_uuid}"
             execution_id = await self._record_execution_start(
                 task_id, spec.id, branch_name, execution_id=exec_uuid
-            )
-
-            # Step 3: record assignment with real execution_id
-            await self._store.append_event(
-                aggregate_id=task_id,
-                aggregate_type="task",
-                event_type=ev.TASK_ASSIGNED_TO_WORKER,
-                payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
-            )
-
-            # Step 4: transition to IN_PROGRESS
-            await self._state_machine.transition(
-                task_id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0}
             )
 
             # Step 5: CreateWorktree
@@ -347,8 +336,9 @@ class PipelineSequencer:
             # Step 9: save trace and parse output for COMPLETED/BLOCKED markers
             stdout = claude_resp.stdout or ""
             stderr = claude_resp.stderr or ""
-            from core.models import ExecutionTrace
             from datetime import UTC, datetime
+
+            from core.models import ExecutionTrace
 
             session_jsonl = claude_resp.session_jsonl or ""
             trace_content = (
