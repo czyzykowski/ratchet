@@ -432,15 +432,15 @@ class PipelineSequencer:
         project_id = project.id
         execution_id: UUID | None = None
 
-        # Find execution branch from task events
+        # Find the impl execution branch (not QA branches) from task events
         execution_events = await self._store.get_events(task_id, "task_executions")
         execution_branch: str | None = None
         for event in reversed(execution_events):
             if event.event_type == ev.EXECUTION_STARTED:
                 bn = event.payload.get("branch_name")
-                if bn:
+                if bn and bn.startswith("execution/"):
                     execution_branch = bn
-                break
+                    break
 
         if not execution_branch:
             failure = "QA cannot run: no execution branch found for task"
@@ -663,11 +663,12 @@ class PipelineSequencer:
         for event in reversed(execution_events):
             if event.event_type == ev.EXECUTION_STARTED:
                 bn = event.payload.get("branch_name")
-                si = event.payload.get("spec_id")
-                if bn:
+                # Skip QA branches — we need the impl execution branch
+                if bn and bn.startswith("execution/"):
+                    si = event.payload.get("spec_id")
                     execution_branch = bn
                     spec_id_val = UUID(si) if si else None
-                break
+                    break
 
         spec_content = ""
         if spec_id_val is not None:
