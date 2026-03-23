@@ -91,6 +91,18 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                     continue
                 qa_candidates.append((task, project, spec))
 
+            elif task.status == ev.WAITING_FOR_INPUT:
+                # Check if all questions have been answered
+                from core import qa_manager
+
+                pending = await qa_manager.get_pending_question(store, task_id)
+                if pending is not None:
+                    continue  # still waiting for answer
+                spec = await spec_manager.get_current_spec(task_id)
+                if spec is None:
+                    continue
+                impl_candidates.append((task, project, spec))
+
             elif task.status == ev.READY_FOR_IMPLEMENTATION:
                 spec = await spec_manager.get_current_spec(task_id)
                 if spec is None:

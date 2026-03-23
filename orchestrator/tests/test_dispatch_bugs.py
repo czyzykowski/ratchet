@@ -226,3 +226,216 @@ async def test_orphan_recovery_skips_task_with_active_worker():
 
     status = await sm.get_current_status(task_id)
     assert status == ev.IN_PROGRESS  # NOT recovered — worker is active
+
+
+# ---------------------------------------------------------------------------
+# Bug 6: Crash recovery should retry (not block) if task wasn't IN_PROGRESS yet
+# ---------------------------------------------------------------------------
+
+
+async def test_crash_recovery_blocks_task_that_was_in_progress():
+    """Pipeline crash after IN_PROGRESS should transition to BLOCKED."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    registry = _make_registry_with_worker()
+
+    # Pipeline that crashes after dispatch (task already IN_PROGRESS)
+    async def crashing_pipeline(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("boom")
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        side_effect=crashing_pipeline,
+    ):
+        await dispatch_pending(store, registry)
+
+    # Let the async crash handler run
+    import asyncio
+
+    await asyncio.sleep(0.1)
+
+    sm = TaskStateMachine(store)
+    status = await sm.get_current_status(task_id)
+    assert status == ev.BLOCKED
+
+
+# ---------------------------------------------------------------------------
+# Bug 1: dispatch_pending should not dispatch a task whose status changed
+#         between candidate collection and _start_pipeline
+# ---------------------------------------------------------------------------
+
+
+async def test_does_not_dispatch_same_project_twice_in_one_cycle():
+    """Only one task per project should be dispatched per dispatch_pending call."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+
+    task1 = await _setup_task(store, project.id, title="Task 1")
+    await _advance_to_ready(store, task1)
+    await _setup_spec(store, task1)
+
+    task2 = await _setup_task(store, project.id, title="Task 2")
+    await _advance_to_ready(store, task2)
+    await _setup_spec(store, task2)
+
+    # Two workers available
+    registry = WorkerRegistry()
+    for wid in ["w1", "w2"]:
+        ws = AsyncMock()
+        conn = registry.register(wid, [], ws)
+        ch = AsyncMock()
+        ch.worker_id = wid
+        conn.channel = ch
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    # Only one task dispatched (one per project)
+    assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: Worker capacity — should not dispatch to a busy worker
+# ---------------------------------------------------------------------------
+
+
+async def test_does_not_dispatch_to_busy_worker():
+    """A worker with current_execution_id set should not receive new tasks."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    registry = _make_registry_with_worker()
+    # Mark the only worker as busy
+    registry.assign_job("worker-1", "some-existing-job")
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    assert count == 0  # no available workers
+
+
+async def test_second_dispatch_cycle_skips_in_progress_project():
+    """On the next dispatch_pending call, projects with IN_PROGRESS tasks are skipped."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+
+    task1 = await _setup_task(store, project.id, title="Task 1")
+    await _advance_to_ready(store, task1)
+    await _setup_spec(store, task1)
+
+    task2 = await _setup_task(store, project.id, title="Task 2")
+    await _advance_to_ready(store, task2)
+    await _setup_spec(store, task2)
+
+    registry = _make_registry_with_worker()
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        new_callable=AsyncMock,
+    ):
+        # First cycle: dispatches task1
+        count1 = await dispatch_pending(store, registry)
+        assert count1 == 1
+
+        # Clear worker so it's "available" again
+        registry.clear_job("worker-1")
+
+        # Second cycle: task1 is IN_PROGRESS, project skipped entirely
+        count2 = await dispatch_pending(store, registry)
+        assert count2 == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug 5: WAITING_FOR_INPUT tasks with answered questions should be dispatched
+# ---------------------------------------------------------------------------
+
+
+async def test_dispatches_waiting_for_input_task_with_answered_question():
+    """A task in WAITING_FOR_INPUT whose question has been answered should be
+    picked up by dispatch_pending (as an impl pipeline to resume)."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.WAITING_FOR_INPUT, extra_payload={
+        "execution_id": str(uuid.uuid4()),
+    })
+
+    # Record a question and answer
+    await store.append_event(
+        aggregate_id=task_id, aggregate_type="task",
+        event_type=ev.TASK_INPUT_REQUESTED,
+        payload={
+            "question": "What database?",
+            "execution_id": str(uuid.uuid4()),
+            "question_index": 0,
+        },
+    )
+    await store.append_event(
+        aggregate_id=task_id, aggregate_type="task",
+        event_type=ev.TASK_INPUT_PROVIDED,
+        payload={"answer": "PostgreSQL", "question_index": 0, "answered_by": "cli"},
+    )
+
+    registry = _make_registry_with_worker()
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    assert count == 1
+
+
+async def test_skips_waiting_for_input_task_with_unanswered_question():
+    """A task in WAITING_FOR_INPUT with a pending question should NOT be dispatched."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.WAITING_FOR_INPUT, extra_payload={
+        "execution_id": str(uuid.uuid4()),
+    })
+
+    # Record a question but NO answer
+    await store.append_event(
+        aggregate_id=task_id, aggregate_type="task",
+        event_type=ev.TASK_INPUT_REQUESTED,
+        payload={
+            "question": "What database?",
+            "execution_id": str(uuid.uuid4()),
+            "question_index": 0,
+        },
+    )
+
+    registry = _make_registry_with_worker()
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    assert count == 0
