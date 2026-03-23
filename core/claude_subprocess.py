@@ -130,6 +130,7 @@ def start(request: ClaudeRequest) -> StreamingHandle:
         stdout=PIPE,
         stderr=PIPE,
         text=True,
+        encoding="utf-8",
         env=env,
     )
 
@@ -175,6 +176,7 @@ def run(
         stdout=PIPE,
         stderr=PIPE,
         text=True,
+        encoding="utf-8",
         env=env,
     )
 

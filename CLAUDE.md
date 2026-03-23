@@ -129,6 +129,7 @@ scripts/
   merge-task.py     — manually squash-merge a task's execution branch into develop
   task-status.py    — detailed task inspector: execution history, failure reasons, worker assignment
   workers.py        — show connected workers with capabilities and current execution
+  blocked-reasons.py — show all blocked tasks with categorized failure reasons
 ```
 
 ### Usage
