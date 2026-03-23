@@ -9,6 +9,7 @@ from web.routes.api import (
     executions,
     feature_sessions,
     features,
+    project_chat_sessions,
     projects,
     specs,
     tasks,
@@ -27,4 +28,5 @@ api_router.include_router(workers.router)
 api_router.include_router(features.router)
 api_router.include_router(executions.router)
 api_router.include_router(feature_sessions.router)
+api_router.include_router(project_chat_sessions.router)
 api_router.include_router(specs.router)

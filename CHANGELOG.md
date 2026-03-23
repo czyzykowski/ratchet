@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Project chat session API endpoints (`/api/project-chat-sessions`)
 - `core/event_queries.py` — `has_pending_baseline_qa_failure()` migrated from `worker/event_helpers.py`
 
 ### Removed

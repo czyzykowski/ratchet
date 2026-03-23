@@ -26,6 +26,7 @@ from web.routes import worker as worker_router
 from web.routes.api import chat_images as chat_images_router
 from web.routes.api import events as api_events_router
 from web.routes.api import feature_sessions as feature_sessions_router
+from web.routes.api import project_chat_sessions as project_chat_sessions_router
 from web.routes.api import spec_sessions as spec_sessions_router
 from web.routes.api.router import api_router
 from web.routes.api.ws_worker import router as ws_worker_router
@@ -80,6 +81,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sse_clients = []
     app.state.spec_sessions = {}
     app.state.feature_sessions = {}
+    app.state.project_chat_sessions = {}
 
     # Worker registry shared between WebSocket endpoint and dispatch loop
     registry = WorkerRegistry()
@@ -145,6 +147,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         for session in list(app.state.feature_sessions.values()):
             await session.close()
         app.state.feature_sessions.clear()
+        for session in list(app.state.project_chat_sessions.values()):
+            await session.close()
+        app.state.project_chat_sessions.clear()
         await local_worker.stop(graceful=True)
         await close_pool()
 
@@ -167,6 +172,7 @@ app.include_router(ws_worker_router)
 app.include_router(api_events_router.router)
 app.include_router(spec_sessions_router.router, prefix="/api")
 app.include_router(feature_sessions_router.router, prefix="/api")
+app.include_router(project_chat_sessions_router.router, prefix="/api")
 app.include_router(chat_images_router.router, prefix="/api")
 
 
