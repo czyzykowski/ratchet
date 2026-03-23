@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections import defaultdict
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
@@ -13,12 +16,14 @@ from pydantic import BaseModel
 
 from core import events as ev
 from core.claude_repl import SpecReplSession, _QueueDone
+from core.models import Project
 from core.project_manager import ProjectManager
-from web.queries import get_chat_session_by_id
+from web.queries import get_chat_session_by_id, get_features_for_project, get_tasks_for_project
 
 router = APIRouter(prefix="/project-chat-sessions")
 
 _INTERRUPTED = "[Request interrupted by user]"
+_PROJECT_CHAT_ALLOWED_TOOLS = "Read,Glob,Grep,Bash(git log:*,git show:*,git diff:*)"
 
 
 def _clean_history(
@@ -31,18 +36,95 @@ def _clean_history(
     ]
 
 
-def _build_project_chat_system_prompt(intent_md: str) -> str:
-    return f"""You are a helpful assistant for this software project.
+def _build_project_chat_prompt(
+    project: Project,
+    intent_md: str,
+    claude_md: str,
+    recent_commits: list[str],
+    task_summaries: list[dict[str, Any]],
+    feature_summaries: list[dict[str, Any]],
+) -> str:
+    sections: list[str] = []
 
-## Project Intent
-{intent_md}
+    sections.append(f"## Project Intent\n{intent_md}")
 
-## Your Role
-Help the user with any questions or tasks related to this project. You can discuss
-architecture, answer questions about the codebase, help plan features, review code,
-or assist with any other project-related topics.
+    if claude_md:
+        sections.append(f"## Project Guidelines\n{claude_md}")
 
-Be concise and direct. Read the codebase when needed to give accurate answers."""
+    if recent_commits:
+        commit_lines = "\n".join(f"- {c}" for c in recent_commits)
+        sections.append(f"## Recent Activity\n{commit_lines}")
+
+    if task_summaries:
+        by_status: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for task in task_summaries:
+            by_status[task["status"]].append(task)
+        task_rows: list[str] = ["| Title | Feature |", "| ----- | ------- |"]
+        for status in sorted(by_status.keys()):
+            task_rows.append(f"| **{status}** | |")
+            for task in by_status[status]:
+                feature = task.get("feature_title") or ""
+                task_rows.append(f"| {task['title']} | {feature} |")
+        sections.append("## Tasks\n" + "\n".join(task_rows))
+    else:
+        sections.append("## Tasks\n*No tasks yet.*")
+
+    if feature_summaries:
+        feat_rows: list[str] = ["| Title | Specs | Compiled |", "| ----- | ----- | -------- |"]
+        for feat in feature_summaries:
+            feat_rows.append(
+                f"| {feat['title']} | {feat['spec_count']} | {feat['compiled_count']} |"
+            )
+        sections.append("## Features\n" + "\n".join(feat_rows))
+    else:
+        sections.append("## Features\n*No features yet.*")
+
+    capabilities = (
+        f"You are a project assistant for {project.name}. You have full read access to the "
+        "codebase and project data. You can create tasks, create features, and modify task "
+        "metadata when the user asks."
+    )
+    sections.append(f"## Capabilities\n{capabilities}")
+
+    return "\n\n".join(sections)
+
+
+async def _gather_project_context(
+    project: Project, pool: object
+) -> tuple[str, str, list[str], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Gather intent_md, claude_md, recent_commits, task_summaries, feature_summaries."""
+    local_path = str(project.local_path)
+
+    intent_md_path = Path(local_path) / "docs" / "INTENT.md"
+    intent_md = intent_md_path.read_text() if intent_md_path.exists() else ""
+
+    claude_md_path = Path(local_path) / "CLAUDE.md"
+    claude_md = claude_md_path.read_text() if claude_md_path.exists() else ""
+
+    recent_commits: list[str] = []
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            "log",
+            "--oneline",
+            "-20",
+            cwd=local_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode == 0:
+            recent_commits = [
+                line for line in stdout.decode().splitlines() if line.strip()
+            ]
+    except Exception:
+        pass
+
+    async with pool.connection() as conn:  # type: ignore[attr-defined]
+        task_summaries = await get_tasks_for_project(conn, project.id)
+        feature_summaries = await get_features_for_project(conn, project.id)
+
+    return intent_md, claude_md, recent_commits, task_summaries, feature_summaries
 
 
 class CreateSessionBody(BaseModel):
@@ -56,6 +138,7 @@ class MessageBody(BaseModel):
 @router.post("")
 async def create_session(body: CreateSessionBody, request: Request) -> JSONResponse:
     store = request.app.state.store
+    pool = request.app.state.pool
 
     pm = ProjectManager(store)
     project = await pm.get_project(body.project_id)
@@ -67,14 +150,19 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
     if not intent_md_path.exists():
         raise HTTPException(status_code=400, detail="INTENT.md not found in project")
 
-    intent_md = intent_md_path.read_text()
-    system_prompt = _build_project_chat_system_prompt(intent_md)
+    intent_md, claude_md, recent_commits, task_summaries, feature_summaries = (
+        await _gather_project_context(project, pool)
+    )
+    system_prompt = _build_project_chat_prompt(
+        project, intent_md, claude_md, recent_commits, task_summaries, feature_summaries
+    )
 
     session_id = str(uuid4())
     session = SpecReplSession(
         task_id=str(body.project_id),
         system_prompt=system_prompt,
         cwd=local_path,
+        allowed_tools=_PROJECT_CHAT_ALLOWED_TOOLS,
     )
     request.app.state.project_chat_sessions[session_id] = session
 
@@ -140,13 +228,19 @@ async def _recover_session(session_id: str, request: Request) -> SpecReplSession
     intent_md_path = Path(local_path) / "docs" / "INTENT.md"
     if not intent_md_path.exists():
         return None
-    intent_md = intent_md_path.read_text()
-    system_prompt = _build_project_chat_system_prompt(intent_md)
+
+    intent_md, claude_md, recent_commits, task_summaries, feature_summaries = (
+        await _gather_project_context(project, pool)
+    )
+    system_prompt = _build_project_chat_prompt(
+        project, intent_md, claude_md, recent_commits, task_summaries, feature_summaries
+    )
     session = SpecReplSession(
         task_id=str(project_id),
         system_prompt=system_prompt,
         cwd=local_path,
         history=_clean_history(list(existing.messages)),
+        allowed_tools=_PROJECT_CHAT_ALLOWED_TOOLS,
     )
     request.app.state.project_chat_sessions[session_id] = session
     return session

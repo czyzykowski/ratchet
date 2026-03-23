@@ -77,6 +77,10 @@ def test_should_create_session_and_return_session_id(
             return_value="# Intent",
         ),
         patch(
+            "web.routes.api.project_chat_sessions._gather_project_context",
+            new=AsyncMock(return_value=("# Intent", "", [], [], [])),
+        ),
+        patch(
             "web.routes.api.project_chat_sessions.SpecReplSession",
             return_value=mock_session,
         ),

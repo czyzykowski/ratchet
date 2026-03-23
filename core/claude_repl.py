@@ -89,6 +89,7 @@ class SpecReplSession:
     history: list[tuple[str, str, str | None, str | None]] = field(default_factory=list)
     session_id: str = "default"
     model: str = field(default=CHAT_MODEL)
+    allowed_tools: str = "Read,Glob,WebSearch,Bash"
 
     def __post_init__(self) -> None:
         self._proc: asyncio.subprocess.Process | None = None
@@ -107,7 +108,7 @@ class SpecReplSession:
             "--verbose",
             "--include-partial-messages",
             "--allowedTools",
-            "Read,Glob,WebSearch,Bash",
+            self.allowed_tools,
             "--model",
             self.model,
             "--system-prompt",

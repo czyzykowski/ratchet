@@ -327,6 +327,64 @@ async def get_project_tasks(conn: Any, project_id: UUID) -> list[dict[str, Any]]
     ]
 
 
+async def get_tasks_for_project(conn: Any, project_id: UUID) -> list[dict[str, Any]]:
+    """Return tasks for a project with feature backlink title.
+
+    Joins with current_high_level_specs and current_features to include feature_title.
+    """
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT t.title, t.status, f.title AS feature_title
+            FROM current_tasks t
+            LEFT JOIN current_high_level_specs hls ON hls.task_id = t.id
+            LEFT JOIN current_features f ON f.id = hls.feature_id
+            WHERE t.project_id = %s
+            ORDER BY t.created_at ASC
+            """,
+            (str(project_id),),
+        )
+        rows = await cur.fetchall()
+    return [
+        {
+            "title": row[0],
+            "status": row[1],
+            "feature_title": row[2],
+        }
+        for row in rows
+    ]
+
+
+async def get_features_for_project(conn: Any, project_id: UUID) -> list[dict[str, Any]]:
+    """Return features for a project with spec and compiled counts."""
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT
+                f.title,
+                f.description,
+                COUNT(hls.id) AS spec_count,
+                COUNT(hls.id) FILTER (WHERE hls.compiled = true) AS compiled_count
+            FROM current_features f
+            LEFT JOIN current_high_level_specs hls ON hls.feature_id = f.id
+            WHERE f.project_id = %s
+            GROUP BY f.id, f.title, f.description, f.created_at
+            ORDER BY f.created_at ASC
+            """,
+            (str(project_id),),
+        )
+        rows = await cur.fetchall()
+    return [
+        {
+            "title": row[0],
+            "description": row[1],
+            "spec_count": row[2],
+            "compiled_count": row[3],
+        }
+        for row in rows
+    ]
+
+
 async def get_task_baseline_qa_failure(conn: Any, task_id: UUID) -> str | None:
     """Return pending baseline QA failure output if not cleared by retry or force-execute."""
     async with conn.cursor() as cur:
