@@ -221,6 +221,9 @@ export function ProjectChat({ projectId, onClose }: ProjectChatProps) {
             setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
             assistantText = ''
             setCurrentStream('')
+          } else if (payload.type === 'action_executed') {
+            queryClient.invalidateQueries({ queryKey: ['board'] })
+            queryClient.invalidateQueries({ queryKey: ['features'] })
           }
         }
       }

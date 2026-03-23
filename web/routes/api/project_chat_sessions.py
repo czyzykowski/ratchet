@@ -18,6 +18,8 @@ from core import events as ev
 from core.claude_repl import SpecReplSession, _QueueDone
 from core.models import Project
 from core.project_manager import ProjectManager
+from web.action_executor import execute_action
+from web.action_parser import parse_action_blocks, replace_action_block
 from web.queries import get_chat_session_by_id, get_features_for_project, get_tasks_for_project
 
 router = APIRouter(prefix="/project-chat-sessions")
@@ -85,6 +87,33 @@ def _build_project_chat_prompt(
         "metadata when the user asks."
     )
     sections.append(f"## Capabilities\n{capabilities}")
+
+    write_actions = (
+        "To perform write actions on project entities, output a fenced action block:\n\n"
+        "```action\n"
+        '{"action": "create_task", "title": "Task title here"}\n'
+        "```\n\n"
+        "```action\n"
+        '{"action": "create_feature", "title": "Feature title",'
+        ' "description": "What this feature does"}\n'
+        "```\n\n"
+        "```action\n"
+        '{"action": "update_task", "task_id": "<uuid>", "title": "New title"}\n'
+        "```\n\n"
+        "```action\n"
+        '{"action": "update_task", "task_id": "<uuid>", "status": "abandoned"}\n'
+        "```\n\n"
+        "```action\n"
+        '{"action": "archive_task", "task_id": "<uuid>", "reason": "No longer needed"}\n'
+        "```\n\n"
+        "Rules:\n"
+        "- Always confirm with the user before executing destructive actions"
+        " (archive, status changes)\n"
+        "- Only perform one write action per response unless the user explicitly"
+        " approves multiple\n"
+        "- Explain what you're about to do before outputting the action block"
+    )
+    sections.append(f"## Write Actions\n{write_actions}")
 
     return "\n\n".join(sections)
 
@@ -257,32 +286,62 @@ async def send_message(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     store = request.app.state.store
+    project_id = UUID(session.task_id)
 
-    async def _on_complete(full_text: str) -> None:
+    async def _persist(text: str) -> None:
         await store.append_event(
             aggregate_id=UUID(session_id),
             aggregate_type="chat_session",
             event_type=ev.CHAT_SESSION_MESSAGE_ADDED,
             payload={
                 "user_input": body.user_input,
-                "assistant_text": full_text,
+                "assistant_text": text,
                 "image_id": None,
                 "image_media_type": None,
             },
         )
 
-    queue = await session.ask_detached(body.user_input, _on_complete)
+    async def _noop(_: str) -> None:
+        pass
+
+    queue = await session.ask_detached(body.user_input, _noop)
 
     async def _stream() -> AsyncGenerator[str, None]:
+        accumulated = ""
         while True:
             chunk = await queue.get()
             if isinstance(chunk, _QueueDone):
                 break
             if chunk is None:
                 yield f"data: {json.dumps({'type': 'new_message'})}\n\n"
+                accumulated = ""
             else:
+                accumulated += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
 
+        # Detect and execute action blocks in accumulated text
+        action_blocks = parse_action_blocks(accumulated)
+        modified = accumulated
+        for _parsed in action_blocks:
+            result = await execute_action(_parsed, store, project_id)
+            confirmation = result.message if result.success else f"⚠ {result.error}"
+            # Re-parse each iteration to get fresh offsets after prior replacements
+            fresh = parse_action_blocks(modified)
+            if fresh:
+                modified = replace_action_block(modified, fresh[0], confirmation)
+            event_payload = {
+                "type": "action_executed",
+                "action": result.action,
+                "result": {
+                    "success": result.success,
+                    "message": result.message,
+                    "entity_id": result.entity_id,
+                    "error": result.error,
+                },
+            }
+            yield f"data: {json.dumps(event_payload)}\n\n"
+
+        await _persist(modified)
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream")

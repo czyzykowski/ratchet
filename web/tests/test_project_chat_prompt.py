@@ -109,3 +109,14 @@ def test_should_handle_task_with_feature_title_none() -> None:
     tasks = [{"title": "Standalone task", "status": "ready_for_spec", "feature_title": None}]
     result = _build_project_chat_prompt(project, "intent", "", [], tasks, [])
     assert "Standalone task" in result
+
+
+def test_should_include_write_actions_section_in_prompt() -> None:
+    project = _make_project()
+    result = _build_project_chat_prompt(project, "intent", "", [], [], [])
+    assert "## Write Actions" in result
+    assert "create_task" in result
+    assert "create_feature" in result
+    assert "update_task" in result
+    assert "archive_task" in result
+    assert "confirm with the user before executing destructive actions" in result
