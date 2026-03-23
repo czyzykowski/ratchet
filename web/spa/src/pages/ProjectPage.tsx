@@ -9,6 +9,7 @@ import { NewTaskModal } from '../components/NewTaskModal'
 import { NewFeatureModal } from '../components/NewFeatureModal'
 import { FeatureProgressBar } from '../components/FeatureProgressBar'
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal'
+import { ProjectChat } from '../components/ProjectChat'
 import { STATUS_COLORS } from '../utils/statusColors'
 
 const STATUS_ORDER = [
@@ -90,6 +91,7 @@ export function ProjectPage() {
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [showChat, setShowChat] = useState(false)
   const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
 
   useSSE((event) => {
@@ -114,6 +116,9 @@ export function ProjectPage() {
       <header className="page-header">
         <h1>{data.project.name}</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-secondary" onClick={() => setShowChat(true)}>
+            Chat
+          </button>
           <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
@@ -226,6 +231,13 @@ export function ProjectPage() {
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+      {showChat && project_id && (
+        <div className="modal-overlay" onClick={() => setShowChat(false)}>
+          <div className="modal-content-chat" onClick={e => e.stopPropagation()}>
+            <ProjectChat projectId={project_id} onClose={() => setShowChat(false)} />
+          </div>
+        </div>
       )}
     </div>
   )
