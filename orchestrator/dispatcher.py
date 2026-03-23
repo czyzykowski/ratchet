@@ -293,9 +293,20 @@ async def dispatch_loop(
     import time
 
     _COMPILE_INTERVAL = 60  # seconds between HLS compilation runs
+    _RECOVERY_INTERVAL = 120  # seconds between orphan recovery runs
     last_compile = 0.0
+    last_recovery = time.monotonic()
 
     while True:
+        # Periodic orphan recovery — catch tasks whose pipeline crashed
+        now = time.monotonic()
+        if now - last_recovery >= _RECOVERY_INTERVAL:
+            last_recovery = now
+            try:
+                await _recover_orphaned_tasks(store, registry)
+            except Exception:
+                logger.warning("Periodic orphan recovery failed", exc_info=True)
+
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
         except TimeoutError:
