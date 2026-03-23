@@ -548,7 +548,12 @@ class PipelineSequencer:
                 # All QA steps passed
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_complete(execution_id)
-                await self._state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+                # Only transition if not already in target state
+                current = await self._state_machine.get_current_status(task_id)
+                if current != ev.READY_FOR_DEPLOYMENT:
+                    await self._state_machine.transition(
+                        task_id, ev.READY_FOR_DEPLOYMENT
+                    )
                 return PipelineResult(
                     success=True, task_id=task_id, execution_id=execution_id
                 )
