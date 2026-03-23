@@ -159,8 +159,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
             return False
 
         # Generate execution_id and record assignment BEFORE async task.
-        # This ensures the task is IN_PROGRESS when dispatch_pending returns,
-        # preventing duplicate dispatch on the next cycle.
         execution_id = uuid4()
         await store.append_event(
             aggregate_id=task_t.id,
@@ -171,10 +169,14 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 "execution_id": str(execution_id),
             },
         )
-        await state_machine.transition(
-            task_t.id, ev.IN_PROGRESS,
-            extra_payload={"qa_fix_attempts": 0},
-        )
+        # Only transition to IN_PROGRESS for impl tasks (ready_for_implementation
+        # or waiting_for_input). QA and merge tasks stay in their current state —
+        # the pipeline sequencer handles their transitions.
+        if task_t.status in (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT):
+            await state_machine.transition(
+                task_t.id, ev.IN_PROGRESS,
+                extra_payload={"qa_fix_attempts": 0},
+            )
 
         # Use the real execution_id as the worker reservation
         registry.assign_job(worker.worker_id, str(execution_id))

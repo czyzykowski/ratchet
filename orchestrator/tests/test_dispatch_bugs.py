@@ -439,3 +439,75 @@ async def test_skips_waiting_for_input_task_with_unanswered_question():
         count = await dispatch_pending(store, registry)
 
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug: QA/merge dispatch must not transition to in_progress (invalid)
+# ---------------------------------------------------------------------------
+
+
+async def test_qa_dispatch_does_not_crash_on_transition():
+    """dispatch_pending should successfully dispatch a QA task without
+    trying an invalid ready_for_qa -> in_progress transition."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+    await _setup_spec(store, task_id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.READY_FOR_QA)
+
+    # Record an execution branch so QA pipeline can find it
+    exec_id = str(uuid.uuid4())
+    await store.append_event(
+        aggregate_id=task_id,
+        aggregate_type="task_executions",
+        event_type=ev.EXECUTION_STARTED,
+        payload={
+            "execution_id": exec_id,
+            "task_id": str(task_id),
+            "spec_id": str(uuid.uuid4()),
+            "branch_name": f"execution/{exec_id}",
+            "status": "running",
+        },
+    )
+
+    registry = _make_registry_with_worker()
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_qa_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    assert count == 1
+    status = await sm.get_current_status(task_id)
+    assert status == ev.READY_FOR_QA
+
+
+async def test_merge_dispatch_does_not_crash_on_transition():
+    """dispatch_pending should successfully dispatch a merge task without
+    trying an invalid ready_for_deployment -> in_progress transition."""
+    store = InMemoryStore()
+    _, project = await _setup_project(store)
+    task_id = await _setup_task(store, project.id)
+    await _advance_to_ready(store, task_id)
+
+    sm = TaskStateMachine(store)
+    await sm.transition(task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.READY_FOR_QA)
+    await sm.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+
+    registry = _make_registry_with_worker()
+
+    with patch(
+        "orchestrator.sequencer.PipelineSequencer.run_merge_pipeline",
+        new_callable=AsyncMock,
+    ):
+        count = await dispatch_pending(store, registry)
+
+    assert count == 1
+    status = await sm.get_current_status(task_id)
+    assert status == ev.READY_FOR_DEPLOYMENT
