@@ -80,6 +80,8 @@ flake.nix          — reproducible dev shell (nix develop)
 - Dispatch loop runs as async task in lifespan, controlled by `DISPATCH_ENABLED` env var (default `true`)
 - Auto-merge: on each dispatch cycle, the worker attempts a local squash merge for one `ready_for_merge` task per project; `TASK_AUTO_MERGE_FAILED` prevents retry — use `scripts/merge-task.py` for manual merge
 - **Workers run in remote mode only**: `python -m worker` requires `--remote <URL>`; the orchestrator's `dispatch_loop` discovers tasks and drives workers via WebSocket commands — there is no local dispatch fallback
+- **Infrastructure changes break in-flight tasks**: Changes to shared modules (`core/remote_protocol.py`, `orchestrator/sequencer.py`, `worker/executor.py`, `ratchet.yaml`) affect ALL in-flight task executions because QA runs on worktrees that inherit from `develop`. Protocol type changes (e.g. changing a field from `dict` to `list`), lint errors in orchestrator code, or missing symlinks will cause every QA run to fail. Always run `ruff check .` and `pytest` BEFORE committing changes to these files
+- **Workers run in remote mode only**: `python -m worker` requires `--remote <URL>`; the orchestrator's `dispatch_loop` discovers tasks and drives workers via WebSocket commands — there is no local dispatch fallback
 
 ## Running Things
 
