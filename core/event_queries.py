@@ -19,3 +19,17 @@ def has_pending_baseline_qa_failure(task_events: list[Any]) -> bool:
     if last_failed_seq is None:
         return False
     return last_cleared_seq is None or last_failed_seq > last_cleared_seq
+
+
+def should_skip_baseline_qa(task_events: list[Any]) -> bool:
+    """True if force-execute was requested after the last baseline QA failure."""
+    last_failed_seq: int | None = None
+    last_force_seq: int | None = None
+    for event in task_events:
+        if event.event_type == ev.TASK_BASELINE_QA_FAILED:
+            last_failed_seq = event.sequence
+        elif event.event_type == ev.TASK_FORCE_EXECUTE:
+            last_force_seq = event.sequence
+    if last_force_seq is None:
+        return False
+    return last_failed_seq is None or last_force_seq > last_failed_seq

@@ -247,8 +247,65 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     for qa_task, qa_project, qa_spec in qa_candidates:
         await _start_pipeline("qa", qa_task, qa_project, qa_spec)
 
+    # Baseline QA: before dispatching impl tasks, check that the project's
+    # develop HEAD passes QA. This prevents wasting execution cycles when
+    # develop is broken (e.g. lint/typecheck errors from infrastructure changes).
+    from core.event_queries import has_pending_baseline_qa_failure, should_skip_baseline_qa
+    from core.qa_runner import check_baseline_qa
+    from worker.worktree import (
+        create_baseline_worktree,
+        remove_qa_worktree,
+    )
+
+    baseline_failed_projects: set[UUID] = set()
     for impl_task, impl_project, impl_spec in impl_candidates:
-        await _start_pipeline("impl", impl_task, impl_project, impl_spec)
+        if impl_project.id in baseline_failed_projects:
+            continue
+        # Check if baseline QA was already attempted and is pending/skipped
+        task_events = await store.get_events(impl_task.id, "task")
+        if has_pending_baseline_qa_failure(task_events):
+            continue
+        if should_skip_baseline_qa(task_events):
+            await _start_pipeline("impl", impl_task, impl_project, impl_spec)
+            continue
+
+        # Run baseline QA locally
+        ratchet_yaml = (
+            impl_project.ratchet_yaml
+            if impl_project.config_source == "db"
+            else None
+        )
+        try:
+            baseline_wt = await asyncio.to_thread(
+                create_baseline_worktree, impl_project.local_path
+            )
+        except Exception as exc:
+            logger.warning("Baseline QA worktree failed for %s: %s", impl_project.name, exc)
+            await _start_pipeline("impl", impl_task, impl_project, impl_spec)
+            continue
+
+        try:
+            failures = await asyncio.to_thread(
+                check_baseline_qa, baseline_wt, ratchet_yaml
+            )
+        finally:
+            await asyncio.to_thread(
+                remove_qa_worktree, impl_project.local_path, baseline_wt
+            )
+
+        if failures:
+            combined = "\n\n".join(f"Step '{r.step_name}':\n{r.output}" for r in failures)
+            logger.warning("Baseline QA failed for %s — skipping impl dispatch", impl_project.name)
+            baseline_failed_projects.add(impl_project.id)
+            if not has_pending_baseline_qa_failure(task_events):
+                await store.append_event(
+                    aggregate_id=impl_task.id,
+                    aggregate_type="task",
+                    event_type=ev.TASK_BASELINE_QA_FAILED,
+                    payload={"failure_output": combined},
+                )
+        else:
+            await _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
     return count
 
