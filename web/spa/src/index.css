@@ -1259,6 +1259,32 @@ body, #root {
   font-weight: 500;
 }
 
+.architecture-scope-banner {
+  padding: 0.5rem 1rem;
+  background: #f8f7ff;
+  border-bottom: 1px solid #e0dcff;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.8rem;
+  color: #5b50a0;
+}
+
+.architecture-action-result {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.architecture-action-result.error {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fcd34d;
+}
+
 @media (max-width: 600px) {
   .chat-session-list {
     display: none;

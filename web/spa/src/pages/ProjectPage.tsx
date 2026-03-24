@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchProject, type Task } from '../api/projects'
 import { apiFetch } from '../api/client'
@@ -76,6 +76,7 @@ function groupByStatus(tasks: Task[]): Record<string, Task[]> {
 
 export function ProjectPage() {
   const { project_id } = useParams<{ project_id: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery({
     queryKey: ['project', project_id],
@@ -93,6 +94,12 @@ export function ProjectPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
+  const [architectureScope, setArchitectureScope] = useState('')
+
+  function handleArchitectureClick() {
+    const url = `/projects/${project_id}/architecture`
+    navigate(architectureScope.trim() ? `${url}?scope=${encodeURIComponent(architectureScope.trim())}` : url)
+  }
 
   useSSE((event) => {
     if (
@@ -115,9 +122,19 @@ export function ProjectPage() {
     <div className="page">
       <header className="page-header">
         <h1>{data.project.name}</h1>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <button className="btn btn-secondary" onClick={() => setShowChat(true)}>
             Chat
+          </button>
+          <input
+            type="text"
+            value={architectureScope}
+            onChange={e => setArchitectureScope(e.target.value)}
+            placeholder="scope (optional)"
+            style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', border: '1px solid #e0e0e0', borderRadius: '4px', width: '140px' }}
+          />
+          <button className="btn btn-secondary" onClick={handleArchitectureClick}>
+            Architecture
           </button>
           <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
             Settings
