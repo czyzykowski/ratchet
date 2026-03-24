@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pathlib
 from dataclasses import dataclass
 from typing import cast
 from uuid import UUID
 
 from core import events as ev
 from core.feature_manager import FeatureManager
+from core.project_manager import OnboardingError, ProjectManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
 from core.store import Store
 from core.task_manager import TaskManager
@@ -24,7 +26,10 @@ class ActionResult:
 
 
 async def execute_action(
-    parsed: ParsedAction, store: Store, project_id: UUID | None
+    parsed: ParsedAction,
+    store: Store,
+    project_id: UUID | None,
+    session_id: UUID | None = None,
 ) -> ActionResult:
     """Execute a parsed action block against the store."""
     if parsed.action == "error":
@@ -37,7 +42,9 @@ async def execute_action(
         )
 
     try:
-        if parsed.action == "create_task":
+        if parsed.action == "register_project":
+            return await _register_project(parsed, store, session_id)
+        elif parsed.action == "create_task":
             if project_id is None:
                 return ActionResult(
                     success=False,
@@ -61,6 +68,8 @@ async def execute_action(
             return await _archive_task(parsed, store)
         elif parsed.action == "add_hls":
             return await _add_hls(parsed, store)
+        elif parsed.action == "check_task_status":
+            return await _check_task_status(parsed, store)
         else:
             return ActionResult(
                 success=False,
@@ -68,7 +77,7 @@ async def execute_action(
                 message="",
                 error=f"Unknown action: {parsed.action}",
             )
-    except (InvalidTransitionError, ValueError) as e:
+    except (InvalidTransitionError, ValueError, OnboardingError) as e:
         return ActionResult(
             success=False,
             action=parsed.action,
@@ -205,5 +214,84 @@ async def _archive_task(parsed: ParsedAction, store: Store) -> ActionResult:
         success=True,
         action="archive_task",
         message=f"✓ Archived task {task_id}",
+        entity_id=str(task_id),
+    )
+
+
+async def _register_project(
+    parsed: ParsedAction, store: Store, session_id: UUID | None
+) -> ActionResult:
+    name = parsed.payload.get("name")
+    if not name:
+        raise ValueError("'name' is required for register_project")
+    path = parsed.payload.get("path")
+    if not path:
+        raise ValueError("'path' is required for register_project")
+    path_str = str(path)
+    repo_url = str(parsed.payload.get("repo_url", path_str))
+    config_source = str(parsed.payload.get("config_source", "disk"))
+    raw_caps = parsed.payload.get("required_capabilities", [])
+    required_capabilities: list[str] = [str(c) for c in cast(list[object], raw_caps)]
+
+    project = await ProjectManager(store).register_project(
+        str(name), repo_url, path_str, config_source, required_capabilities
+    )
+
+    if config_source == "db":
+        base = pathlib.Path(path_str)
+        claude_md = (base / "CLAUDE.md").read_text() if (base / "CLAUDE.md").exists() else None
+        intent_md = (
+            (base / "docs" / "INTENT.md").read_text()
+            if (base / "docs" / "INTENT.md").exists()
+            else None
+        )
+        ratchet_yaml = (
+            (base / "ratchet.yaml").read_text() if (base / "ratchet.yaml").exists() else None
+        )
+        await ProjectManager(store).update_project_config(
+            project.id, claude_md, intent_md, ratchet_yaml
+        )
+
+    if session_id is not None:
+        await store.append_event(
+            aggregate_id=session_id,
+            aggregate_type="chat_session",
+            event_type=ev.CHAT_SESSION_CONTEXT_UPDATED,
+            payload={"context_id": str(project.id), "context_type": "project"},
+        )
+
+    return ActionResult(
+        success=True,
+        action="register_project",
+        message=f"✓ Registered project: {name} (id: {project.id})",
+        entity_id=str(project.id),
+    )
+
+
+async def _check_task_status(parsed: ParsedAction, store: Store) -> ActionResult:
+    task_id_str = parsed.payload.get("task_id")
+    if not task_id_str:
+        raise ValueError("'task_id' is required for check_task_status")
+    task_id = UUID(str(task_id_str))
+    status = await TaskStateMachine(store).get_current_status(task_id)
+    if status is None:
+        raise ValueError(f"task not found: {task_id_str}")
+    if status == ev.BLOCKED:
+        task_events = await store.get_events(task_id, "task")
+        reason = "unknown"
+        for e in reversed(task_events):
+            if e.event_type == ev.TASK_STATUS_CHANGED and e.payload.get("to_status") == ev.BLOCKED:
+                reason = e.payload.get("failure_reason", "unknown")
+                break
+        return ActionResult(
+            success=True,
+            action="check_task_status",
+            message=f"Task {task_id_str}: status=blocked, reason={reason}",
+            entity_id=str(task_id),
+        )
+    return ActionResult(
+        success=True,
+        action="check_task_status",
+        message=f"Task {task_id_str}: status={status}",
         entity_id=str(task_id),
     )

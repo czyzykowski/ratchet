@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pathlib
 from uuid import UUID, uuid4
 
 import pytest
 
 from core import events as ev
 from core.feature_manager import FeatureManager
+from core.project_manager import ProjectManager
 from core.state_machine import TaskStateMachine
 from core.store import InMemoryStore
 from core.task_manager import TaskManager
@@ -300,3 +302,166 @@ async def test_should_add_hls_with_empty_dependencies(
     assert result.success is True
     specs = await FeatureManager(store).get_high_level_specs(feature.id)
     assert specs[0].dependencies == []
+
+
+# --- register_project tests ---
+
+
+@pytest.mark.asyncio
+async def test_should_register_project_via_action(
+    store: InMemoryStore, tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.md").write_text("# claude")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "INTENT.md").write_text("# intent")
+
+    parsed = _make_parsed("register_project", name="my-project", path=str(tmp_path))
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is True
+    assert result.action == "register_project"
+    assert result.entity_id is not None
+    project = await ProjectManager(store).get_project(UUID(result.entity_id))
+    assert project is not None
+    assert project.name == "my-project"
+
+
+@pytest.mark.asyncio
+async def test_should_register_project_with_db_config_source(
+    store: InMemoryStore, tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "CLAUDE.md").write_text("claude content")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "INTENT.md").write_text("intent content")
+    (tmp_path / "ratchet.yaml").write_text("yaml content")
+
+    parsed = _make_parsed(
+        "register_project",
+        name="db-project",
+        path=str(tmp_path),
+        config_source="db",
+    )
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is True
+    project_id = UUID(result.entity_id)  # type: ignore[arg-type]
+    project_events = await store.get_events(project_id, "project")
+    config_events = [e for e in project_events if e.event_type == ev.PROJECT_CONFIG_UPDATED]
+    assert len(config_events) == 1
+    assert config_events[0].payload["claude_md"] == "claude content"
+    assert config_events[0].payload["intent_md"] == "intent content"
+    assert config_events[0].payload["ratchet_yaml"] == "yaml content"
+
+
+@pytest.mark.asyncio
+async def test_should_register_project_and_update_session_context(
+    store: InMemoryStore, tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    session_id = uuid4()
+    await store.append_event(
+        aggregate_id=session_id,
+        aggregate_type="chat_session",
+        event_type=ev.CHAT_SESSION_CREATED,
+        payload={"session_type": "bootstrap"},
+    )
+
+    parsed = _make_parsed(
+        "register_project", name="ctx-project", path=str(tmp_path), config_source="db"
+    )
+    result = await execute_action(parsed, store, None, session_id=session_id)
+
+    assert result.success is True
+    session_events = await store.get_events(session_id, "chat_session")
+    context_events = [e for e in session_events if e.event_type == ev.CHAT_SESSION_CONTEXT_UPDATED]
+    assert len(context_events) == 1
+    assert context_events[0].payload["context_id"] == result.entity_id
+    assert context_events[0].payload["context_type"] == "project"
+
+
+@pytest.mark.asyncio
+async def test_should_fail_register_project_when_path_missing(
+    store: InMemoryStore,
+) -> None:
+    parsed = _make_parsed("register_project", name="bad-project", path="/nonexistent/path/xyz")
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is False
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_should_fail_register_project_when_name_missing(
+    store: InMemoryStore, tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    parsed = _make_parsed("register_project", path=str(tmp_path))
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is False
+    assert result.error is not None
+
+
+# --- check_task_status tests ---
+
+
+@pytest.mark.asyncio
+async def test_should_check_task_status(
+    store: InMemoryStore, project_id: object
+) -> None:
+    task = await _seed_task(store, project_id)
+    task_id = str(task.id)  # type: ignore[attr-defined]
+
+    parsed = _make_parsed("check_task_status", task_id=task_id)
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is True
+    assert result.action == "check_task_status"
+    assert "ready_for_spec" in result.message
+    assert result.entity_id == task_id
+
+
+@pytest.mark.asyncio
+async def test_should_check_task_status_blocked_with_reason(
+    store: InMemoryStore, project_id: object
+) -> None:
+    task = await _seed_task(store, project_id)
+    task_id = task.id  # type: ignore[attr-defined]
+    sm = TaskStateMachine(store)
+    # Transition through valid path to blocked
+    await sm.transition(task_id, ev.SPEC_QA)
+    await sm.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task_id, ev.IN_PROGRESS)
+    await sm.transition(task_id, ev.BLOCKED, extra_payload={"failure_reason": "tests failed"})
+
+    parsed = _make_parsed("check_task_status", task_id=str(task_id))
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is True
+    assert "blocked" in result.message
+    assert "tests failed" in result.message
+
+
+@pytest.mark.asyncio
+async def test_should_fail_check_task_status_when_task_not_found(
+    store: InMemoryStore,
+) -> None:
+    parsed = _make_parsed("check_task_status", task_id=str(uuid4()))
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "task not found" in result.error
+
+
+@pytest.mark.asyncio
+async def test_should_fail_check_task_status_when_task_id_missing(
+    store: InMemoryStore,
+) -> None:
+    parsed = _make_parsed("check_task_status")
+    result = await execute_action(parsed, store, None)
+
+    assert result.success is False
+    assert result.error is not None

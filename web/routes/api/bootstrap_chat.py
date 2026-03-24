@@ -204,6 +204,15 @@ async def send_message(
     queue = await session.ask_detached(body.user_input, _noop)
 
     async def _stream() -> AsyncGenerator[str, None]:
+        # Recover project_id from prior session events
+        session_events = await store.get_events(UUID(session_id), "chat_session")
+        bootstrap_project_id: UUID | None = None
+        for e in session_events:
+            if e.event_type == ev.CHAT_SESSION_CONTEXT_UPDATED:
+                ctx = e.payload.get("context_id")
+                if ctx:
+                    bootstrap_project_id = UUID(ctx)
+
         accumulated = ""
         while True:
             chunk = await queue.get()
@@ -220,7 +229,11 @@ async def send_message(
         action_blocks = parse_action_blocks(accumulated)
         modified = accumulated
         for _parsed in action_blocks:
-            result = await execute_action(_parsed, store, None)
+            result = await execute_action(
+                _parsed, store, bootstrap_project_id, session_id=UUID(session_id)
+            )
+            if result.success and result.action == "register_project" and result.entity_id:
+                bootstrap_project_id = UUID(result.entity_id)
             confirmation = result.message if result.success else f"⚠ {result.error}"
             fresh = parse_action_blocks(modified)
             if fresh:

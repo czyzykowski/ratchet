@@ -65,6 +65,7 @@ HIGH_LEVEL_SPEC_COMPILED = "high_level_spec.compiled"
 # Chat session events
 CHAT_SESSION_CREATED = "chat_session.created"
 CHAT_SESSION_MESSAGE_ADDED = "chat_session.message_added"
+CHAT_SESSION_CONTEXT_UPDATED = "chat_session.context_updated"
 
 # Review events
 REVIEW_RUN_STARTED = "review_run.started"
