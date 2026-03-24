@@ -165,8 +165,38 @@ class CommandExecutor:
     ) -> UpdateProjectResponse:
         try:
             path = self._projects[request.project_id]
-            patch = base64.b64decode(request.patch_b64).decode()
-            git_transfer.apply_patch(path, patch)
+            bundle_bytes = base64.b64decode(request.patch_b64)
+            # The "patch" is actually a git bundle — fetch from it
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".bundle", delete=False) as f:
+                f.write(bundle_bytes)
+                bundle_path = f.name
+            try:
+                result = subprocess.run(
+                    ["git", "fetch", bundle_path],
+                    cwd=path,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    # Fall back to treating as text patch
+                    try:
+                        patch_text = bundle_bytes.decode("utf-8")
+                        git_transfer.apply_patch(path, patch_text)
+                    except Exception:
+                        raise RuntimeError(
+                            f"git fetch from bundle failed: {result.stderr.strip()}"
+                        )
+                else:
+                    # Reset to fetched HEAD
+                    subprocess.run(
+                        ["git", "reset", "--hard", "FETCH_HEAD"],
+                        cwd=path,
+                        capture_output=True,
+                    )
+            finally:
+                os.unlink(bundle_path)
             return UpdateProjectResponse(
                 type="update_project_response",
                 request_id=request.request_id,
