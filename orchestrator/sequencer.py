@@ -99,6 +99,81 @@ class PipelineSequencer:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _apply_patch_to_local(
+        local_path: str, branch_name: str, patch_text: str
+    ) -> None:
+        """Apply a worker's patch to the orchestrator's local repo.
+
+        Creates the execution branch if it doesn't exist, applies the patch
+        via git apply, and commits. This ensures the merge pipeline can find
+        the execution branch locally.
+        """
+        import os
+        import tempfile
+
+        # Create branch from HEAD if it doesn't exist
+        subprocess.run(
+            ["git", "branch", branch_name, "HEAD"],
+            cwd=local_path,
+            capture_output=True,  # ignore "already exists" errors
+        )
+
+        # Create worktree for the branch
+        wt_path = os.path.join(local_path, ".worktrees", f"patch-{branch_name.split('/')[-1]}")
+        subprocess.run(
+            ["git", "worktree", "add", wt_path, branch_name],
+            cwd=local_path,
+            capture_output=True,
+        )
+
+        try:
+            # Write patch to temp file and apply
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".patch", delete=False
+            ) as f:
+                f.write(patch_text)
+                patch_file = f.name
+
+            try:
+                result = subprocess.run(
+                    ["git", "apply", "--allow-empty", patch_file],
+                    cwd=wt_path,
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    logger.warning(
+                        "git apply failed: %s — trying with --3way",
+                        result.stderr.strip(),
+                    )
+                    subprocess.run(
+                        ["git", "apply", "--3way", patch_file],
+                        cwd=wt_path,
+                        capture_output=True,
+                    )
+            finally:
+                os.unlink(patch_file)
+
+            # Commit the applied changes
+            subprocess.run(
+                ["git", "add", "-A"],
+                cwd=wt_path,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", f"feat: worker execution ({branch_name})"],
+                cwd=wt_path,
+                capture_output=True,
+            )
+        finally:
+            # Remove worktree
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", wt_path],
+                cwd=local_path,
+                capture_output=True,
+            )
+
     async def _record_execution_start(
         self, task_id: UUID, spec_id: UUID, branch_name: str,
         execution_id: UUID | None = None,
@@ -363,7 +438,7 @@ class PipelineSequencer:
             )
             is_completed = "COMPLETED" in stdout and not is_blocked
 
-            # Step 10: GetDiff
+            # Step 10: GetDiff and apply to orchestrator's local repo
             get_diff_req = GetDiffRequest(
                 type="get_diff",
                 request_id=str(uuid4()),
@@ -372,7 +447,16 @@ class PipelineSequencer:
             )
             diff_resp = await channel.send_command(get_diff_req)
             assert isinstance(diff_resp, GetDiffResponse)
-            _patch = diff_resp.patch or ""
+            patch_text = diff_resp.patch or ""
+
+            # Apply the worker's changes to the orchestrator's execution branch
+            if patch_text:
+                await asyncio.to_thread(
+                    self._apply_patch_to_local,
+                    project.local_path,
+                    branch_name,
+                    patch_text,
+                )
 
             # Step 11: RemoveWorktree
             await self._try_remove_worktree(channel, project_id, execution_id)
