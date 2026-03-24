@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import subprocess
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 from uuid import uuid4
 
 from core.claude_subprocess import ClaudeResult
@@ -119,34 +119,42 @@ class TestHandleSetupProject:
 
 
 class TestHandleUpdateProject:
-    async def test_applies_patch_to_project(self) -> None:
+    async def test_applies_bundle_to_project(self) -> None:
         ex = _executor({"proj1": "/repo"})
-        patch_content = "--- a\n+++ b\n"
+        bundle_data = b"\x00binary-bundle-data"
         req = UpdateProjectRequest(
             type="update_project",
             request_id=_rid(),
             project_id="proj1",
-            patch_b64=base64.b64encode(patch_content.encode()).decode(),
+            patch_b64=base64.b64encode(bundle_data).decode(),
         )
-        with patch("core.git_transfer.apply_patch") as mock_apply:
-            resp = await ex.handle(req)
-        mock_apply.assert_called_once_with("/repo", patch_content)
-        assert resp.success is True
-
-    async def test_returns_error_on_apply_failure(self) -> None:
-        ex = _executor({"proj1": "/repo"})
-        req = UpdateProjectRequest(
-            type="update_project",
-            request_id=_rid(),
-            project_id="proj1",
-            patch_b64=base64.b64encode(b"bad patch").decode(),
-        )
-        with patch(
-            "core.git_transfer.apply_patch", side_effect=RuntimeError("apply failed")
+        with (
+            patch("subprocess.run") as mock_run,
+            patch("os.unlink"),
         ):
+            mock_run.return_value = MagicMock(returncode=0, stderr="")
+            resp = await ex.handle(req)
+        assert resp.success is True
+        # Should have called git fetch and git reset
+        assert mock_run.call_count >= 2
+
+    async def test_returns_error_on_fetch_failure(self) -> None:
+        ex = _executor({"proj1": "/repo"})
+        req = UpdateProjectRequest(
+            type="update_project",
+            request_id=_rid(),
+            project_id="proj1",
+            patch_b64=base64.b64encode(b"\x00bad").decode(),
+        )
+        with (
+            patch("subprocess.run") as mock_run,
+            patch("os.unlink"),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=1, stderr="fatal: not a bundle"
+            )
             resp = await ex.handle(req)
         assert resp.success is False
-        assert "apply failed" in (resp.error or "")
 
 
 # ---------------------------------------------------------------------------
