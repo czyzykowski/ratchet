@@ -678,6 +678,22 @@ async def get_chat_sessions_for_project(
     return [ChatSessionSummary(id=row[0], created_at=row[1]) for row in rows]
 
 
+async def get_architecture_sessions_for_project(
+    pool: Any, project_id: UUID
+) -> list[ChatSessionSummary]:
+    """Return architecture sessions for a project ordered by created_at DESC."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, created_at FROM current_chat_sessions"
+                " WHERE context_id = %s AND session_type = 'architecture'"
+                " ORDER BY created_at DESC",
+                (str(project_id),),
+            )
+            rows = await cur.fetchall()
+    return [ChatSessionSummary(id=row[0], created_at=row[1]) for row in rows]
+
+
 async def get_tasks_summary_for_project(
     pool: Any, project_id: UUID
 ) -> list[TaskSummary]:

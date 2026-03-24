@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from web.routes.api import (
+    architecture_sessions,
     board,
     executions,
     feature_sessions,
@@ -29,4 +30,5 @@ api_router.include_router(features.router)
 api_router.include_router(executions.router)
 api_router.include_router(feature_sessions.router)
 api_router.include_router(project_chat_sessions.router)
+api_router.include_router(architecture_sessions.router)
 api_router.include_router(specs.router)

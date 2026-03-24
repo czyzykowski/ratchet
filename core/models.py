@@ -100,7 +100,7 @@ class ExecutionTrace(BaseModel):
 
 class ChatSession(BaseModel):
     id: UUID
-    session_type: Literal["spec", "feature", "project_chat"]
+    session_type: Literal["spec", "feature", "project_chat", "architecture"]
     context_id: UUID
     context_type: Literal["task", "feature", "project"]
     created_at: datetime
