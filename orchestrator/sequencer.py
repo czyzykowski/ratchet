@@ -789,6 +789,21 @@ class PipelineSequencer:
             if project.ratchet_yaml:
                 qa_config = load_qa_config_from_string(project.ratchet_yaml)
 
+            # Run auto-fix before QA steps
+            if qa_config is not None and qa_config.auto_fix:
+                for fix_cmd in qa_config.auto_fix:
+                    fix_req = RunCommandRequest(
+                        type="run_command",
+                        request_id=str(uuid4()),
+                        execution_id=str(execution_id),
+                        cmd=["bash", "-c", fix_cmd],
+                        cwd=worktree_path,
+                    )
+                    try:
+                        await channel.send_command(fix_req)
+                    except PipelineAbort:
+                        pass  # auto-fix failures are non-fatal
+
             failed_steps: list[tuple[str, str]] = []
             if qa_config is not None:
                 for step in qa_config.steps:
