@@ -24,7 +24,7 @@ class ActionResult:
 
 
 async def execute_action(
-    parsed: ParsedAction, store: Store, project_id: UUID
+    parsed: ParsedAction, store: Store, project_id: UUID | None
 ) -> ActionResult:
     """Execute a parsed action block against the store."""
     if parsed.action == "error":
@@ -38,8 +38,22 @@ async def execute_action(
 
     try:
         if parsed.action == "create_task":
+            if project_id is None:
+                return ActionResult(
+                    success=False,
+                    action=parsed.action,
+                    message="",
+                    error="create_task requires a project_id — register a project first",
+                )
             return await _create_task(parsed, store, project_id)
         elif parsed.action == "create_feature":
+            if project_id is None:
+                return ActionResult(
+                    success=False,
+                    action=parsed.action,
+                    message="",
+                    error="create_feature requires a project_id — register a project first",
+                )
             return await _create_feature(parsed, store, project_id)
         elif parsed.action == "update_task":
             return await _update_task(parsed, store)

@@ -141,6 +141,8 @@ async def _recover_session(session_id: str, request: Request) -> SpecReplSession
     if existing is None:
         return None
     task_id = existing.context_id
+    if task_id is None:
+        return None
     task_manager = TaskManager(store)
     task = await task_manager.get_task(task_id)
     if task is None:

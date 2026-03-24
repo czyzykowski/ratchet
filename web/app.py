@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.feature_sessions = {}
     app.state.project_chat_sessions = {}
     app.state.architecture_sessions = {}
+    app.state.bootstrap_chat_sessions = {}
 
     # Worker registry shared between WebSocket endpoint and dispatch loop
     registry = WorkerRegistry()
@@ -161,6 +162,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         for session in list(app.state.architecture_sessions.values()):
             await session.close()
         app.state.architecture_sessions.clear()
+        for session in list(app.state.bootstrap_chat_sessions.values()):
+            await session.close()
+        app.state.bootstrap_chat_sessions.clear()
         await local_worker.stop(graceful=True)
         await close_pool()
 

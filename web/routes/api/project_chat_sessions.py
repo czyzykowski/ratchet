@@ -246,6 +246,8 @@ async def _recover_session(session_id: str, request: Request) -> SpecReplSession
     if existing is None:
         return None
     project_id = existing.context_id
+    if project_id is None:
+        return None
     pm = ProjectManager(store)
     project = await pm.get_project(project_id)
     if project is None:

@@ -100,9 +100,9 @@ class ExecutionTrace(BaseModel):
 
 class ChatSession(BaseModel):
     id: UUID
-    session_type: Literal["spec", "feature", "project_chat", "architecture"]
-    context_id: UUID
-    context_type: Literal["task", "feature", "project"]
+    session_type: Literal["spec", "feature", "project_chat", "architecture", "bootstrap"]
+    context_id: UUID | None = None
+    context_type: Literal["task", "feature", "project", "bootstrap"]
     created_at: datetime
     messages: list[tuple[str, str, str | None, str | None]]
 
