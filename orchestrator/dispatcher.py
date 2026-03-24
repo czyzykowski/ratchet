@@ -295,6 +295,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
 
     # Impl tasks with baseline QA check
     baseline_failed_projects: set[UUID] = set()
+    baseline_passed_projects: set[UUID] = set()
     for impl_task, impl_project, impl_spec in impl_candidates:
         if impl_project.id in baseline_failed_projects:
             continue
@@ -306,6 +307,11 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
             await _start_pipeline("impl", impl_task, impl_project, impl_spec)
             continue
 
+        # If we already ran baseline for this project in this cycle, reuse result
+        if impl_project.id in baseline_passed_projects:
+            await _start_pipeline("impl", impl_task, impl_project, impl_spec)
+            continue
+
         # Check if baseline QA was already attempted and is pending/skipped
         task_events = await store.get_events(impl_task.id, "task")
         if has_pending_baseline_qa_failure(task_events):
@@ -314,7 +320,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
             await _start_pipeline("impl", impl_task, impl_project, impl_spec)
             continue
 
-        # Run baseline QA locally
+        # Run baseline QA locally (once per project per dispatch cycle)
         ratchet_yaml = (
             impl_project.ratchet_yaml
             if impl_project.config_source == "db"
@@ -350,6 +356,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
                     payload={"failure_output": combined},
                 )
         else:
+            baseline_passed_projects.add(impl_project.id)
             await _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
     return results
@@ -492,7 +499,7 @@ async def dispatch_loop(
                 logger.warning("Periodic orphan recovery failed", exc_info=True)
 
         try:
-            await asyncio.wait_for(dispatch_pending(store, registry), timeout=30)
+            await asyncio.wait_for(dispatch_pending(store, registry), timeout=120)
         except TimeoutError:
             logger.warning("dispatch_pending timed out")
         except asyncio.CancelledError:
