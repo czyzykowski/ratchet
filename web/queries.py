@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from core import events as ev
-from core.models import ChatSession
+from core.models import ChatSession, ChatSessionSummary, FeatureSummary, TaskSummary
 
 
 async def get_task(conn: Any, task_id: UUID) -> dict[str, Any] | None:
@@ -660,3 +660,69 @@ async def get_board_tasks(conn: Any) -> list[dict[str, Any]]:
             "baseline_qa_failure": row[10],
         })
     return result
+
+
+async def get_chat_sessions_for_project(
+    pool: Any, project_id: UUID
+) -> list[ChatSessionSummary]:
+    """Return chat sessions for a project ordered by created_at DESC."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, created_at FROM current_chat_sessions"
+                " WHERE context_id = %s AND session_type = 'project_chat'"
+                " ORDER BY created_at DESC",
+                (str(project_id),),
+            )
+            rows = await cur.fetchall()
+    return [ChatSessionSummary(id=row[0], created_at=row[1]) for row in rows]
+
+
+async def get_tasks_summary_for_project(
+    pool: Any, project_id: UUID
+) -> list[TaskSummary]:
+    """Return task summaries for a project with optional feature backlink title."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DISTINCT ON (t.id) t.id, t.title, t.status, f.title AS feature_title
+                FROM current_tasks t
+                LEFT JOIN current_high_level_specs hls ON hls.task_id = t.id
+                LEFT JOIN current_features f ON f.id = hls.feature_id
+                WHERE t.project_id = %s
+                ORDER BY t.id, t.created_at ASC
+                """,
+                (str(project_id),),
+            )
+            rows = await cur.fetchall()
+    return [
+        TaskSummary(id=row[0], title=row[1], status=row[2], feature_title=row[3])
+        for row in rows
+    ]
+
+
+async def get_features_summary_for_project(
+    pool: Any, project_id: UUID
+) -> list[FeatureSummary]:
+    """Return feature summaries for a project with spec and compiled counts."""
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT f.id, f.title,
+                       COUNT(hls.id) AS spec_count,
+                       COUNT(hls.id) FILTER (WHERE hls.compiled) AS compiled_count
+                FROM current_features f
+                LEFT JOIN current_high_level_specs hls ON hls.feature_id = f.id
+                WHERE f.project_id = %s
+                GROUP BY f.id, f.title
+                ORDER BY f.created_at ASC
+                """,
+                (str(project_id),),
+            )
+            rows = await cur.fetchall()
+    return [
+        FeatureSummary(id=row[0], title=row[1], spec_count=row[2], compiled_count=row[3])
+        for row in rows
+    ]

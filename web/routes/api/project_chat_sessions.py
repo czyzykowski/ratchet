@@ -20,7 +20,12 @@ from core.models import Project
 from core.project_manager import ProjectManager
 from web.action_executor import execute_action
 from web.action_parser import parse_action_blocks, replace_action_block
-from web.queries import get_chat_session_by_id, get_features_for_project, get_tasks_for_project
+from web.queries import (
+    get_chat_session_by_id,
+    get_chat_sessions_for_project,
+    get_features_for_project,
+    get_tasks_for_project,
+)
 
 router = APIRouter(prefix="/project-chat-sessions")
 
@@ -212,18 +217,10 @@ async def create_session(body: CreateSessionBody, request: Request) -> JSONRespo
 @router.get("")
 async def list_sessions(project_id: UUID, request: Request) -> JSONResponse:
     pool = request.app.state.pool
-    async with pool.connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT id, created_at FROM current_chat_sessions"
-                " WHERE context_id = %s AND session_type = 'project_chat'"
-                " ORDER BY created_at DESC",
-                (str(project_id),),
-            )
-            rows = await cur.fetchall()
+    sessions = await get_chat_sessions_for_project(pool, project_id)
     result = [
-        {"session_id": str(row[0]), "created_at": row[1].isoformat()}
-        for row in rows
+        {"session_id": str(s.id), "created_at": s.created_at.isoformat()}
+        for s in sessions
     ]
     return JSONResponse(result)
 

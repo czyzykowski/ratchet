@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- `ChatSessionSummary`, `TaskSummary`, `FeatureSummary` Pydantic models in `core/models.py`
+- `get_chat_sessions_for_project`, `get_tasks_summary_for_project`, `get_features_summary_for_project` query functions in `web/queries.py`
 - Project chat session API endpoints (`/api/project-chat-sessions`)
 - `core/event_queries.py` — `has_pending_baseline_qa_failure()` migrated from `worker/event_helpers.py`
 

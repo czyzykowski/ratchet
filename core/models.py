@@ -107,6 +107,25 @@ class ChatSession(BaseModel):
     messages: list[tuple[str, str, str | None, str | None]]
 
 
+class ChatSessionSummary(BaseModel):
+    id: UUID
+    created_at: datetime
+
+
+class TaskSummary(BaseModel):
+    id: UUID
+    title: str
+    status: str
+    feature_title: str | None
+
+
+class FeatureSummary(BaseModel):
+    id: UUID
+    title: str
+    spec_count: int
+    compiled_count: int
+
+
 class ReviewScope(BaseModel):
     project_ids: list[UUID] = []
     include_global: bool
