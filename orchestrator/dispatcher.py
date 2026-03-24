@@ -298,6 +298,14 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
     for impl_task, impl_project, impl_spec in impl_candidates:
         if impl_project.id in baseline_failed_projects:
             continue
+
+        # Skip baseline QA for projects that require capabilities not available
+        # locally (e.g. osx projects can't run baseline QA on linux)
+        project_caps = set(impl_project.required_capabilities or [])
+        if project_caps:
+            await _start_pipeline("impl", impl_task, impl_project, impl_spec)
+            continue
+
         # Check if baseline QA was already attempted and is pending/skipped
         task_events = await store.get_events(impl_task.id, "task")
         if has_pending_baseline_qa_failure(task_events):
