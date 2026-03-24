@@ -7,6 +7,7 @@ awaits typed responses, and sequences the next step based on results.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import subprocess
@@ -560,18 +561,63 @@ class PipelineSequencer:
                     break
 
             if not failed_steps:
-                # All QA steps passed
+                # All QA steps passed — run Claude review
+                diff_req = GetDiffRequest(
+                    type="get_diff",
+                    request_id=str(uuid4()),
+                    project_id=str(project_id),
+                    execution_id=str(execution_id),
+                )
+                diff_resp = await channel.send_command(diff_req)
+                assert isinstance(diff_resp, GetDiffResponse)
+                diff_text = diff_resp.patch or ""
+
+                from core.qa_runner import build_review_prompt, parse_review_output
+
+                review_prompt = build_review_prompt(
+                    spec.content, diff_text, []
+                )
+                review_req = RunClaudeRequest(
+                    type="run_claude",
+                    request_id=str(uuid4()),
+                    execution_id=str(execution_id),
+                    prompt=review_prompt,
+                    model=WORKER_MODEL,
+                    tools=["Bash", "Read", "Glob", "Grep"],
+                    cwd=worktree_path,
+                )
+                review_resp = await channel.send_command(review_req)
+                assert isinstance(review_resp, RunClaudeResponse)
+
+                review_output = (review_resp.stdout or "") + (review_resp.stderr or "")
+                review_result = parse_review_output(review_output)
+
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_complete(execution_id)
-                # Only transition if not already in target state
-                current = await self._state_machine.get_current_status(task_id)
-                if current != ev.READY_FOR_DEPLOYMENT:
-                    await self._state_machine.transition(
-                        task_id, ev.READY_FOR_DEPLOYMENT
+
+                if review_result.verdict == "passed":
+                    logger.info("QA review passed for task=%s", task_id)
+                    current = await self._state_machine.get_current_status(task_id)
+                    if current != ev.READY_FOR_DEPLOYMENT:
+                        await self._state_machine.transition(
+                            task_id, ev.READY_FOR_DEPLOYMENT
+                        )
+                    return PipelineResult(
+                        success=True, task_id=task_id, execution_id=execution_id
                     )
-                return PipelineResult(
-                    success=True, task_id=task_id, execution_id=execution_id
-                )
+                else:
+                    logger.info("QA review failed for task=%s", task_id)
+                    await self._state_machine.transition(
+                        task_id,
+                        ev.BLOCKED,
+                        extra_payload={"failure_reason": review_result.full_output},
+                    )
+                    return PipelineResult(
+                        success=False,
+                        task_id=task_id,
+                        execution_id=execution_id,
+                        failure_reason=review_result.full_output,
+                    )
 
             # Some steps failed
             combined_output = "\n\n".join(
@@ -826,9 +872,35 @@ class PipelineSequencer:
                         break
 
             if not failed_steps:
-                # QA passed — RemoveWorktree, push, deploy
+                # QA passed — RemoveWorktree, run deploy hooks, push, deploy
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_complete(execution_id)
+
+                # Run merge/deploy hooks (e.g. alembic upgrade, SPA rebuild)
+                from core.qa_runner import load_merge_config, run_merge_steps
+
+                merge_config = load_merge_config(local_path)
+                if merge_config is not None and merge_config.steps:
+                    hook_results = await asyncio.to_thread(
+                        run_merge_steps, merge_config, local_path
+                    )
+                    await self._store.append_event(
+                        aggregate_id=task_id,
+                        aggregate_type="task",
+                        event_type=ev.TASK_DEPLOY_HOOKS_RUN,
+                        payload={
+                            "steps": [
+                                {
+                                    "name": r.step_name,
+                                    "command": r.command,
+                                    "returncode": r.returncode,
+                                    "output": r.output,
+                                }
+                                for r in hook_results
+                            ]
+                        },
+                    )
+
                 # Push the merged branch to remote
                 _push_branch(local_path, target_branch)
                 await self._state_machine.transition(task_id, ev.DEPLOYED)

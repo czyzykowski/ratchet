@@ -79,6 +79,20 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 continue
 
             if task.status == ev.READY_FOR_DEPLOYMENT:
+                # Check deployment mode (only local mode uses auto-merge)
+                from core.qa_runner import load_deployment_config
+
+                ratchet_yaml = (
+                    project.ratchet_yaml
+                    if project.config_source == "db"
+                    else None
+                )
+                deploy_cfg = load_deployment_config(
+                    project.local_path, ratchet_yaml
+                )
+                if deploy_cfg.mode != "local":
+                    continue  # PR-based deploys handled by poll_pr_merges
+
                 # Check not already failed auto-merge
                 task_events = await store.get_events(task_id, "task")
                 if not any(e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events):
@@ -310,6 +324,69 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     return count
 
 
+async def _poll_pr_merges(store: Store) -> None:
+    """Poll GitHub for merged PRs and transition tasks to deployed."""
+    import json as _json
+    import os
+    import subprocess as _subprocess
+    from pathlib import Path
+
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+    state_machine = TaskStateMachine(store)
+
+    def _run_gh(args: list[str], cwd: str) -> _subprocess.CompletedProcess[str]:
+        if (Path(cwd) / "flake.nix").exists():
+            return _subprocess.run(
+                ["nix", "develop", "--command", "gh"] + args,
+                cwd=cwd, capture_output=True, text=True,
+            )
+        return _subprocess.run(
+            ["gh"] + args, cwd=cwd, capture_output=True, text=True,
+        )
+
+    for project in await project_manager.list_projects():
+        tasks = await task_manager.list_tasks_by_project(project.id)
+        for task in tasks:
+            if task.status != ev.READY_FOR_DEPLOYMENT:
+                continue
+            task_events = await store.get_events(task.id, "task")
+            pr_number: int | None = None
+            for event in reversed(task_events):
+                if event.event_type == ev.TASK_PR_CREATED:
+                    pr_number = event.payload.get("pr_number")
+                    break
+            if pr_number is None:
+                continue
+
+            cwd = project.local_path or os.getcwd()
+            _pr_num = int(pr_number)
+            _cwd = str(cwd)
+            proc = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: _run_gh(
+                    ["pr", "view", str(_pr_num), "--json", "state,mergeCommit"],
+                    _cwd,
+                ),
+            )
+            if proc.returncode != 0:
+                continue
+
+            try:
+                state_data = _json.loads(proc.stdout)
+                pr_state = state_data.get("state", "")
+            except Exception:
+                continue
+
+            if pr_state == "MERGED":
+                logger.info("PR %s merged — deploying task=%s", pr_number, task.id)
+                sha = (state_data.get("mergeCommit") or {}).get("oid")
+                extra = {"merge_commit_sha": sha} if sha else None
+                await state_machine.transition(
+                    task.id, ev.DEPLOYED, extra_payload=extra
+                )
+
+
 async def _recover_orphaned_tasks(store: Store, registry: WorkerRegistry) -> None:
     """Reset in_progress tasks with no active worker back to ready_for_implementation.
 
@@ -360,8 +437,10 @@ async def dispatch_loop(
 
     _COMPILE_INTERVAL = 60  # seconds between HLS compilation runs
     _RECOVERY_INTERVAL = 120  # seconds between orphan recovery runs
+    _PR_POLL_INTERVAL = 300  # seconds between PR merge polls
     last_compile = 0.0
     last_recovery = time.monotonic()
+    last_pr_poll = 0.0
 
     while True:
         # Periodic orphan recovery — catch tasks whose pipeline crashed
@@ -394,6 +473,15 @@ async def dispatch_loop(
                     logger.info("compile_all: compiled %d HLS entries", count)
             except Exception:
                 logger.warning("compile_all failed", exc_info=True)
+
+        # PR merge polling — check if any PR-mode tasks had their PR merged
+        now = time.monotonic()
+        if now - last_pr_poll >= _PR_POLL_INTERVAL:
+            last_pr_poll = now
+            try:
+                await _poll_pr_merges(store)
+            except Exception:
+                logger.warning("poll_pr_merges failed", exc_info=True)
 
         await asyncio.sleep(interval_seconds)
 
