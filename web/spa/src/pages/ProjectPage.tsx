@@ -130,7 +130,8 @@ export function ProjectPage() {
             type="text"
             value={architectureScope}
             onChange={e => setArchitectureScope(e.target.value)}
-            placeholder="scope (optional)"
+            onKeyDown={e => e.key === 'Enter' && handleArchitectureClick()}
+            placeholder="scope, e.g. core/ or web/routes/api/ (optional)"
             style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', border: '1px solid #e0e0e0', borderRadius: '4px', width: '140px' }}
           />
           <button className="btn btn-secondary" onClick={handleArchitectureClick}>

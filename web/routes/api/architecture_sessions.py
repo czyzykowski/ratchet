@@ -51,9 +51,23 @@ def _build_architecture_system_prompt(
         sections.append(f"## Project Guidelines\n{claude_md}")
 
     if scope:
-        sections.append(f"## Analysis Scope\n{scope}")
+        sections.append(
+            f"## Analysis Scope\n"
+            f"Focus your analysis on: {scope}\n\n"
+            f"In your initial exploration (Phase 1), prioritize reading files within this scope "
+            f"before examining external dependencies. Structure your findings around this "
+            f"subtree's architecture, boundaries, and coupling to the rest of the codebase. "
+            f"Only explore files outside this scope when necessary to understand dependencies "
+            f"or interfaces."
+        )
 
+    scope_prefix = (
+        f"Your analysis is scoped to: {scope}. Start by exploring that subtree.\n\n"
+        if scope
+        else ""
+    )
     role = (
+        f"{scope_prefix}"
         f"You are an architecture analyst for {project.name}. Your role is to:\n"
         "- Identify coupling between modules and suggest improvements\n"
         "- Analyze module boundaries and separation of concerns\n"

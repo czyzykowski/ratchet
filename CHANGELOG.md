@@ -6,6 +6,7 @@
 - Architecture session system prompt now follows a multi-phase flow (Discover → Analyze → Recommend → Act)
 
 ### Added
+- Scoped architecture session support — scope string now generates focused exploration instructions in system prompt
 - `add_hls` action in action executor for creating high-level specs on features from architecture sessions
 - Architecture session backend: CRUD endpoints and SSE streaming at `/api/architecture-sessions`
 - `ChatSessionSummary`, `TaskSummary`, `FeatureSummary` Pydantic models in `core/models.py`

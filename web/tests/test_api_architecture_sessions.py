@@ -201,6 +201,90 @@ def test_should_return_404_when_deleting_missing_session(
     assert response.status_code == 404
 
 
+def test_should_include_scope_instructions_in_system_prompt(
+    store: InMemoryStore,
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    app = _make_test_app(store)
+    client = TestClient(app)
+
+    captured_system_prompt: list[str] = []
+
+    def _capture_session(*args: object, **kwargs: object) -> MagicMock:
+        system_prompt = kwargs.get("system_prompt", args[1] if len(args) > 1 else "")
+        captured_system_prompt.append(str(system_prompt))
+        return MagicMock()
+
+    with (
+        patch(
+            "web.routes.api.architecture_sessions.Path.exists",
+            return_value=True,
+        ),
+        patch(
+            "web.routes.api.architecture_sessions.Path.read_text",
+            return_value="# Intent",
+        ),
+        patch(
+            "web.routes.api.architecture_sessions.SpecReplSession",
+            side_effect=_capture_session,
+        ),
+    ):
+        response = client.post(
+            "/api/architecture-sessions",
+            json={"project_id": str(project_id), "scope": "core/"},
+        )
+
+    assert response.status_code == 200
+    assert len(captured_system_prompt) == 1
+    prompt = captured_system_prompt[0]
+    assert "Focus your analysis on: core/" in prompt
+    assert "scoped to: core/" in prompt
+
+
+def test_should_not_include_scope_section_when_scope_is_none(
+    store: InMemoryStore,
+) -> None:
+    project_id = uuid4()
+    asyncio.get_event_loop().run_until_complete(_seed_project(store, project_id))
+
+    app = _make_test_app(store)
+    client = TestClient(app)
+
+    captured_system_prompt: list[str] = []
+
+    def _capture_session(*args: object, **kwargs: object) -> MagicMock:
+        system_prompt = kwargs.get("system_prompt", args[1] if len(args) > 1 else "")
+        captured_system_prompt.append(str(system_prompt))
+        return MagicMock()
+
+    with (
+        patch(
+            "web.routes.api.architecture_sessions.Path.exists",
+            return_value=True,
+        ),
+        patch(
+            "web.routes.api.architecture_sessions.Path.read_text",
+            return_value="# Intent",
+        ),
+        patch(
+            "web.routes.api.architecture_sessions.SpecReplSession",
+            side_effect=_capture_session,
+        ),
+    ):
+        response = client.post(
+            "/api/architecture-sessions",
+            json={"project_id": str(project_id)},
+        )
+
+    assert response.status_code == 200
+    assert len(captured_system_prompt) == 1
+    prompt = captured_system_prompt[0]
+    assert "Analysis Scope" not in prompt
+    assert "Focus your analysis on" not in prompt
+
+
 def _make_mock_session_with_queue(
     project_id: UUID, chunks: list[object]
 ) -> MagicMock:
