@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from core import events as ev
@@ -44,6 +45,8 @@ async def execute_action(
             return await _update_task(parsed, store)
         elif parsed.action == "archive_task":
             return await _archive_task(parsed, store)
+        elif parsed.action == "add_hls":
+            return await _add_hls(parsed, store)
         else:
             return ActionResult(
                 success=False,
@@ -129,6 +132,48 @@ async def _update_task(parsed: ParsedAction, store: Store) -> ActionResult:
         action="update_task",
         message=f"✓ Updated task {task_id}: {', '.join(updates)}",
         entity_id=str(task_id),
+    )
+
+
+async def _add_hls(parsed: ParsedAction, store: Store) -> ActionResult:
+    feature_id_str = parsed.payload.get("feature_id")
+    if not feature_id_str:
+        raise ValueError("'feature_id' is required for add_hls")
+    feature_id = UUID(str(feature_id_str))
+
+    title = parsed.payload.get("title")
+    if not title:
+        raise ValueError("'title' is required for add_hls")
+
+    order = parsed.payload.get("order")
+    if order is None:
+        raise ValueError("'order' is required for add_hls")
+
+    content = parsed.payload.get("content")
+    if not content:
+        raise ValueError("'content' is required for add_hls")
+
+    raw_deps = cast(list[object], parsed.payload.get("dependencies", []))
+    dep_indices: list[int] = [int(cast(int, d)) for d in raw_deps]
+
+    resolved_deps: list[UUID] = []
+    if dep_indices:
+        fm = FeatureManager(store)
+        existing_specs = await fm.get_high_level_specs(feature_id)
+        order_to_id = {spec.order: spec.id for spec in existing_specs}
+        for idx in dep_indices:
+            if idx not in order_to_id:
+                raise ValueError(f"Dependency order {idx} not found in feature specs")
+            resolved_deps.append(order_to_id[idx])
+
+    hls = await FeatureManager(store).add_high_level_spec(
+        feature_id, str(title), int(cast(int, order)), str(content), resolved_deps
+    )
+    return ActionResult(
+        success=True,
+        action="add_hls",
+        message=f"✓ Added HLS: {title} (id: {hls.id})",
+        entity_id=str(hls.id),
     )
 
 

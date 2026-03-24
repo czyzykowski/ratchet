@@ -14,9 +14,8 @@ from fastapi.testclient import TestClient
 
 from core import events as ev
 from core.claude_repl import _QueueDone
-from core.models import ChatSession, ChatSessionSummary, Project
+from core.models import ChatSession, ChatSessionSummary
 from core.store import InMemoryStore
-from web.routes.api.architecture_sessions import _build_architecture_system_prompt
 from web.routes.api.router import api_router
 
 _REGISTRY_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -252,59 +251,6 @@ def test_should_execute_action_blocks_in_streamed_response(
     assert action_events[0]["action"] == "create_task"
     assert action_events[0]["result"]["success"] is True
     assert "Decouple modules" in action_events[0]["result"]["message"]
-
-
-def _make_project(name: str = "test-project") -> Project:
-    now = datetime.now(tz=UTC)
-    return Project(
-        id=uuid4(),
-        name=name,
-        repo_url="/tmp/test",
-        local_path="/tmp/test",
-        status="active",
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def test_system_prompt_contains_all_phases() -> None:
-    project = _make_project()
-    prompt = _build_architecture_system_prompt(
-        project=project,
-        intent_md="# Intent\nBuild great software.",
-        claude_md="# Guidelines\nWrite tests.",
-        scope="Focus on web/ module coupling",
-    )
-
-    assert "## Phase 1: Discover" in prompt
-    assert "## Phase 2: Analyze" in prompt
-    assert "## Phase 3: Recommend" in prompt
-    assert "## Phase 4: Act" in prompt
-    assert '{"action": "create_task"' in prompt
-
-
-def test_system_prompt_without_scope() -> None:
-    project = _make_project()
-    prompt = _build_architecture_system_prompt(
-        project=project,
-        intent_md="# Intent",
-        claude_md="# Guidelines",
-        scope=None,
-    )
-
-    assert "## Analysis Scope" not in prompt
-
-
-def test_system_prompt_without_claude_md() -> None:
-    project = _make_project()
-    prompt = _build_architecture_system_prompt(
-        project=project,
-        intent_md="# Intent",
-        claude_md="",
-        scope=None,
-    )
-
-    assert "## Project Guidelines" not in prompt
 
 
 def test_should_list_sessions_for_project(

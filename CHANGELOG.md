@@ -6,6 +6,7 @@
 - Architecture session system prompt now follows a multi-phase flow (Discover → Analyze → Recommend → Act)
 
 ### Added
+- `add_hls` action in action executor for creating high-level specs on features from architecture sessions
 - Architecture session backend: CRUD endpoints and SSE streaming at `/api/architecture-sessions`
 - `ChatSessionSummary`, `TaskSummary`, `FeatureSummary` Pydantic models in `core/models.py`
 - `get_chat_sessions_for_project`, `get_tasks_summary_for_project`, `get_features_summary_for_project` query functions in `web/queries.py`

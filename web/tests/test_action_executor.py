@@ -171,3 +171,132 @@ async def test_should_return_error_for_missing_required_fields(
     result2 = await execute_action(parsed2, store, UUID(str(project_id)))
     assert result2.success is False
     assert result2.error is not None
+
+
+@pytest.mark.asyncio
+async def test_should_add_hls_to_feature(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    feature = await FeatureManager(store).create_feature(pid, "My Feature", "desc")
+    feature_id = str(feature.id)
+
+    parsed = _make_parsed(
+        "add_hls",
+        feature_id=feature_id,
+        title="Spec One",
+        order=1,
+        content="Do the thing",
+    )
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    assert result.action == "add_hls"
+    assert "Spec One" in result.message
+    assert result.entity_id is not None
+
+    specs = await FeatureManager(store).get_high_level_specs(feature.id)
+    assert len(specs) == 1
+    assert specs[0].title == "Spec One"
+    assert specs[0].order == 1
+    assert specs[0].content == "Do the thing"
+
+
+@pytest.mark.asyncio
+async def test_should_add_hls_with_dependencies(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    fm = FeatureManager(store)
+    feature = await fm.create_feature(pid, "My Feature", "desc")
+    hls1 = await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content 1", [])
+    hls2 = await fm.add_high_level_spec(feature.id, "Spec 2", 2, "content 2", [])
+
+    parsed = _make_parsed(
+        "add_hls",
+        feature_id=str(feature.id),
+        title="Spec 3",
+        order=3,
+        content="content 3",
+        dependencies=[1, 2],
+    )
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    specs = await fm.get_high_level_specs(feature.id)
+    spec3 = next(s for s in specs if s.order == 3)
+    assert set(spec3.dependencies) == {hls1.id, hls2.id}
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_hls_when_missing_required_fields(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    feature = await FeatureManager(store).create_feature(pid, "F", "d")
+    fid = str(feature.id)
+
+    # missing feature_id
+    r = await execute_action(_make_parsed("add_hls", title="T", order=1, content="C"), store, pid)
+    assert r.success is False
+
+    # missing title
+    parsed_no_title = _make_parsed("add_hls", feature_id=fid, order=1, content="C")
+    r = await execute_action(parsed_no_title, store, pid)
+    assert r.success is False
+
+    # missing order
+    parsed_no_order = _make_parsed("add_hls", feature_id=fid, title="T", content="C")
+    r = await execute_action(parsed_no_order, store, pid)
+    assert r.success is False
+
+    # missing content
+    parsed_no_content = _make_parsed("add_hls", feature_id=fid, title="T", order=1)
+    r = await execute_action(parsed_no_content, store, pid)
+    assert r.success is False
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_hls_with_invalid_dependency_order(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    fm = FeatureManager(store)
+    feature = await fm.create_feature(pid, "F", "d")
+    await fm.add_high_level_spec(feature.id, "Spec 1", 1, "content", [])
+
+    parsed = _make_parsed(
+        "add_hls",
+        feature_id=str(feature.id),
+        title="Spec 2",
+        order=2,
+        content="content",
+        dependencies=[99],
+    )
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "99" in result.error
+
+
+@pytest.mark.asyncio
+async def test_should_add_hls_with_empty_dependencies(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    feature = await FeatureManager(store).create_feature(pid, "F", "d")
+
+    parsed = _make_parsed(
+        "add_hls",
+        feature_id=str(feature.id),
+        title="Spec 1",
+        order=1,
+        content="content",
+        dependencies=[],
+    )
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    specs = await FeatureManager(store).get_high_level_specs(feature.id)
+    assert specs[0].dependencies == []
