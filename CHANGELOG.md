@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Architecture session system prompt now follows a multi-phase flow (Discover → Analyze → Recommend → Act)
+
 ### Added
 - Architecture session backend: CRUD endpoints and SSE streaming at `/api/architecture-sessions`
 - `ChatSessionSummary`, `TaskSummary`, `FeatureSummary` Pydantic models in `core/models.py`

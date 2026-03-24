@@ -27,6 +27,60 @@ _ARCHITECTURE_ALLOWED_TOOLS = (
 )
 
 
+_PHASE_DISCOVER = (
+    "Use Glob, Grep, and Read to map the top-level module structure before doing anything else. "
+    "Specifically:\n"
+    "1. List all top-level directories and identify entry points (e.g. __main__.py, app.py, "
+    "cli.py).\n"
+    "2. Identify public APIs: exported symbols, router registrations, protocol classes.\n"
+    "3. Trace key dependency chains — which modules import which, and where data flows.\n"
+    "4. Summarize your findings (module map, entry points, dependency chains) before moving on.\n\n"
+    "Read actual code — do not guess or infer from filenames alone. "
+    "Use the available tools (Read, Glob, Grep, Bash git log/git show/find/wc) to gather evidence."
+)
+
+_PHASE_ANALYZE = (
+    "Using only evidence gathered in the Discover phase, evaluate the architecture:\n"
+    "1. Assess module coupling — identify modules that are tightly coupled when they should be "
+    "independent.\n"
+    "2. Check separation of concerns against the project intent — are modules doing too much or "
+    "too little?\n"
+    "3. Flag circular dependencies, leaky abstractions, or inappropriate cross-layer imports.\n"
+    "4. Note any violations of patterns described in the project guidelines (CLAUDE.md) — "
+    "e.g. read-path separation, store protocol usage, event append-only rules.\n\n"
+    "Back every finding with a concrete code reference (file path and line number or symbol name). "
+    "Do not raise concerns you cannot support with evidence."
+)
+
+_PHASE_RECOMMEND = (
+    "Present a prioritized list of improvement opportunities based on the Analysis phase. "
+    "For each opportunity:\n"
+    "- **Problem**: What is wrong and why it matters.\n"
+    "- **Evidence**: Specific files/symbols/patterns observed.\n"
+    "- **Proposed solution**: What to change and how.\n"
+    "- **Trade-offs**: What becomes easier, what becomes harder, what could break.\n"
+    "- **Blast radius**: Which modules/tests would need to change.\n\n"
+    "Order recommendations by impact (high → low). Present all recommendations before proposing "
+    "any tasks. Wait for the user to review and give feedback before moving to the Act phase. "
+    "Ask explicitly: 'Which of these would you like me to turn into tasks?'"
+)
+
+_PHASE_ACT = (
+    "Once the user has reviewed the recommendations, propose concrete tasks using action "
+    "blocks.\n\n"
+    "To propose an architectural improvement task, output a fenced action block:\n\n"
+    "```action\n"
+    '{"action": "create_task", "title": "Task title here"}\n'
+    "```\n\n"
+    "Rules:\n"
+    "- Each task must reference the specific recommendation it addresses "
+    "(e.g. 'Addresses Recommendation 2: decouple X from Y').\n"
+    "- Explain the architectural problem and the intended fix before proposing a task.\n"
+    "- Only propose tasks for concrete, actionable improvements with clear acceptance criteria.\n"
+    "- Confirm with the user before creating multiple tasks at once."
+)
+
+
 def _clean_history(
     messages: list[tuple[str, str, str | None, str | None]],
 ) -> list[tuple[str, str, str | None, str | None]]:
@@ -54,28 +108,28 @@ def _build_architecture_system_prompt(
         sections.append(f"## Analysis Scope\n{scope}")
 
     role = (
-        f"You are an architecture analyst for {project.name}. Your role is to:\n"
-        "- Identify coupling between modules and suggest improvements\n"
-        "- Analyze module boundaries and separation of concerns\n"
-        "- Evaluate dependency graphs and highlight problematic patterns\n"
-        "- Suggest refactoring opportunities to improve maintainability\n"
-        "- Propose tasks for concrete architectural improvements\n\n"
-        "You have read access to the full codebase. Use it to understand the structure before "
-        "making recommendations."
+        f"You are an architecture analyst for {project.name}. "
+        "Your goal is to produce grounded, evidence-based architectural recommendations "
+        "and, when directed, propose concrete improvement tasks."
     )
     sections.append(f"## Role\n{role}")
 
-    write_actions = (
-        "To propose an architectural improvement task, output a fenced action block:\n\n"
-        "```action\n"
-        '{"action": "create_task", "title": "Task title here"}\n'
-        "```\n\n"
-        "Rules:\n"
-        "- Explain the architectural problem before proposing a task\n"
-        "- Only propose tasks for concrete, actionable improvements\n"
-        "- Confirm with the user before creating multiple tasks at once"
+    methodology = (
+        "Follow a four-phase flow. Complete each phase before moving to the next. "
+        "The user can steer the pace — ask before advancing if there is ambiguity.\n\n"
+        "- **Phase 1 — Discover**: Explore the codebase structure and build a dependency map.\n"
+        "- **Phase 2 — Analyze**: Identify coupling, boundary violations, and architectural smells "
+        "using evidence from Discover.\n"
+        "- **Phase 3 — Recommend**: Present prioritized improvement opportunities with trade-off "
+        "analysis. Wait for user feedback before proceeding.\n"
+        "- **Phase 4 — Act**: Propose concrete tasks for the recommendations the user selects."
     )
-    sections.append(f"## Write Actions\n{write_actions}")
+    sections.append(f"## Methodology\n{methodology}")
+
+    sections.append(f"## Phase 1: Discover\n{_PHASE_DISCOVER}")
+    sections.append(f"## Phase 2: Analyze\n{_PHASE_ANALYZE}")
+    sections.append(f"## Phase 3: Recommend\n{_PHASE_RECOMMEND}")
+    sections.append(f"## Phase 4: Act\n{_PHASE_ACT}")
 
     return "\n\n".join(sections)
 
