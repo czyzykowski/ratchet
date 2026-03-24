@@ -307,7 +307,11 @@ async def ws_worker(websocket: WebSocket) -> None:
     registry: WorkerRegistry = websocket.app.state.registry
     store: Store = websocket.app.state.store
 
-    raw = await websocket.receive_text()
+    try:
+        raw = await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Worker disconnected before hello (worker_id=%s)", worker_id)
+        return
     incoming = parse_worker_message(raw)
 
     if not isinstance(incoming, WorkerHelloMessage):
