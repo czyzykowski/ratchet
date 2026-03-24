@@ -522,6 +522,21 @@ class PipelineSequencer:
                     success=True, task_id=task_id, execution_id=execution_id
                 )
 
+            # Step 5b: run auto-fix commands (e.g. ruff check --fix)
+            if qa_config.auto_fix:
+                for fix_cmd in qa_config.auto_fix:
+                    fix_req = RunCommandRequest(
+                        type="run_command",
+                        request_id=str(uuid4()),
+                        execution_id=str(execution_id),
+                        cmd=["bash", "-c", fix_cmd],
+                        cwd=worktree_path,
+                    )
+                    try:
+                        await channel.send_command(fix_req)
+                    except PipelineAbort:
+                        pass  # auto-fix failures are non-fatal
+
             # Step 6: run each QA step via RunCommand
             failed_steps: list[tuple[str, str]] = []
             for step in qa_config.steps:
