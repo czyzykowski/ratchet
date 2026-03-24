@@ -210,3 +210,28 @@ def test_system_prompt_contains_brainstorming_pattern() -> None:
     assert "approval checkpoint" in prompt.lower() or "approval" in prompt.lower()
     assert "register_project" in prompt
     assert "create_task" in prompt
+
+
+def test_system_prompt_contains_all_action_types() -> None:
+    prompt = _build_bootstrap_system_prompt()
+
+    action_types = [
+        "register_project",
+        "create_task",
+        "create_feature",
+        "add_hls",
+        "update_task",
+        "archive_task",
+        "check_task_status",
+    ]
+    for action_type in action_types:
+        assert action_type in prompt, f"Expected action type '{action_type}' in prompt"
+
+
+def test_system_prompt_has_section_headers() -> None:
+    prompt = _build_bootstrap_system_prompt()
+
+    assert "## Role" in prompt
+    assert "## Conversation Phases" in prompt
+    assert "## Available Actions" in prompt
+    assert "## Rules" in prompt
