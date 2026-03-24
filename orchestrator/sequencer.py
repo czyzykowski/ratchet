@@ -13,12 +13,12 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
 from uuid import UUID, uuid4
 
 from core import events as ev
 from core import git_transfer
 from core.context_assembler import build_prompt, read_intent
+from core.event_queries import get_qa_fix_attempts as _get_qa_fix_attempts
 from core.merge import squash_merge
 from core.models import ExecutionTrace, Project, Spec, Task
 from core.models_config import WORKER_MODEL
@@ -407,6 +407,145 @@ class PipelineSequencer:
                 exc.error,
             )
             failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
+            return await self._abort_pipeline(
+                channel, task_id, project_id, execution_id, failure
+            )
+
+    # ------------------------------------------------------------------
+    # Resume pipeline (for WAITING_FOR_INPUT tasks)
+    # ------------------------------------------------------------------
+
+    async def run_resume_pipeline(
+        self,
+        channel: WorkerChannel,
+        task: Task,
+        project: Project,
+        spec: Spec,
+    ) -> PipelineResult:
+        """Resume a task that was waiting for input.
+
+        Finds the existing execution branch/worktree, builds a prompt
+        that includes the Q&A history, and re-runs Claude in the same worktree.
+        """
+        task_id = task.id
+        project_id = project.id
+
+        # Find existing execution branch
+        execution_events = await self._store.get_events(task_id, "task_executions")
+        execution_branch: str | None = None
+        execution_id: UUID | None = None
+        for event in reversed(execution_events):
+            if event.event_type == ev.EXECUTION_STARTED:
+                bn = event.payload.get("branch_name")
+                if bn and bn.startswith("execution/"):
+                    execution_branch = bn
+                    eid = event.payload.get("execution_id")
+                    if eid:
+                        execution_id = UUID(eid)
+                    break
+
+        if not execution_branch or not execution_id:
+            failure = "Resume failed: no execution branch found"
+            logger.error("task=%s: %s", task_id, failure)
+            await self._state_machine.transition(
+                task_id, ev.BLOCKED, extra_payload={"failure_reason": failure}
+            )
+            return PipelineResult(
+                success=False, task_id=task_id, failure_reason=failure
+            )
+
+        try:
+            # Ensure project on worker
+            await self._ensure_project_on_worker(channel, project)
+
+            # CreateWorktree on the existing execution branch
+            create_wt_req = CreateWorktreeRequest(
+                type="create_worktree",
+                request_id=str(uuid4()),
+                project_id=str(project_id),
+                execution_id=str(execution_id),
+                base_commit=execution_branch,
+            )
+            create_wt_resp = await channel.send_command(create_wt_req)
+            assert isinstance(create_wt_resp, CreateWorktreeResponse)
+            worktree_path = create_wt_resp.worktree_path or f"/remote/{execution_id}"
+
+            # SetupEnvironment
+            setup_env_req = SetupEnvironmentRequest(
+                type="setup_environment",
+                request_id=str(uuid4()),
+                project_id=str(project_id),
+                execution_id=str(execution_id),
+                symlinks=_STANDARD_SYMLINKS,
+            )
+            await channel.send_command(setup_env_req)
+
+            # Build prompt with Q&A history
+            from core import qa_manager
+
+            qa_history = await qa_manager.get_qa_history(self._store, task_id)
+            qa_section = ""
+            if qa_history:
+                qa_lines = ["## Previous Q&A\n"]
+                for qa in qa_history:
+                    if qa.answer:
+                        qa_lines.append(f"Q: {qa.question}\nA: {qa.answer}\n")
+                qa_section = "\n".join(qa_lines)
+
+            intent_content = ""
+            try:
+                intent_content = read_intent(project.local_path, project.intent_md)
+            except Exception:
+                pass
+
+            prompt = build_prompt(intent_content, spec.content)
+            if qa_section:
+                prompt += f"\n\n{qa_section}\nContinue from where you left off."
+
+            # RunClaude
+            run_claude_req = RunClaudeRequest(
+                type="run_claude",
+                request_id=str(uuid4()),
+                execution_id=str(execution_id),
+                prompt=prompt,
+                model=WORKER_MODEL,
+                tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+                cwd=worktree_path,
+            )
+            claude_resp = await channel.send_command(run_claude_req)
+            assert isinstance(claude_resp, RunClaudeResponse)
+
+            stdout = claude_resp.stdout or ""
+            is_blocked = (
+                "BLOCKED" in stdout
+                or claude_resp.status == "blocked"
+                or (claude_resp.returncode is not None and claude_resp.returncode != 0)
+            )
+            is_completed = "COMPLETED" in stdout and not is_blocked
+
+            await self._try_remove_worktree(channel, project_id, execution_id)
+
+            if is_completed:
+                await self._record_execution_complete(execution_id)
+                await self._state_machine.transition(task_id, ev.READY_FOR_QA)
+                return PipelineResult(
+                    success=True, task_id=task_id, execution_id=execution_id
+                )
+            else:
+                failure = f"Resume: Claude returned BLOCKED or non-zero: {stdout[:500]}"
+                await self._record_execution_fail(execution_id, failure)
+                await self._state_machine.transition(
+                    task_id, ev.BLOCKED,
+                    extra_payload={"failure_reason": failure},
+                )
+                return PipelineResult(
+                    success=False, task_id=task_id,
+                    execution_id=execution_id, failure_reason=failure,
+                )
+
+        except PipelineAbort as exc:
+            failure = f"Resume aborted at {exc.step_name!r}: {exc.error}"
+            logger.error("Resume pipeline aborted for task=%s: %s", task_id, failure)
             return await self._abort_pipeline(
                 channel, task_id, project_id, execution_id, failure
             )
@@ -947,16 +1086,6 @@ class PipelineSequencer:
             return await self._abort_pipeline(
                 channel, task_id, project_id, execution_id, failure
             )
-
-
-def _get_qa_fix_attempts(task_events: list[Any]) -> int:
-    """Read qa_fix_attempts from the latest TASK_STATUS_CHANGED event."""
-    for event in reversed(task_events):
-        if event.event_type == ev.TASK_STATUS_CHANGED:
-            val = event.payload.get("qa_fix_attempts")
-            if val is not None:
-                return int(val)
-    return 0
 
 
 def _push_branch(local_path: str, branch: str) -> None:

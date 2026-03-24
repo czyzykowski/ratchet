@@ -114,9 +114,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     dispatch_enabled = os.environ.get("DISPATCH_ENABLED", "true").lower() in (
         "true", "1", "yes",
     )
+    # Create a notification queue for the dispatch loop — fed by _listen_task_events
+    dispatch_notify_queue: asyncio.Queue[str] = asyncio.Queue()
+    sse_queues.add(dispatch_notify_queue)
+
     dispatch_task: asyncio.Task[None] | None = None
     if dispatch_enabled:
-        dispatch_task = asyncio.create_task(dispatch_loop(store, registry))
+        dispatch_task = asyncio.create_task(
+            dispatch_loop(store, registry, notification_queue=dispatch_notify_queue)
+        )
 
     async def _refresh_loop() -> None:
         while True:

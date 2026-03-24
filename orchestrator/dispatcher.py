@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from core import events as ev
@@ -27,7 +28,17 @@ from orchestrator.sequencer import PipelineSequencer
 logger = logging.getLogger(__name__)
 
 
-async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
+@dataclass(frozen=True)
+class DispatchResult:
+    """Result of a single dispatch action."""
+
+    action: str  # "impl" | "qa" | "merge" | "resume" | "idle"
+    task_id: UUID | None = None
+    success: bool = True
+    detail: str = ""
+
+
+async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[DispatchResult]:
     """Discover ready tasks in priority order and dispatch to available workers.
 
     Priority: merge (ready_for_deployment) → QA (ready_for_qa) → impl (ready_for_implementation).
@@ -45,6 +56,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     merge_candidates: list[tuple[Task, Project]] = []
     qa_candidates: list[tuple[Task, Project, Spec]] = []
     impl_candidates: list[tuple[Task, Project, Spec]] = []
+    resume_candidates: list[tuple[Task, Project, Spec]] = []
 
     from worker.capability_check import effective_capabilities
 
@@ -115,7 +127,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                 spec = await spec_manager.get_current_spec(task_id)
                 if spec is None:
                     continue
-                impl_candidates.append((task, project, spec))
+                resume_candidates.append((task, project, spec))
 
             elif task.status == ev.READY_FOR_IMPLEMENTATION:
                 spec = await spec_manager.get_current_spec(task_id)
@@ -141,9 +153,10 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
     # Sort each group by task creation time (oldest first)
     merge_candidates.sort(key=lambda c: c[0].created_at)
     qa_candidates.sort(key=lambda c: c[0].created_at)
+    resume_candidates.sort(key=lambda c: c[0].created_at)
     impl_candidates.sort(key=lambda c: c[0].created_at)
 
-    count = 0
+    results: list[DispatchResult] = []
     dispatched_projects: set[UUID] = set()
     state_machine = TaskStateMachine(store)
 
@@ -159,7 +172,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         SYNCHRONOUSLY (before creating the async pipeline task) to prevent
         duplicate dispatch on the next dispatch_pending cycle.
         """
-        nonlocal count
+        nonlocal results
         if project_t.id in dispatched_projects:
             return False
         required = list(effective_capabilities(task_t, project_t))
@@ -210,6 +223,9 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         elif pipeline_type == "qa":
             assert spec_t is not None
             coro = sequencer.run_qa_pipeline(channel, task_t, project_t, spec_t)
+        elif pipeline_type == "resume":
+            assert spec_t is not None
+            coro = sequencer.run_resume_pipeline(channel, task_t, project_t, spec_t)
         else:
             assert spec_t is not None
             coro = sequencer.run_impl_pipeline(channel, task_t, project_t, spec_t)
@@ -245,7 +261,9 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
                     pass
 
         asyncio.create_task(_run_pipeline())
-        count += 1
+        results.append(DispatchResult(
+            action=pipeline_type, task_id=task_t.id, success=True
+        ))
         logger.info(
             "Dispatched %s pipeline for task=%s to worker=%s",
             pipeline_type,
@@ -271,6 +289,11 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         remove_qa_worktree,
     )
 
+    # Resume tasks (WAITING_FOR_INPUT with answered questions) — priority over fresh impl
+    for resume_task, resume_project, resume_spec in resume_candidates:
+        await _start_pipeline("resume", resume_task, resume_project, resume_spec)
+
+    # Impl tasks with baseline QA check
     baseline_failed_projects: set[UUID] = set()
     for impl_task, impl_project, impl_spec in impl_candidates:
         if impl_project.id in baseline_failed_projects:
@@ -321,7 +344,7 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> int:
         else:
             await _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
-    return count
+    return results
 
 
 async def _poll_pr_merges(store: Store) -> None:
@@ -424,9 +447,17 @@ async def _recover_orphaned_tasks(store: Store, registry: WorkerRegistry) -> Non
 
 
 async def dispatch_loop(
-    store: Store, registry: WorkerRegistry, interval_seconds: float = 2.0
+    store: Store,
+    registry: WorkerRegistry,
+    interval_seconds: float = 2.0,
+    notification_queue: asyncio.Queue[str] | None = None,
 ) -> None:
-    """Run dispatch_pending + compile_all repeatedly at the given interval."""
+    """Run dispatch_pending + compile_all, triggered by notifications or polling.
+
+    If notification_queue is provided, the loop wakes on LISTEN/NOTIFY events
+    from Postgres instead of sleeping for interval_seconds. Falls back to
+    polling if no notification arrives within interval_seconds.
+    """
     # Startup: recover tasks orphaned by previous orchestrator crash
     try:
         await _recover_orphaned_tasks(store, registry)
@@ -483,7 +514,16 @@ async def dispatch_loop(
             except Exception:
                 logger.warning("poll_pr_merges failed", exc_info=True)
 
-        await asyncio.sleep(interval_seconds)
+        # Wait for notification or fall back to polling interval
+        if notification_queue is not None:
+            try:
+                await asyncio.wait_for(
+                    notification_queue.get(), timeout=interval_seconds
+                )
+            except TimeoutError:
+                pass  # polling fallback
+        else:
+            await asyncio.sleep(interval_seconds)
 
 
 class JobDispatcher:
