@@ -525,7 +525,7 @@ class PipelineSequencer:
             # Step 5b: run auto-fix commands (e.g. ruff check --fix)
             if qa_config.auto_fix:
                 for fix_cmd in qa_config.auto_fix:
-                    fix_req = RunCommandRequest(
+                    autofix_req = RunCommandRequest(
                         type="run_command",
                         request_id=str(uuid4()),
                         execution_id=str(execution_id),
@@ -533,7 +533,7 @@ class PipelineSequencer:
                         cwd=worktree_path,
                     )
                     try:
-                        await channel.send_command(fix_req)
+                        await channel.send_command(autofix_req)
                     except PipelineAbort:
                         pass  # auto-fix failures are non-fatal
 
@@ -792,7 +792,7 @@ class PipelineSequencer:
             # Run auto-fix before QA steps
             if qa_config is not None and qa_config.auto_fix:
                 for fix_cmd in qa_config.auto_fix:
-                    fix_req = RunCommandRequest(
+                    autofix_req = RunCommandRequest(
                         type="run_command",
                         request_id=str(uuid4()),
                         execution_id=str(execution_id),
@@ -800,7 +800,7 @@ class PipelineSequencer:
                         cwd=worktree_path,
                     )
                     try:
-                        await channel.send_command(fix_req)
+                        await channel.send_command(autofix_req)
                     except PipelineAbort:
                         pass  # auto-fix failures are non-fatal
 
