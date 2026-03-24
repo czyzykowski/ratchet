@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -58,7 +58,7 @@ def _make_pool(fetchall_return: Any) -> Any:
     return pool
 
 
-_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
