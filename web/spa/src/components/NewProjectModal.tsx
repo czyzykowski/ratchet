@@ -1,14 +1,18 @@
-import { useState, FormEvent } from 'react'
+import { useState, FormEvent, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { createProject } from '../api/projects'
+import { BootstrapChat } from './BootstrapChat'
 
 interface NewProjectModalProps {
   open: boolean
   onClose: () => void
 }
 
+type Mode = 'select' | 'manual' | 'bootstrap'
+
 export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const queryClient = useQueryClient()
+  const [mode, setMode] = useState<Mode>('select')
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
   const [repoUrl, setRepoUrl] = useState('')
@@ -19,6 +23,12 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   const [capabilities, setCapabilities] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      setMode('select')
+    }
+  }, [open])
 
   if (!open) return null
 
@@ -60,112 +70,149 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
     }
   }
 
+  if (mode === 'bootstrap') {
+    return (
+      <div className="modal-overlay" onClick={handleOverlayClick}>
+        <div className="modal-content-chat">
+          <BootstrapChat onClose={onClose} onBack={() => setMode('select')} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal-content">
         <div className="modal-header">
+          {mode === 'manual' && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setMode('select')}
+              style={{ marginRight: '0.75rem', padding: '0.25rem 0.5rem' }}
+            >
+              ← Back
+            </button>
+          )}
           <div className="modal-title">New Project</div>
           <button className="modal-close" onClick={onClose}>&#215;</button>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div className="modal-field">
-            <label className="modal-label" htmlFor="project-name">Name</label>
-            <input
-              id="project-name"
-              className="form-input"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              required
-              placeholder="My Project"
-            />
-          </div>
-          <div className="modal-field">
-            <label className="modal-label" htmlFor="project-path">Path</label>
-            <input
-              id="project-path"
-              className="form-input"
-              value={path}
-              onChange={e => setPath(e.target.value)}
-              required
-              placeholder="/path/to/repo"
-            />
-          </div>
-          <div className="modal-field">
-            <label className="modal-label" htmlFor="project-repo-url">Repo URL <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional)</span></label>
-            <input
-              id="project-repo-url"
-              className="form-input"
-              value={repoUrl}
-              onChange={e => setRepoUrl(e.target.value)}
-              placeholder="https://github.com/org/repo"
-            />
-          </div>
-          <div className="modal-field">
-            <label className="modal-label" htmlFor="project-config-source">Config Source</label>
-            <select
-              id="project-config-source"
-              className="form-input"
-              value={configSource}
-              onChange={e => setConfigSource(e.target.value)}
-            >
-              <option value="disk">disk</option>
-              <option value="db">db</option>
-            </select>
-          </div>
-          <div className="modal-field">
-            <label className="modal-label" htmlFor="project-capabilities">Required Capabilities <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional, comma-separated)</span></label>
-            <input
-              id="project-capabilities"
-              className="form-input"
-              value={capabilities}
-              onChange={e => setCapabilities(e.target.value)}
-              placeholder="e.g. osx, gpu"
-            />
-          </div>
-          {configSource === 'db' && (
-            <>
-              <div className="modal-field">
-                <label className="modal-label" htmlFor="project-claude-md">CLAUDE.md</label>
-                <textarea
-                  id="project-claude-md"
-                  className="form-input"
-                  style={{ fontFamily: 'monospace' }}
-                  rows={8}
-                  value={claudeMd}
-                  onChange={e => setClaudeMd(e.target.value)}
-                />
-              </div>
-              <div className="modal-field">
-                <label className="modal-label" htmlFor="project-intent-md">INTENT.md</label>
-                <textarea
-                  id="project-intent-md"
-                  className="form-input"
-                  style={{ fontFamily: 'monospace' }}
-                  rows={8}
-                  value={intentMd}
-                  onChange={e => setIntentMd(e.target.value)}
-                />
-              </div>
-              <div className="modal-field">
-                <label className="modal-label" htmlFor="project-ratchet-yaml">ratchet.yaml</label>
-                <textarea
-                  id="project-ratchet-yaml"
-                  className="form-input"
-                  style={{ fontFamily: 'monospace' }}
-                  rows={8}
-                  value={ratchetYaml}
-                  onChange={e => setRatchetYaml(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          {error && <div className="error-state">{error}</div>}
-          <div className="modal-field">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Creating...' : 'Create Project'}
+
+        {mode === 'select' && (
+          <div className="new-project-options">
+            <button className="new-project-option" onClick={() => setMode('manual')}>
+              <div className="new-project-option-icon">🔧</div>
+              <div className="new-project-option-title">Manual Setup</div>
+              <div className="new-project-option-desc">I know what I want to build</div>
+            </button>
+            <button className="new-project-option" onClick={() => setMode('bootstrap')}>
+              <div className="new-project-option-icon">✨</div>
+              <div className="new-project-option-title">Bootstrap with AI</div>
+              <div className="new-project-option-desc">Guide me through project setup</div>
             </button>
           </div>
-        </form>
+        )}
+
+        {mode === 'manual' && (
+          <form onSubmit={handleSubmit}>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="project-name">Name</label>
+              <input
+                id="project-name"
+                className="form-input"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                required
+                placeholder="My Project"
+              />
+            </div>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="project-path">Path</label>
+              <input
+                id="project-path"
+                className="form-input"
+                value={path}
+                onChange={e => setPath(e.target.value)}
+                required
+                placeholder="/path/to/repo"
+              />
+            </div>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="project-repo-url">Repo URL <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional)</span></label>
+              <input
+                id="project-repo-url"
+                className="form-input"
+                value={repoUrl}
+                onChange={e => setRepoUrl(e.target.value)}
+                placeholder="https://github.com/org/repo"
+              />
+            </div>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="project-config-source">Config Source</label>
+              <select
+                id="project-config-source"
+                className="form-input"
+                value={configSource}
+                onChange={e => setConfigSource(e.target.value)}
+              >
+                <option value="disk">disk</option>
+                <option value="db">db</option>
+              </select>
+            </div>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="project-capabilities">Required Capabilities <span style={{ fontWeight: 'normal', opacity: 0.7 }}>(optional, comma-separated)</span></label>
+              <input
+                id="project-capabilities"
+                className="form-input"
+                value={capabilities}
+                onChange={e => setCapabilities(e.target.value)}
+                placeholder="e.g. osx, gpu"
+              />
+            </div>
+            {configSource === 'db' && (
+              <>
+                <div className="modal-field">
+                  <label className="modal-label" htmlFor="project-claude-md">CLAUDE.md</label>
+                  <textarea
+                    id="project-claude-md"
+                    className="form-input"
+                    style={{ fontFamily: 'monospace' }}
+                    rows={8}
+                    value={claudeMd}
+                    onChange={e => setClaudeMd(e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label className="modal-label" htmlFor="project-intent-md">INTENT.md</label>
+                  <textarea
+                    id="project-intent-md"
+                    className="form-input"
+                    style={{ fontFamily: 'monospace' }}
+                    rows={8}
+                    value={intentMd}
+                    onChange={e => setIntentMd(e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label className="modal-label" htmlFor="project-ratchet-yaml">ratchet.yaml</label>
+                  <textarea
+                    id="project-ratchet-yaml"
+                    className="form-input"
+                    style={{ fontFamily: 'monospace' }}
+                    rows={8}
+                    value={ratchetYaml}
+                    onChange={e => setRatchetYaml(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+            {error && <div className="error-state">{error}</div>}
+            <div className="modal-field">
+              <button type="submit" className="btn btn-primary" disabled={submitting}>
+                {submitting ? 'Creating...' : 'Create Project'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
