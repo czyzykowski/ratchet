@@ -96,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store=store,
         settings=_local_worker_settings_from_env(),
         log_buffer=log_buffer,
+        registry=registry,
     )
     app.state.local_worker = local_worker
     # Backward-compat alias used by existing worker API routes

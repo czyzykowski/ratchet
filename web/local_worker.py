@@ -35,12 +35,14 @@ class LocalWorkerManager:
         store: Store,
         settings: LocalWorkerSettings | None = None,
         log_buffer: LogBuffer | None = None,
+        registry: object | None = None,
     ) -> None:
         self._store = store
         self._settings: LocalWorkerSettings = (
             settings if settings is not None else LocalWorkerSettings()
         )
         self.log_buffer: LogBuffer = log_buffer if log_buffer is not None else LogBuffer()
+        self._registry = registry  # WorkerRegistry — used for health checks
         self._process: asyncio.subprocess.Process | None = None
         self._status: str = "stopped"
         self.started_at: datetime | None = None
@@ -48,6 +50,7 @@ class LocalWorkerManager:
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._monitor_task: asyncio.Task[None] | None = None
+        self._health_task: asyncio.Task[None] | None = None
 
     @property
     def status(self) -> str:
@@ -114,6 +117,7 @@ class LocalWorkerManager:
                 self._pump_stream(process.stderr, "ERROR")
             )
         self._monitor_task = asyncio.create_task(self._monitor_process())
+        self._health_task = asyncio.create_task(self._health_check_loop())
 
     async def _pump_stream(self, stream: asyncio.StreamReader, default_level: str) -> None:
         """Read lines from stream and publish to LogBuffer."""
@@ -141,6 +145,35 @@ class LocalWorkerManager:
         except asyncio.CancelledError:
             pass
 
+    async def _health_check_loop(self) -> None:
+        """Periodically verify the worker is registered in the registry.
+
+        If the subprocess is alive but not in the registry (dead WebSocket),
+        restart it automatically.
+        """
+        _CHECK_INTERVAL = 60  # seconds
+        _GRACE_PERIOD = 30  # seconds after start before checking
+        await asyncio.sleep(_GRACE_PERIOD)
+        while True:
+            await asyncio.sleep(_CHECK_INTERVAL)
+            if self._status != "running" or self._registry is None:
+                continue
+            try:
+                registry = self._registry
+                workers = registry.all_workers()  # type: ignore[attr-defined]
+                has_local = any(
+                    not w.capabilities for w in workers
+                )
+                if not has_local and self._process is not None and self._process.returncode is None:
+                    logger.warning(
+                        "LocalWorkerManager: subprocess alive but not in registry — restarting"
+                    )
+                    await self.restart(graceful=True)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Health check failed", exc_info=True)
+
     async def stop(self, graceful: bool = True) -> None:
         """Stop the worker subprocess."""
         if self._status == "stopped":
@@ -167,7 +200,7 @@ class LocalWorkerManager:
                 except ProcessLookupError:
                     pass
 
-        for task in (self._stdout_task, self._stderr_task, self._monitor_task):
+        for task in (self._stdout_task, self._stderr_task, self._monitor_task, self._health_task):
             if task is not None and not task.done():
                 task.cancel()
                 try:
@@ -179,6 +212,7 @@ class LocalWorkerManager:
         self._stdout_task = None
         self._stderr_task = None
         self._monitor_task = None
+        self._health_task = None
         self._status = "stopped"
         self.started_at = None
         logger.info("LocalWorkerManager: stopped")
