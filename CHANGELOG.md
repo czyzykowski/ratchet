@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- Merge conflicts on remote worker tasks: `_apply_patch_to_local` now uses the original base commit instead of HEAD, preventing context mismatch when develop advances between execution and merge
+- Dispatcher tests updated to match `dispatch_pending` returning `list[DispatchResult]` instead of `int`
+
 ### Changed
 - Architecture session system prompt now follows a multi-phase flow (Discover → Analyze → Recommend → Act)
 

@@ -101,20 +101,24 @@ class PipelineSequencer:
 
     @staticmethod
     def _apply_patch_to_local(
-        local_path: str, branch_name: str, patch_text: str
+        local_path: str, branch_name: str, patch_text: str,
+        base_commit: str = "HEAD",
     ) -> None:
         """Apply a worker's patch to the orchestrator's local repo.
 
         Creates the execution branch if it doesn't exist, applies the patch
         via git apply, and commits. This ensures the merge pipeline can find
         the execution branch locally.
+
+        ``base_commit`` must match the commit the worker used when creating
+        its worktree so the patch context lines match the local tree.
         """
         import os
         import tempfile
 
-        # Create branch from HEAD if it doesn't exist
+        # Create branch from the same base the worker used
         subprocess.run(
-            ["git", "branch", branch_name, "HEAD"],
+            ["git", "branch", branch_name, base_commit],
             cwd=local_path,
             capture_output=True,  # ignore "already exists" errors
         )
@@ -177,6 +181,7 @@ class PipelineSequencer:
     async def _record_execution_start(
         self, task_id: UUID, spec_id: UUID, branch_name: str,
         execution_id: UUID | None = None,
+        base_commit: str | None = None,
     ) -> UUID:
         """Record EXECUTION_STARTED events without creating a local worktree.
 
@@ -185,7 +190,7 @@ class PipelineSequencer:
         if execution_id is None:
             execution_id = uuid4()
         worktree_path = f"remote/{execution_id}"
-        payload = {
+        payload: dict[str, str] = {
             "execution_id": str(execution_id),
             "task_id": str(task_id),
             "spec_id": str(spec_id),
@@ -193,6 +198,8 @@ class PipelineSequencer:
             "branch_name": branch_name,
             "status": "running",
         }
+        if base_commit:
+            payload["base_commit"] = base_commit
         await self._store.append_event(
             aggregate_id=execution_id,
             aggregate_type="execution",
@@ -363,7 +370,8 @@ class PipelineSequencer:
             exec_uuid = uuid4()
             branch_name = f"execution/{exec_uuid}"
             execution_id = await self._record_execution_start(
-                task_id, spec.id, branch_name, execution_id=exec_uuid
+                task_id, spec.id, branch_name, execution_id=exec_uuid,
+                base_commit=head_commit,
             )
 
             # Step 5: CreateWorktree
@@ -456,6 +464,7 @@ class PipelineSequencer:
                     project.local_path,
                     branch_name,
                     patch_text,
+                    base_commit=head_commit,
                 )
 
             # Step 11: RemoveWorktree

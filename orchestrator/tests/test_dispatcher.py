@@ -29,6 +29,16 @@ def _fake_ws() -> AsyncMock:
     return ws
 
 
+def _register_worker(
+    registry: WorkerRegistry, worker_id: str, capabilities: list[str], ws: AsyncMock | None = None,
+) -> None:
+    """Register a worker with a mock channel so dispatch doesn't skip it."""
+    if ws is None:
+        ws = _fake_ws()
+    conn = registry.register(worker_id, capabilities, ws)
+    conn.channel = MagicMock()
+
+
 async def _seed_ready_task(
     store: InMemoryStore,
     capabilities: list[str] | None = None,
@@ -172,7 +182,7 @@ async def test_dispatch_pending_returns_zero_no_tasks() -> None:
     store = _make_store()
     registry = WorkerRegistry()
     result = await dispatch_pending(store, registry)
-    assert result == 0
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -181,7 +191,7 @@ async def test_dispatch_pending_returns_zero_no_workers() -> None:
     registry = WorkerRegistry()
     await _seed_ready_task(store)
     result = await dispatch_pending(store, registry)
-    assert result == 0
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -193,7 +203,7 @@ async def test_dispatch_pending_returns_zero_worker_busy() -> None:
     registry.register("w1", ["python"], ws)
     registry.assign_job("w1", "exec-1")
     result = await dispatch_pending(store, registry)
-    assert result == 0
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -204,7 +214,7 @@ async def test_dispatch_pending_returns_zero_worker_capability_mismatch() -> Non
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
     result = await dispatch_pending(store, registry)
-    assert result == 0
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -212,15 +222,14 @@ async def test_dispatch_pending_dispatches_impl_task_returns_one() -> None:
     store = _make_store()
     registry = WorkerRegistry()
     task, project, spec = await _seed_ready_task(store)
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
+    _register_worker(registry, "w1", ["python"])
 
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert result == 1
+    assert len(result) == 1
     # Give background task a chance to run
     await asyncio.sleep(0)
     mock_seq.run_impl_pipeline.assert_called_once()
@@ -233,8 +242,7 @@ async def test_dispatch_pending_assigns_job_in_registry() -> None:
     store = _make_store()
     registry = WorkerRegistry()
     task, project, spec = await _seed_ready_task(store)
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
+    _register_worker(registry, "w1", ["python"])
 
     mock_seq = _mock_sequencer()
 
@@ -262,14 +270,13 @@ async def test_dispatch_pending_skips_task_without_spec() -> None:
     await sm.transition(task.id, ev.SPEC_QA)
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
 
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
+    _register_worker(registry, "w1", ["python"])
 
     mock_seq = _mock_sequencer()
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert result == 0
+    assert result == []
     mock_seq.run_impl_pipeline.assert_not_called()
 
 
@@ -280,10 +287,10 @@ async def test_dispatch_loop_calls_dispatch_pending_multiple_times() -> None:
 
     call_count = 0
 
-    async def fake_dispatch_pending(s: object, r: object) -> int:
+    async def fake_dispatch_pending(s: object, r: object) -> list:
         nonlocal call_count
         call_count += 1
-        return 0
+        return []
 
     with patch("orchestrator.dispatcher.dispatch_pending", side_effect=fake_dispatch_pending):
         try:
@@ -314,10 +321,9 @@ async def test_dispatch_priority_merge_before_qa_before_impl() -> None:
     merge_task, _, _ = await _seed_merge_task(store)
 
     # Three workers available
-    ws1, ws2, ws3 = _fake_ws(), _fake_ws(), _fake_ws()
-    registry.register("w1", ["python"], ws1)
-    registry.register("w2", ["python"], ws2)
-    registry.register("w3", ["python"], ws3)
+    _register_worker(registry, "w1", ["python"])
+    _register_worker(registry, "w2", ["python"])
+    _register_worker(registry, "w3", ["python"])
 
     dispatched_pipelines: list[str] = []
 
@@ -338,7 +344,7 @@ async def test_dispatch_priority_merge_before_qa_before_impl() -> None:
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert result == 3
+    assert len(result) == 3
     # Let background tasks run
     await asyncio.sleep(0.05)
 
@@ -359,9 +365,8 @@ async def test_dispatch_skips_second_task_in_same_project_when_first_dispatched(
     task2, _, spec2 = await _seed_ready_task(store, project=project)
 
     # Two workers available
-    ws1, ws2 = _fake_ws(), _fake_ws()
-    registry.register("w1", ["python"], ws1)
-    registry.register("w2", ["python"], ws2)
+    _register_worker(registry, "w1", ["python"])
+    _register_worker(registry, "w2", ["python"])
 
     mock_seq = _mock_sequencer()
 
@@ -369,7 +374,7 @@ async def test_dispatch_skips_second_task_in_same_project_when_first_dispatched(
         result = await dispatch_pending(store, registry)
 
     # Only one task dispatched despite two workers being available
-    assert result == 1
+    assert len(result) == 1
 
 
 @pytest.mark.asyncio
@@ -391,8 +396,7 @@ async def test_dispatch_skips_project_with_in_progress_task() -> None:
     await sm.transition(task2.id, ev.SPEC_QA)
     await sm.transition(task2.id, ev.READY_FOR_IMPLEMENTATION)
 
-    ws = _fake_ws()
-    registry.register("w1", ["python"], ws)
+    _register_worker(registry, "w1", ["python"])
 
     mock_seq = _mock_sequencer()
 
@@ -400,7 +404,7 @@ async def test_dispatch_skips_project_with_in_progress_task() -> None:
         result = await dispatch_pending(store, registry)
 
     # Project skipped entirely because task1 is IN_PROGRESS
-    assert result == 0
+    assert result == []
     mock_seq.run_impl_pipeline.assert_not_called()
 
 
@@ -413,16 +417,15 @@ async def test_dispatch_mix_of_pipeline_types_to_separate_workers() -> None:
     impl_task, _, _ = await _seed_ready_task(store)
     qa_task, _, _ = await _seed_qa_task(store)
 
-    ws1, ws2 = _fake_ws(), _fake_ws()
-    registry.register("w1", ["python"], ws1)
-    registry.register("w2", ["python"], ws2)
+    _register_worker(registry, "w1", ["python"])
+    _register_worker(registry, "w2", ["python"])
 
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert result == 2
+    assert len(result) == 2
     await asyncio.sleep(0)
     # Both pipeline types were dispatched
     mock_seq.run_impl_pipeline.assert_called_once()
