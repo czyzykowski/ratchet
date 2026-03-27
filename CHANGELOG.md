@@ -13,6 +13,7 @@
 - Tablet breakpoint at 768px with intermediate layout adjustments
 - Utility CSS classes: `link-soft`, `text-dim`, `text-secondary`, `dark-surface`, `abandon-section`
 - Lazy-loaded mermaid plugin in Markdown component (only loads when content contains mermaid blocks)
+- `scripts/diagnose.py` — comprehensive task diagnostic: blocked tasks with failure classification, orphaned execution detection, dependency chain analysis, stale task detection; supports `--fix-orphans` and `--task-id` modes
 - `<main>` landmark wrapping Routes for screen reader navigation
 - `loading="lazy"` on all chat inline images
 

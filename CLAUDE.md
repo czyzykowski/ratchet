@@ -129,6 +129,7 @@ scripts/
   task-status.py    — detailed task inspector: execution history, failure reasons, worker assignment
   workers.py        — show connected workers with capabilities and current execution
   blocked-reasons.py — show all blocked tasks with categorized failure reasons
+  diagnose.py       — comprehensive diagnostic: blocked tasks, orphaned executions, dependency chains, stale tasks; --fix-orphans to clean up; --task-id <uuid> for single task deep-dive
 ```
 
 ### Usage
@@ -170,6 +171,11 @@ python scripts/task-status.py --task-id <uuid>   # specific task detail
 
 # Show connected workers
 python scripts/workers.py
+
+# Diagnose stuck tasks (blocked, orphaned executions, dependency chains)
+python scripts/diagnose.py                          # full diagnostic report
+python scripts/diagnose.py --task-id <uuid>         # deep-dive single task
+python scripts/diagnose.py --fix-orphans            # clean up orphaned running executions
 ```
 
 ### Full Workflow
