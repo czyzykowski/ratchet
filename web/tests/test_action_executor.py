@@ -465,3 +465,154 @@ async def test_should_fail_check_task_status_when_task_id_missing(
 
     assert result.success is False
     assert result.error is not None
+
+
+# --- add_spec tests ---
+
+
+async def _seed_task_in_status(
+    store: InMemoryStore, project_id: UUID, status: str
+) -> object:
+    """Create a task and advance it to the given status."""
+    task = await TaskManager(store).create_task(project_id, "Test task")
+    sm = TaskStateMachine(store)
+    # Advance through states to reach target
+    if status == ev.READY_FOR_SPEC:
+        pass  # default
+    elif status == ev.SPEC_QA:
+        await sm.transition(task.id, ev.SPEC_QA)
+    elif status == ev.READY_FOR_IMPLEMENTATION:
+        await sm.transition(task.id, ev.SPEC_QA)
+        await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+    elif status == ev.IN_PROGRESS:
+        await sm.transition(task.id, ev.SPEC_QA)
+        await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+        await sm.transition(task.id, ev.IN_PROGRESS)
+    elif status == ev.BLOCKED:
+        await sm.transition(task.id, ev.SPEC_QA)
+        await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+        await sm.transition(task.id, ev.IN_PROGRESS)
+        await sm.transition(task.id, ev.BLOCKED)
+    return task
+
+
+@pytest.mark.asyncio
+async def test_should_add_spec_from_ready_for_spec(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    task = await _seed_task_in_status(store, pid, ev.READY_FOR_SPEC)
+    task_id = str(task.id)  # type: ignore[attr-defined]
+
+    parsed = _make_parsed("add_spec", task_id=task_id, content="## Spec\nDo the thing.")
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    assert result.action == "add_spec"
+    assert task_id in result.message
+    assert result.entity_id is not None
+
+    # Verify task transitioned to ready_for_implementation
+    sm = TaskStateMachine(store)
+    status = await sm.get_current_status(UUID(task_id))
+    assert status == ev.READY_FOR_IMPLEMENTATION
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_spec_when_task_id_missing(
+    store: InMemoryStore, project_id: object
+) -> None:
+    parsed = _make_parsed("add_spec", content="## Spec\nDo the thing.")
+    result = await execute_action(parsed, store, UUID(str(project_id)))
+
+    assert result.success is False
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_spec_when_content_missing(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    task = await _seed_task_in_status(store, pid, ev.READY_FOR_SPEC)
+
+    parsed = _make_parsed("add_spec", task_id=str(task.id))  # type: ignore[attr-defined]
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is False
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_spec_when_task_in_disallowed_status(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    task = await _seed_task_in_status(store, pid, ev.IN_PROGRESS)
+
+    parsed = _make_parsed("add_spec", task_id=str(task.id), content="## Spec")  # type: ignore[attr-defined]
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is False
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_should_fail_add_spec_when_task_belongs_to_different_project(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    other_pid = uuid4()
+    task = await _seed_task_in_status(store, other_pid, ev.READY_FOR_SPEC)
+
+    parsed = _make_parsed("add_spec", task_id=str(task.id), content="## Spec")  # type: ignore[attr-defined]
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is False
+    assert result.error is not None
+    assert "does not belong to this project" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_should_add_spec_from_blocked_status(
+    store: InMemoryStore, project_id: object
+) -> None:
+    pid = UUID(str(project_id))
+    task = await _seed_task_in_status(store, pid, ev.BLOCKED)
+    task_id = str(task.id)  # type: ignore[attr-defined]
+
+    parsed = _make_parsed("add_spec", task_id=task_id, content="## Revised Spec")
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    sm = TaskStateMachine(store)
+    status = await sm.get_current_status(UUID(task_id))
+    assert status == ev.READY_FOR_IMPLEMENTATION
+
+
+@pytest.mark.asyncio
+async def test_should_add_spec_from_ready_for_implementation_with_lineage(
+    store: InMemoryStore, project_id: object
+) -> None:
+    from core.spec_manager import SpecManager
+
+    pid = UUID(str(project_id))
+    task = await _seed_task_in_status(store, pid, ev.READY_FOR_IMPLEMENTATION)
+    task_id = UUID(str(task.id))  # type: ignore[attr-defined]
+
+    # Assign initial spec
+    spec_mgr = SpecManager(store)
+    first_spec = await spec_mgr.create_spec(task_id, "First spec content")
+    await spec_mgr.assign_spec(task_id, first_spec.id)
+
+    # Re-spec via action
+    parsed = _make_parsed("add_spec", task_id=str(task_id), content="## Updated Spec")
+    result = await execute_action(parsed, store, pid)
+
+    assert result.success is True
+    assert result.entity_id is not None
+
+    # Verify lineage — new spec should have previous_spec_id set
+    new_spec = await spec_mgr.get_spec(UUID(result.entity_id))
+    assert new_spec is not None
+    assert new_spec.previous_spec_id == first_spec.id

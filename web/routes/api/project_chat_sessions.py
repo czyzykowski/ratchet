@@ -111,6 +111,10 @@ def _build_project_chat_prompt(
         "```action\n"
         '{"action": "archive_task", "task_id": "<uuid>", "reason": "No longer needed"}\n'
         "```\n\n"
+        "```action\n"
+        '{"action": "add_spec", "task_id": "<uuid>",'
+        ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
+        "```\n\n"
         "Rules:\n"
         "- Always confirm with the user before executing destructive actions"
         " (archive, status changes)\n"

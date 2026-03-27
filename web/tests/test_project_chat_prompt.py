@@ -120,3 +120,9 @@ def test_should_include_write_actions_section_in_prompt() -> None:
     assert "update_task" in result
     assert "archive_task" in result
     assert "confirm with the user before executing destructive actions" in result
+
+
+def test_should_include_add_spec_action_in_prompt() -> None:
+    project = _make_project()
+    result = _build_project_chat_prompt(project, "intent", "", [], [], [])
+    assert "add_spec" in result

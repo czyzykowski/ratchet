@@ -10,6 +10,7 @@ from uuid import UUID
 from core import events as ev
 from core.feature_manager import FeatureManager
 from core.project_manager import OnboardingError, ProjectManager
+from core.spec_manager import SpecManager
 from core.state_machine import InvalidTransitionError, TaskStateMachine
 from core.store import Store
 from core.task_manager import TaskManager
@@ -70,6 +71,15 @@ async def execute_action(
             return await _add_hls(parsed, store)
         elif parsed.action == "check_task_status":
             return await _check_task_status(parsed, store)
+        elif parsed.action == "add_spec":
+            if project_id is None:
+                return ActionResult(
+                    success=False,
+                    action=parsed.action,
+                    message="",
+                    error="add_spec requires a project_id — use within a project chat session",
+                )
+            return await _add_spec(parsed, store, project_id)
         else:
             return ActionResult(
                 success=False,
@@ -265,6 +275,53 @@ async def _register_project(
         action="register_project",
         message=f"✓ Registered project: {name} (id: {project.id})",
         entity_id=str(project.id),
+    )
+
+
+async def _add_spec(
+    parsed: ParsedAction, store: Store, project_id: UUID
+) -> ActionResult:
+    task_id_str = parsed.payload.get("task_id")
+    if not task_id_str:
+        raise ValueError("'task_id' is required for add_spec")
+    content = parsed.payload.get("content")
+    if not content:
+        raise ValueError("'content' is required for add_spec")
+
+    task_id = UUID(str(task_id_str))
+    task = await TaskManager(store).get_task(task_id)
+    if task is None:
+        raise ValueError(f"Task {task_id_str} not found")
+    if task.project_id != project_id:
+        raise ValueError(f"Task {task_id_str} does not belong to this project")
+
+    state_machine = TaskStateMachine(store)
+    current_status = await state_machine.get_current_status(task_id)
+    allowed = {ev.READY_FOR_SPEC, ev.SPEC_QA, ev.BLOCKED, ev.READY_FOR_IMPLEMENTATION}
+    if current_status not in allowed:
+        raise ValueError(
+            f"Cannot assign spec to task in status {current_status!r}"
+        )
+
+    spec_manager = SpecManager(store)
+    current_spec = await spec_manager.get_current_spec(task_id)
+    previous_spec_id = current_spec.id if current_spec is not None else None
+
+    spec = await spec_manager.create_spec(task_id, str(content), previous_spec_id)
+    await spec_manager.assign_spec(task_id, spec.id)
+
+    if current_status == ev.READY_FOR_SPEC:
+        await state_machine.transition(task_id, ev.SPEC_QA)
+        await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    elif current_status in (ev.SPEC_QA, ev.BLOCKED):
+        await state_machine.transition(task_id, ev.READY_FOR_IMPLEMENTATION)
+    # ready_for_implementation: spec assigned, no state transition needed
+
+    return ActionResult(
+        success=True,
+        action="add_spec",
+        message=f"✓ Assigned spec to task {task_id_str} (spec: {spec.id})",
+        entity_id=str(spec.id),
     )
 
 
