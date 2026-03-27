@@ -59,8 +59,8 @@ export function FeaturesPage() {
                       {f.title}
                     </Link>
                   </td>
-                  <td className="text-secondary text-xs">
-                    {f.description.slice(0, 80)}{f.description.length > 80 ? '…' : ''}
+                  <td className="text-secondary text-xs" style={{ maxWidth: '300px' }}>
+                    {f.description.slice(0, 80)}{f.description.length > 80 ? '...' : ''}
                   </td>
                   <td>
                     <span className={`badge badge-${f.status}`}>{f.status.replace(/_/g, ' ')}</span>

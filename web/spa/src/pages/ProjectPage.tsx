@@ -158,11 +158,13 @@ export function ProjectPage() {
                         {f.title}
                       </Link>
                     </td>
+                    <td className="text-secondary text-xs" style={{ maxWidth: '300px' }}>
+                      {f.description ? (
+                        <>{f.description.slice(0, 80)}{f.description.length > 80 ? '...' : ''}</>
+                      ) : null}
+                    </td>
                     <td>
-                      <span
-                        className="status-badge"
-                        style={{ backgroundColor: STATUS_COLORS[f.status] ?? '#6b7280' }}
-                      >
+                      <span className={`badge badge-${f.status}`}>
                         {f.status.replace(/_/g, ' ')}
                       </span>
                     </td>

@@ -5,7 +5,6 @@ import { apiFetch } from '../api/client'
 import { Markdown } from '../components/Markdown'
 import { CreateFeatureChat } from '../components/CreateFeatureChat'
 import { FeatureProgressBar } from '../components/FeatureProgressBar'
-import { STATUS_COLORS } from '../utils/statusColors'
 
 interface Feature {
   id: string
@@ -155,7 +154,7 @@ export function FeatureDetailPage() {
       )}
 
       {totalCount > 0 && (
-        <div className="modal-field">
+        <div className="feature-progress-section" style={{ marginBottom: '1.5rem' }}>
           <FeatureProgressBar
             compiledCount={compiledCount}
             totalCount={totalCount}
@@ -167,7 +166,7 @@ export function FeatureDetailPage() {
       {feature.description && (
         <div className="modal-field">
           <div className="modal-label">Description</div>
-          <div className="dark-surface">
+          <div className="feature-description">
             <Markdown content={feature.description} />
           </div>
         </div>
@@ -176,24 +175,21 @@ export function FeatureDetailPage() {
       {sortedSpecs.length > 0 && (
         <div className="modal-field">
           <div className="modal-label">High-Level Specs ({sortedSpecs.length})</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
             {sortedSpecs.map(spec => (
               <div
                 key={spec.id}
-                className="dark-surface"
+                className={`feature-spec-card${spec.compiled ? ' compiled' : ''}`}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <strong style={{ color: '#e0e0e0' }}>
+                  <strong style={{ color: 'var(--color-text)' }}>
                     {spec.order}. {spec.title}
                   </strong>
-                  <span className={`badge badge-${spec.compiled ? 'deployed' : 'ready_for_spec'}`}>
+                  <span className={`badge badge-${spec.compiled ? 'defined' : 'idea'}`}>
                     {spec.compiled ? 'compiled' : 'pending'}
                   </span>
                   {spec.task_status && (
-                    <span
-                      className="status-badge"
-                      style={{ backgroundColor: STATUS_COLORS[spec.task_status] ?? '#6b7280' }}
-                    >
+                    <span className={`badge badge-${spec.task_status}`}>
                       {spec.task_status.replace(/_/g, ' ')}
                     </span>
                   )}
@@ -204,7 +200,7 @@ export function FeatureDetailPage() {
                   )}
                 </div>
                 {spec.dependencies.length > 0 && (
-                  <div style={{ fontSize: '0.75rem', color: '#a0a0a0', marginBottom: '0.5rem' }}>
+                  <div className="text-secondary" style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>
                     Depends on: {spec.dependencies.join(', ')}
                   </div>
                 )}
