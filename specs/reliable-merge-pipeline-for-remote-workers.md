@@ -408,7 +408,7 @@ git commit -m "feat: add optional patch field to CreateWorktreeRequest"
 
 **Depends on:** None (independent)
 
-- [ ] Step 1: Add `apply_patch_to_develop` function to `core/merge.py`
+- [x] Step 1: Add `apply_patch_to_develop` function to `core/merge.py`
 
 After the `MergeResult` dataclass (line 19), add:
 

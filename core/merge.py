@@ -19,6 +19,114 @@ class MergeResult:
     new_sha: str | None = None
 
 
+def apply_patch_to_develop(
+    local_path: str,
+    patch_text: str,
+    title: str,
+    task_id: UUID,
+    target_branch: str = "develop",
+) -> MergeResult:
+    """Apply a pre-verified patch to the target branch.
+
+    Used after remote worker QA verifies the merge. Creates a temporary
+    worktree, applies the patch, commits, and advances the target branch.
+
+    Returns MergeResult with success=True and new_sha on success.
+    """
+    merge_worktree = os.path.join(local_path, ".worktrees", f"deploy-{_uuid4()}")
+    new_sha: str | None = None
+
+    try:
+        subprocess.run(
+            ["git", "worktree", "add", "--detach", merge_worktree, target_branch],
+            cwd=local_path,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        return MergeResult(
+            success=False,
+            failure_reason=f"git worktree add failed: {exc.stderr.decode()}",
+        )
+
+    try:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".patch", delete=False
+        ) as f:
+            f.write(patch_text)
+            patch_file = f.name
+
+        try:
+            result = subprocess.run(
+                ["git", "apply", "--allow-empty", patch_file],
+                cwd=merge_worktree,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                return MergeResult(
+                    success=False,
+                    failure_reason=f"git apply failed: {result.stderr.strip()}",
+                )
+        finally:
+            os.unlink(patch_file)
+
+        # Stage and commit
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=merge_worktree,
+            capture_output=True,
+        )
+        commit_msg = f"feat: {title} (task/{task_id})"
+        try:
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", commit_msg],
+                cwd=merge_worktree,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            return MergeResult(
+                success=False,
+                failure_reason=f"git commit failed: {exc.stderr.decode()}",
+            )
+    finally:
+        new_sha_proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=merge_worktree,
+            capture_output=True,
+            text=True,
+        )
+        new_sha = new_sha_proc.stdout.strip() or None
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", merge_worktree],
+            cwd=local_path,
+            capture_output=True,
+        )
+
+    # Advance target branch
+    if new_sha:
+        subprocess.run(
+            ["git", "update-ref", f"refs/heads/{target_branch}", new_sha],
+            cwd=local_path,
+            capture_output=True,
+        )
+    subprocess.run(
+        ["git", "checkout", target_branch],
+        cwd=local_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "reset", "--hard", target_branch],
+        cwd=local_path,
+        capture_output=True,
+    )
+
+    return MergeResult(success=True, new_sha=new_sha)
+
+
 def squash_merge(
     local_path: str,
     execution_branch: str,
