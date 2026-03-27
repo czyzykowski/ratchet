@@ -19,6 +19,7 @@
 ### Changed
 - `scripts/diagnose.py` upgraded to single operational tool: `--fix-orphans` per-task support, `--unblock-infra` bulk unblock, `--check-false-positives` trace scanning, execution waste analysis, per-task failure breakdown, false-positive BLOCKED detection in task deep-dive, proper view refresh after fixes
 - Feature pages normalized: consistent `badge badge-${status}` pattern across FeaturesPage, ProjectPage features section, and FeatureDetailPage; feature statuses added to STATUS_COLORS; spec cards use colored left borders; progress section uses primary accent; description and dependency text use design tokens instead of hardcoded colors
+- Project page redesigned: features as card grid instead of flat table; task sections use colored status dots and left borders (no redundant per-row badges); header buttons split into create actions (primary) and navigation (ghost) with visual separator; new `.btn-ghost`, `.feature-card`, `.task-status-heading` CSS components
 - CSS design token system: 90+ custom properties in `:root` for colors, shadows, overlays
 - `ErrorBoundary` component wrapping the app to catch React crashes with reload button
 - `:focus-visible` styles for all interactive elements (buttons, task cards, toasts, rows)

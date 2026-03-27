@@ -120,64 +120,70 @@ export function ProjectPage() {
     <div className="page">
       <header className="page-header">
         <h1>{data.project.name}</h1>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
-            Add Task
-          </button>
-          <button className="btn btn-primary" onClick={() => setFeatureModalOpen(true)}>
-            Add Feature
-          </button>
-          <button className="btn btn-secondary" onClick={handleChatClick}>
-            Chat
-          </button>
-          <button className="btn btn-secondary" onClick={handleArchitectureClick}>
-            Architecture
-          </button>
-          <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
-            Settings
-          </button>
+        <div className="project-actions">
+          <div className="project-actions-create">
+            <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
+              + Task
+            </button>
+            <button className="btn btn-primary" onClick={() => setFeatureModalOpen(true)}>
+              + Feature
+            </button>
+          </div>
+          <div className="project-actions-nav">
+            <button className="btn btn-ghost" onClick={handleChatClick}>
+              Chat
+            </button>
+            <button className="btn btn-ghost" onClick={handleArchitectureClick}>
+              Architecture
+            </button>
+            <button className="btn btn-ghost" onClick={() => setSettingsOpen(true)}>
+              Settings
+            </button>
+          </div>
         </div>
       </header>
 
       {features.length > 0 && (
-        <section className="status-section">
+        <section className="project-features-section">
           <h2
             className="status-heading"
             style={{ cursor: 'pointer', userSelect: 'none' }}
             onClick={() => setFeaturesCollapsed(c => !c)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFeaturesCollapsed(c => !c) } }}
+            aria-expanded={!featuresCollapsed}
           >
             {featuresCollapsed ? '▶' : '▼'} Features ({features.length})
           </h2>
           {!featuresCollapsed && (
-            <table className="data-table">
-              <tbody>
-                {features.map(f => (
-                  <tr key={f.id} className="task-row">
-                    <td>
-                      <Link to={`/features/${f.id}`}>
-                        {f.title}
-                      </Link>
-                    </td>
-                    <td className="text-secondary text-xs" style={{ maxWidth: '300px' }}>
-                      {f.description ? (
-                        <>{f.description.slice(0, 80)}{f.description.length > 80 ? '...' : ''}</>
-                      ) : null}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${f.status}`}>
-                        {f.status.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-                    <td style={{ minWidth: '120px' }}>
-                      <FeatureProgressBar
-                        compiledCount={f.compiled_spec_count}
-                        totalCount={f.total_spec_count}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="feature-cards-grid">
+              {features.map(f => (
+                <Link
+                  key={f.id}
+                  to={`/features/${f.id}`}
+                  className="feature-card"
+                >
+                  <div className="feature-card-header">
+                    <span className="feature-card-title">{f.title}</span>
+                    <span className={`badge badge-${f.status}`}>
+                      {f.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  {f.description && (
+                    <div className="feature-card-desc">
+                      {f.description.slice(0, 100)}{f.description.length > 100 ? '...' : ''}
+                    </div>
+                  )}
+                  <div className="feature-card-progress">
+                    <FeatureProgressBar
+                      compiledCount={f.compiled_spec_count}
+                      totalCount={f.total_spec_count}
+                    />
+                  </div>
+                </Link>
+              ))}
+            </div>
           )}
         </section>
       )}
@@ -185,9 +191,14 @@ export function ProjectPage() {
       {STATUS_ORDER.map(status => {
         const tasks = groups[status]
         if (tasks.length === 0) return null
+        const color = STATUS_COLORS[status] ?? '#6b7280'
         return (
-          <section key={status} className="status-section">
-            <h2 className="status-heading">{STATUS_LABELS[status] ?? status} ({tasks.length})</h2>
+          <section key={status} className="task-status-section">
+            <h2 className="task-status-heading" style={{ borderLeftColor: color }}>
+              <span className="task-status-dot" style={{ backgroundColor: color }} />
+              {STATUS_LABELS[status] ?? status}
+              <span className="task-status-count">{tasks.length}</span>
+            </h2>
             <table className="data-table">
               <tbody>
                 {tasks.map(task => (
@@ -198,15 +209,9 @@ export function ProjectPage() {
                     style={{ cursor: 'pointer' }}
                   >
                     <td>{task.title}</td>
-                    <td>
-                      <span
-                        className="status-badge"
-                        style={{ backgroundColor: STATUS_COLORS[task.status] ?? '#6b7280' }}
-                      >
-                        {task.status.replace(/_/g, ' ')}
-                      </span>
+                    <td className="text-secondary text-xs" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {formatRelativeTime(task.updated_at)}
                     </td>
-                    <td>{formatRelativeTime(task.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
