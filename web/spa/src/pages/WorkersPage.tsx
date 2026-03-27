@@ -64,6 +64,7 @@ function useConnectedWorkers() {
     queryKey: ['connected-workers'],
     queryFn: fetchConnectedWorkers,
     refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     staleTime: 4_000,
   })
 }

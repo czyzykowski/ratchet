@@ -50,14 +50,14 @@ export function SpecDetailPage() {
         <div className="modal-field">
           <div className="modal-label">Task</div>
           <div className="modal-value modal-value-sm">
-            <Link to={`/tasks/${spec.task_id}`} style={{ color: '#7eb8f7' }}>{spec.task_id}</Link>
+            <Link to={`/tasks/${spec.task_id}`} className="link-soft">{spec.task_id}</Link>
           </div>
         </div>
       </div>
 
       <div className="modal-field">
         <div className="modal-label">Content</div>
-        <div style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}>
+        <div className="dark-surface">
           <Markdown content={spec.content} />
         </div>
       </div>

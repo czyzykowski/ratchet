@@ -238,3 +238,28 @@ git push origin develop
 ```
 
 Never leave merged changes unpushed.
+
+## Design Context
+
+### Users
+Solo developer using Ratchet as a personal task orchestration dashboard for autonomous AI-driven software development. The user is highly technical, monitors task pipelines, reviews execution logs, and manages worker processes. Speed of comprehension and information density matter more than visual polish.
+
+### Brand Personality
+**Technical, precise, calm.** The interface should feel like a well-built developer tool — trustworthy, no-nonsense, and quietly competent. No marketing flair, no unnecessary decoration. Every element earns its place by conveying information.
+
+### Aesthetic Direction
+- **Polished modern** with **dashboard-grade data visualization** — elevate the current minimal/flat style with better typography, subtle depth, refined spacing, and richer status indicators
+- Primary brand color: `#7b6cd8` (purple) — used for interactive elements, active states, and brand identity
+- Semantic status palette already established (green/red/yellow/blue/cyan/purple mapped to task states) — preserve and refine these
+- System font stack is fine; improve hierarchy through better weight/size/spacing choices
+- Light mode primary; dark mode is not a current priority
+- Flat design with subtle depth cues (refined shadows, borders) rather than heavy gradients or skeuomorphism
+- Data-viz elements welcome: progress indicators, timeline views, richer status badges
+
+### Design Principles
+
+1. **Information density over whitespace** — This is a power-user tool. Maximize useful data per viewport without becoming cluttered. Compact is good; cramped is not.
+2. **Status at a glance** — Task states, worker health, and execution progress should be immediately scannable. Use color, position, and shape consistently so the user never has to read a label to understand state.
+3. **Calm confidence** — Avoid visual noise. Animations should be functional (loading, transitions), not decorative. The UI should feel stable and predictable.
+4. **Progressive disclosure** — Show summary by default, detail on demand. The board view is the home base; drill-down views reveal execution logs, specs, and history.
+5. **Consistency over novelty** — Every new component should reuse existing patterns (color tokens, spacing scale, border radius, button styles). When in doubt, match what exists.

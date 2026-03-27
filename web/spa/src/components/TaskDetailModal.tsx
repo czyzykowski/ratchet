@@ -312,7 +312,7 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
 
   if (showChat && data) {
     return (
-      <div className="modal-overlay" onClick={handleOverlayClick}>
+      <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
         <div className="modal-content modal-content-chat">
           <CreateSpecChat
             taskId={taskId}
@@ -325,13 +325,13 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
   }
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
+    <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
       <div className="modal-content modal-content-wide">
         <div className="modal-header">
           <div className="modal-title">
             {isLoading ? 'Loading...' : error ? 'Error' : data?.task.title}
           </div>
-          <button className="modal-close" onClick={onClose}>&#215;</button>
+          <button className="modal-close" onClick={onClose} aria-label="Close">&#215;</button>
         </div>
         {isLoading && <div className="loading-state">Loading task details...</div>}
         {error && <div className="error-state">Failed to load task</div>}

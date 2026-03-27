@@ -136,16 +136,16 @@ export function FeatureDetailPage() {
       </header>
 
       {showAbandonForm && (
-        <div className="modal-field" style={{ border: '1px solid #5a1a1a', borderRadius: 4, padding: '1rem', background: '#1a0a0a', marginBottom: '1rem' }}>
-          <div className="modal-label" style={{ color: '#f87171', marginBottom: '0.5rem' }}>Abandon Feature</div>
+        <div className="modal-field abandon-section">
+          <div className="modal-label abandon-section-label">Abandon Feature</div>
           <textarea
+            className="abandon-section-textarea"
             placeholder="Reason for abandonment (optional)"
             value={abandonReason}
             onChange={e => setAbandonReason(e.target.value)}
-            style={{ width: '100%', minHeight: '4rem', background: '#111', color: '#e0e0e0', border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.5rem', boxSizing: 'border-box' }}
           />
           {abandonError && (
-            <div style={{ color: '#f87171', fontSize: '0.85rem', marginTop: '0.5rem' }}>{abandonError}</div>
+            <div className="abandon-section-error">{abandonError}</div>
           )}
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
             <button className="btn btn-danger" onClick={handleAbandonConfirm}>Confirm Abandon</button>
@@ -167,7 +167,7 @@ export function FeatureDetailPage() {
       {feature.description && (
         <div className="modal-field">
           <div className="modal-label">Description</div>
-          <div style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}>
+          <div className="dark-surface">
             <Markdown content={feature.description} />
           </div>
         </div>
@@ -180,7 +180,7 @@ export function FeatureDetailPage() {
             {sortedSpecs.map(spec => (
               <div
                 key={spec.id}
-                style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}
+                className="dark-surface"
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                   <strong style={{ color: '#e0e0e0' }}>
@@ -198,7 +198,7 @@ export function FeatureDetailPage() {
                     </span>
                   )}
                   {spec.task_id && (
-                    <Link to={`/tasks/${spec.task_id}`} style={{ color: '#7eb8f7', fontSize: '0.75rem' }}>
+                    <Link to={`/tasks/${spec.task_id}`} className="link-soft text-sm">
                       view task
                     </Link>
                   )}

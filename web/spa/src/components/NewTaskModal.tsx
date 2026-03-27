@@ -44,11 +44,11 @@ export function NewTaskModal({ open, projectId, projectCapabilities, onClose }: 
   }
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
+    <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
       <div className="modal-content">
         <div className="modal-header">
           <div className="modal-title">Add Task</div>
-          <button className="modal-close" onClick={onClose}>&#215;</button>
+          <button className="modal-close" onClick={onClose} aria-label="Close">&#215;</button>
         </div>
         <form onSubmit={handleSubmit}>
           <div className="modal-field">

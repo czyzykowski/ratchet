@@ -14,6 +14,7 @@ export function useWorkerStatus() {
     queryFn: fetchWorkerStatus,
     staleTime: 5_000,
     refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
   })
 }
 

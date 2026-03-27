@@ -2,7 +2,33 @@
 
 ## [Unreleased]
 
+### Added
+- CSS design token system: 90+ custom properties in `:root` for colors, shadows, overlays
+- `ErrorBoundary` component wrapping the app to catch React crashes with reload button
+- `:focus-visible` styles for all interactive elements (buttons, task cards, toasts, rows)
+- `prefers-reduced-motion` media query disabling all animations
+- ARIA `role="dialog"` and `aria-modal="true"` on all modal overlays with `aria-label="Close"` on close buttons
+- Keyboard support (Enter/Space) on `TaskCard` and `Toast` components
+- `aria-expanded` and keyboard support on collapsible Features section in ProjectPage
+- Tablet breakpoint at 768px with intermediate layout adjustments
+- Utility CSS classes: `link-soft`, `text-dim`, `text-secondary`, `dark-surface`, `abandon-section`
+- Lazy-loaded mermaid plugin in Markdown component (only loads when content contains mermaid blocks)
+- `<main>` landmark wrapping Routes for screen reader navigation
+- `loading="lazy"` on all chat inline images
+
+### Changed
+- Extracted all hard-coded CSS colors into `:root` custom properties (234 var() references, zero hex outside tokens)
+- Board columns stack vertically at 600px for phones, shrink to 240px on tablets
+- 44px minimum touch targets on buttons at all screen sizes (not just 430px)
+- Replaced inline `color: '#7eb8f7'` styles with `link-soft` CSS class across detail pages
+- Replaced inline dark surface styles with `dark-surface` CSS class
+- Replaced hardcoded abandon section colors with `--color-danger` family tokens
+- Polling queries (`useWorkerStatus`, connected workers) now pause when tab is hidden via `refetchIntervalInBackground: false`
+
 ### Fixed
+- Contrast ratio failures: darkened text-tertiary, text-muted, text-dim and 4 badge foreground colors to meet WCAG AA 4.5:1
+- Blob URL memory leak in chat components: URLs now revoked on success path (not just error path)
+- Generic image alt text: "attached" → "User uploaded image", "pending attachment" → "Image pending upload"
 - Merge conflicts on remote worker tasks: `_apply_patch_to_local` now uses the original base commit instead of HEAD, preventing context mismatch when develop advances between execution and merge
 - Dispatcher tests updated to match `dispatch_pending` returning `list[DispatchResult]` instead of `int`
 

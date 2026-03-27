@@ -72,7 +72,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
 
   if (mode === 'bootstrap') {
     return (
-      <div className="modal-overlay" onClick={handleOverlayClick}>
+      <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
         <div className="modal-content-chat">
           <BootstrapChat onClose={onClose} onBack={() => setMode('select')} />
         </div>
@@ -81,7 +81,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
   }
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick}>
+    <div className="modal-overlay" onClick={handleOverlayClick} role="dialog" aria-modal="true">
       <div className="modal-content">
         <div className="modal-header">
           {mode === 'manual' && (
@@ -94,7 +94,7 @@ export function NewProjectModal({ open, onClose }: NewProjectModalProps) {
             </button>
           )}
           <div className="modal-title">New Project</div>
-          <button className="modal-close" onClick={onClose}>&#215;</button>
+          <button className="modal-close" onClick={onClose} aria-label="Close">&#215;</button>
         </div>
 
         {mode === 'select' && (

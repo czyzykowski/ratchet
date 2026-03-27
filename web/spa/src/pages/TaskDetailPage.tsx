@@ -146,7 +146,7 @@ export function TaskDetailPage() {
           <div className="modal-field">
             <div className="modal-label">Feature</div>
             <div className="modal-value">
-              <Link to={`/features/${data.feature_id}`} style={{ color: '#7eb8f7' }}>
+              <Link to={`/features/${data.feature_id}`} className="link-soft">
                 {data.feature_title}
               </Link>
             </div>
@@ -199,14 +199,14 @@ export function TaskDetailPage() {
           <div className="modal-label">
             Current Spec
             {specs.length > 1 && (
-              <span style={{ marginLeft: '0.5rem', color: '#a0a0a0' }}>(rev {specs.length})</span>
+              <span className="text-dim" style={{ marginLeft: '0.5rem' }}>(rev {specs.length})</span>
             )}
             {' '}
-            <Link to={`/specs/${latestSpec.id}`} style={{ fontSize: '0.75rem', color: '#7eb8f7' }}>
+            <Link to={`/specs/${latestSpec.id}`} className="link-soft text-sm">
               view spec
             </Link>
           </div>
-          <div style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}>
+          <div className="dark-surface">
             <Markdown content={latestSpec.content} />
           </div>
         </div>
@@ -215,10 +215,10 @@ export function TaskDetailPage() {
       {specs.length > 1 && (
         <div className="modal-field">
           <div className="modal-label">Spec History</div>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#a0a0a0', fontSize: '0.8rem' }}>
+          <ul className="text-dim text-xs" style={{ margin: 0, paddingLeft: '1.25rem' }}>
             {[...specs].reverse().map((s, i) => (
               <li key={s.id}>
-                <Link to={`/specs/${s.id}`} style={{ color: '#7eb8f7' }}>
+                <Link to={`/specs/${s.id}`} className="link-soft">
                   Rev {specs.length - i} — {formatDate(s.created_at)}
                 </Link>
               </li>
@@ -235,12 +235,12 @@ export function TaskDetailPage() {
               {executions.map(ex => (
                 <tr key={ex.id}>
                   <td>
-                    <Link to={`/executions/${ex.id}`} style={{ color: '#7eb8f7' }}>
+                    <Link to={`/executions/${ex.id}`} className="link-soft">
                       <span className={`badge badge-${ex.status}`}>{ex.status}</span>
                     </Link>
                   </td>
-                  <td style={{ color: '#a0a0a0', fontSize: '0.75rem' }}>{ex.branch_name ?? '—'}</td>
-                  <td style={{ color: '#a0a0a0', fontSize: '0.75rem' }}>{formatDate(ex.started_at)}</td>
+                  <td className="text-dim text-sm">{ex.branch_name ?? '—'}</td>
+                  <td className="text-dim text-sm">{formatDate(ex.started_at)}</td>
                 </tr>
               ))}
             </tbody>
@@ -252,10 +252,10 @@ export function TaskDetailPage() {
         <div className="modal-field">
           <div className="modal-label">Deployment</div>
           <div>
-            <a href={pr_info.pr_url} target="_blank" rel="noreferrer" style={{ color: '#7eb8f7' }}>
+            <a href={pr_info.pr_url} target="_blank" rel="noreferrer" className="link-soft">
               PR #{pr_info.pr_number}
             </a>
-            <span style={{ marginLeft: '0.5rem', color: '#a0a0a0', fontSize: '0.8rem' }}>
+            <span className="text-dim text-xs" style={{ marginLeft: '0.5rem' }}>
               {pr_info.branch}
             </span>
           </div>
@@ -269,7 +269,7 @@ export function TaskDetailPage() {
             <div key={i} style={{ marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                 <strong>{step.name}</strong>
-                <code style={{ color: '#a0a0a0', fontSize: '0.8rem' }}>{step.command}</code>
+                <code className="text-dim text-xs">{step.command}</code>
                 <span
                   style={{
                     padding: '0.1rem 0.4rem',
@@ -320,10 +320,10 @@ export function TaskDetailPage() {
       {data.dependencies.length > 0 && (
         <div className="modal-field">
           <div className="modal-label">Dependencies</div>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: '#a0a0a0', fontSize: '0.8rem' }}>
+          <ul className="text-dim text-xs" style={{ margin: 0, paddingLeft: '1.25rem' }}>
             {data.dependencies.map(dep => (
               <li key={dep}>
-                <Link to={`/tasks/${dep}`} style={{ color: '#7eb8f7' }}>{dep}</Link>
+                <Link to={`/tasks/${dep}`} className="link-soft">{dep}</Link>
               </li>
             ))}
           </ul>

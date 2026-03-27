@@ -42,7 +42,13 @@ function Toast({ id, taskId, taskTitle, message, onDismiss, onNavigate }: ToastP
   }, [id, onDismiss])
 
   return (
-    <div className="toast" onClick={() => onNavigate(taskId)}>
+    <div
+      className="toast"
+      onClick={() => onNavigate(taskId)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate(taskId) } }}
+      role="button"
+      tabIndex={0}
+    >
       <div className="toast-message">
         <div className="toast-title">{taskTitle}</div>
         <div>{message}</div>

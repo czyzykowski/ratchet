@@ -72,13 +72,13 @@ export function ExecutionDetailPage() {
         <div className="modal-field">
           <div className="modal-label">Task</div>
           <div className="modal-value modal-value-sm">
-            <Link to={`/tasks/${execution.task_id}`} style={{ color: '#7eb8f7' }}>{execution.task_id}</Link>
+            <Link to={`/tasks/${execution.task_id}`} className="link-soft">{execution.task_id}</Link>
           </div>
         </div>
         <div className="modal-field">
           <div className="modal-label">Spec</div>
           <div className="modal-value modal-value-sm">
-            <Link to={`/specs/${execution.spec_id}`} style={{ color: '#7eb8f7' }}>{execution.spec_id}</Link>
+            <Link to={`/specs/${execution.spec_id}`} className="link-soft">{execution.spec_id}</Link>
           </div>
         </div>
       </div>
@@ -93,7 +93,7 @@ export function ExecutionDetailPage() {
       {trace && (
         <div className="modal-field">
           <div className="modal-label">Trace</div>
-          <div style={{ border: '1px solid #2a2a2a', borderRadius: 4, padding: '0.75rem', background: '#111' }}>
+          <div className="dark-surface">
             <Markdown content={trace} />
           </div>
         </div>

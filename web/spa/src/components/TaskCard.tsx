@@ -67,8 +67,16 @@ export function TaskCard({ task, onOpen }: TaskCardProps) {
     onOpen(task)
   }
 
+  function handleCardKeyDown(e: React.KeyboardEvent) {
+    if (renaming) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onOpen(task)
+    }
+  }
+
   return (
-    <div className="task-card" onClick={handleCardClick}>
+    <div className="task-card" onClick={handleCardClick} onKeyDown={handleCardKeyDown} role="button" tabIndex={0}>
       <div className="task-title">
         {renaming ? (
           <input

@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { BoardPage } from './pages/BoardPage'
 import { BootstrapPage } from './pages/BootstrapPage'
 import { ExecutionDetailPage } from './pages/ExecutionDetailPage'
@@ -32,22 +33,24 @@ function AppInner() {
         <NavLink to="/features">Features</NavLink>
         <NavLink to="/workers">Workers</NavLink>
       </nav>
-      <Routes>
-        <Route path="/" element={<FocusPage />} />
-        <Route path="/board" element={<BoardPage />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/projects/:project_id" element={<ProjectPage />} />
-        <Route path="/projects/:project_id/chat" element={<ProjectChatPage />} />
-        <Route path="/projects/:project_id/architecture" element={<ArchitectureSessionPage />} />
-        <Route path="/tasks/:task_id" element={<TaskDetailPage />} />
-        <Route path="/specs/:spec_id" element={<SpecDetailPage />} />
-        <Route path="/features" element={<FeaturesPage />} />
-        <Route path="/features/:feature_id" element={<FeatureDetailPage />} />
-        <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
-        <Route path="/workers" element={<WorkersPage />} />
-        <Route path="/bootstrap" element={<BootstrapPage />} />
-        <Route path="/bootstrap/:session_id" element={<BootstrapPage />} />
-      </Routes>
+      <main style={{ display: 'contents' }}>
+        <Routes>
+          <Route path="/" element={<FocusPage />} />
+          <Route path="/board" element={<BoardPage />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:project_id" element={<ProjectPage />} />
+          <Route path="/projects/:project_id/chat" element={<ProjectChatPage />} />
+          <Route path="/projects/:project_id/architecture" element={<ArchitectureSessionPage />} />
+          <Route path="/tasks/:task_id" element={<TaskDetailPage />} />
+          <Route path="/specs/:spec_id" element={<SpecDetailPage />} />
+          <Route path="/features" element={<FeaturesPage />} />
+          <Route path="/features/:feature_id" element={<FeatureDetailPage />} />
+          <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
+          <Route path="/workers" element={<WorkersPage />} />
+          <Route path="/bootstrap" element={<BootstrapPage />} />
+          <Route path="/bootstrap/:session_id" element={<BootstrapPage />} />
+        </Routes>
+      </main>
     </div>
   )
 }
@@ -56,8 +59,10 @@ export function App() {
   const notificationsValue = useNotificationsState()
 
   return (
-    <NotificationsContext.Provider value={notificationsValue}>
-      <AppInner />
-    </NotificationsContext.Provider>
+    <ErrorBoundary>
+      <NotificationsContext.Provider value={notificationsValue}>
+        <AppInner />
+      </NotificationsContext.Provider>
+    </ErrorBoundary>
   )
 }

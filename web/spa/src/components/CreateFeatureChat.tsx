@@ -220,6 +220,7 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
 
       setMessages(prev => [...prev, { role: 'assistant', content: assistantText }])
       setCurrentStream('')
+      if (sentThumbnailUrl) URL.revokeObjectURL(sentThumbnailUrl)
     } catch (err) {
       setChatError(err instanceof Error ? err.message : 'Unknown error')
       if (sentThumbnailUrl) URL.revokeObjectURL(sentThumbnailUrl)
@@ -304,8 +305,9 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
               {msg.imageId && (
                 <img
                   src={`/api/chat-images/${msg.imageId}`}
-                  alt="attached"
+                  alt="User uploaded image"
                   className="chat-inline-image"
+                  loading="lazy"
                 />
               )}
               {msg.role === 'assistant' ? <Markdown content={msg.content} /> : msg.content}
@@ -361,7 +363,7 @@ export function CreateFeatureChat({ projectId, onClose, sessionId: initialSessio
             <div className="chat-image-preview-row">
               {pendingThumbnailUrl && (
                 <div className="chat-image-preview">
-                  <img src={pendingThumbnailUrl} alt="pending attachment" />
+                  <img src={pendingThumbnailUrl} alt="Image pending upload" />
                   <button className="chat-image-remove" onClick={clearPendingImage} title="Remove image">&#215;</button>
                 </div>
               )}

@@ -154,7 +154,7 @@ export function ProjectPage() {
                 {features.map(f => (
                   <tr key={f.id} className="task-row">
                     <td>
-                      <Link to={`/features/${f.id}`} style={{ color: '#1a1a1a', textDecoration: 'none' }}>
+                      <Link to={`/features/${f.id}`}>
                         {f.title}
                       </Link>
                     </td>
