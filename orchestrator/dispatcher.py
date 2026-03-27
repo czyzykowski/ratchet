@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from core import events as ev
@@ -461,6 +462,81 @@ async def _recover_orphaned_tasks(store: Store, registry: WorkerRegistry) -> Non
             )
 
 
+async def _reap_orphaned_executions(
+    store: Store,
+    registry: WorkerRegistry,
+    timeout_hours: float = 2.0,
+) -> int:
+    """Find running executions older than timeout with no connected worker and mark them failed.
+
+    Returns count of reaped executions.
+    """
+    from core.execution_manager import _build_execution
+    from core.project_manager import ProjectManager
+    from core.task_manager import TaskManager
+
+    project_manager = ProjectManager(store)
+    task_manager = TaskManager(store)
+
+    active_worker_execs = {
+        w.current_execution_id for w in registry.all_workers() if w.current_execution_id
+    }
+
+    threshold = datetime.now(UTC) - timedelta(hours=timeout_hours)
+    reaped = 0
+
+    for project in await project_manager.list_projects():
+        tasks = await task_manager.list_tasks_by_project(project.id)
+        for task in tasks:
+            if task.status in (ev.DEPLOYED, ev.ABANDONED):
+                continue
+
+            exec_events = await store.get_events(task.id, "task_executions")
+            execution_ids: list[UUID] = []
+            seen: set[UUID] = set()
+            for event in exec_events:
+                eid_str = event.payload.get("execution_id")
+                if eid_str:
+                    eid = UUID(eid_str)
+                    if eid not in seen:
+                        seen.add(eid)
+                        execution_ids.append(eid)
+
+            for execution_id in execution_ids:
+                execution_events = await store.get_events(execution_id, "execution")
+                execution = _build_execution(execution_events)
+                if execution is None or execution.status != "running":
+                    continue
+                if execution.started_at >= threshold:
+                    continue
+                if str(execution_id) in active_worker_execs:
+                    continue
+
+                age = datetime.now(UTC) - execution.started_at
+                logger.warning(
+                    "Reaped orphaned execution %s for task %s (started %s ago)",
+                    execution_id,
+                    task.id,
+                    age,
+                )
+                await store.append_event(
+                    aggregate_id=execution_id,
+                    aggregate_type="execution",
+                    event_type=ev.EXECUTION_FAILED,
+                    payload={
+                        "execution_id": str(execution_id),
+                        "status": "failed",
+                        "failure_reason": "execution timed out (worker disconnected)",
+                    },
+                )
+                reaped += 1
+
+    if reaped > 0:
+        await store.refresh_views()
+
+    return reaped
+
+
 async def dispatch_loop(
     store: Store,
     registry: WorkerRegistry,
@@ -479,13 +555,24 @@ async def dispatch_loop(
     except Exception:
         logger.warning("Orphan recovery failed", exc_info=True)
 
+    # Startup: clean up any executions left in 'running' status from before restart.
+    # Uses timeout_hours=0 so ALL running executions with no connected worker are reaped.
+    try:
+        count = await _reap_orphaned_executions(store, registry, timeout_hours=0)
+        if count > 0:
+            logger.info("Startup: reaped %d orphaned executions", count)
+    except Exception:
+        logger.warning("Startup execution cleanup failed", exc_info=True)
+
     import time
 
     _COMPILE_INTERVAL = 60  # seconds between HLS compilation runs
     _RECOVERY_INTERVAL = 120  # seconds between orphan recovery runs
+    _REAP_INTERVAL = 300  # seconds between execution reaper runs
     _PR_POLL_INTERVAL = 300  # seconds between PR merge polls
     last_compile = 0.0
     last_recovery = time.monotonic()
+    last_reap = 0.0
     last_pr_poll = 0.0
 
     while True:
@@ -497,6 +584,16 @@ async def dispatch_loop(
                 await _recover_orphaned_tasks(store, registry)
             except Exception:
                 logger.warning("Periodic orphan recovery failed", exc_info=True)
+
+        # Periodic execution reaper — clean up orphaned running executions
+        if now - last_reap >= _REAP_INTERVAL:
+            last_reap = now
+            try:
+                count = await _reap_orphaned_executions(store, registry)
+                if count > 0:
+                    logger.info("Reaped %d orphaned executions", count)
+            except Exception:
+                logger.warning("Execution reaper failed", exc_info=True)
 
         try:
             await asyncio.wait_for(dispatch_pending(store, registry), timeout=120)

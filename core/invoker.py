@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 import time
@@ -90,26 +91,50 @@ def _scan_session_jsonl(worktree_path: str) -> str:
     return "\n".join(texts)
 
 
+# Line-anchored patterns for COMPLETED/BLOCKED markers.
+# Match only when the marker appears at the start of a line (with optional whitespace),
+# NOT as a substring within longer output (e.g., npm install logs).
+_COMPLETED_RE = re.compile(r"^\s*COMPLETED:", re.MULTILINE)
+_BLOCKED_RE = re.compile(r"^\s*BLOCKED:", re.MULTILINE)
+
+
+def has_completed_marker(output: str) -> bool:
+    """Check if output contains a line-anchored COMPLETED: marker."""
+    return _COMPLETED_RE.search(output) is not None
+
+
+def has_blocked_marker(output: str) -> str | None:
+    """Check if output contains a line-anchored BLOCKED: marker.
+
+    Returns the reason text after BLOCKED: if found, None otherwise.
+    """
+    match = _BLOCKED_RE.search(output)
+    if match is None:
+        return None
+    after_blocked = output[match.end():]
+    blank_line_idx = after_blocked.find("\n\n")
+    if blank_line_idx != -1:
+        return after_blocked[:blank_line_idx].strip()
+    return after_blocked.strip()
+
+
 def parse_output(output: str, returncode: int) -> tuple[str, str | None]:
     """Parse Claude Code output to determine invocation outcome.
 
     Returns (status, failure_reason) tuple.
     Status is one of: 'completed', 'failed', 'crashed'
     failure_reason is None for completed, descriptive string otherwise.
+
+    Markers are line-anchored: COMPLETED: or BLOCKED: must appear at the start
+    of a line (with optional leading whitespace) to be recognized. Substring
+    matches within longer output (e.g., npm install logs) are ignored.
     """
-    if "COMPLETED:" in output:
+    if has_completed_marker(output):
         return "completed", None
 
-    if "BLOCKED:" in output:
-        idx = output.index("BLOCKED:")
-        after_blocked = output[idx + len("BLOCKED:"):]
-        # Extract text up to the next blank line
-        blank_line_idx = after_blocked.find("\n\n")
-        if blank_line_idx != -1:
-            failure_reason = after_blocked[:blank_line_idx].strip()
-        else:
-            failure_reason = after_blocked.strip()
-        return "failed", failure_reason
+    blocked_reason = has_blocked_marker(output)
+    if blocked_reason is not None:
+        return "failed", blocked_reason
 
     if returncode != 0:
         lines = output.splitlines()

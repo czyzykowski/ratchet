@@ -439,12 +439,14 @@ class PipelineSequencer:
                 created_at=now,
             )
             self._store.save_trace(trace)
+            from core.invoker import has_blocked_marker, has_completed_marker
+
             is_blocked = (
-                "BLOCKED" in stdout
+                has_blocked_marker(stdout) is not None
                 or claude_resp.status == "blocked"
                 or (claude_resp.returncode is not None and claude_resp.returncode != 0)
             )
-            is_completed = "COMPLETED" in stdout and not is_blocked
+            is_completed = has_completed_marker(stdout) and not is_blocked
 
             # Step 10: GetDiff and apply to orchestrator's local repo
             get_diff_req = GetDiffRequest(
@@ -609,12 +611,14 @@ class PipelineSequencer:
             assert isinstance(claude_resp, RunClaudeResponse)
 
             stdout = claude_resp.stdout or ""
+            from core.invoker import has_blocked_marker, has_completed_marker
+
             is_blocked = (
-                "BLOCKED" in stdout
+                has_blocked_marker(stdout) is not None
                 or claude_resp.status == "blocked"
                 or (claude_resp.returncode is not None and claude_resp.returncode != 0)
             )
-            is_completed = "COMPLETED" in stdout and not is_blocked
+            is_completed = has_completed_marker(stdout) and not is_blocked
 
             await self._try_remove_worktree(channel, project_id, execution_id)
 
@@ -855,6 +859,33 @@ class PipelineSequencer:
             combined_output = "\n\n".join(
                 f"Step '{name}':\n{output}" for name, output in failed_steps
             )
+
+            # Classify failure before deciding whether to attempt fixes
+            from orchestrator.failure_classifier import classify_qa_failure
+
+            failure_category = classify_qa_failure(combined_output)
+            if failure_category == "infra":
+                logger.info(
+                    "QA failure classified as infrastructure for task=%s, skipping fix attempts",
+                    task_id,
+                )
+                infra_reason = f"[INFRA] {combined_output}"
+                await self._try_remove_worktree(channel, project_id, execution_id)
+                await self._record_execution_fail(execution_id, infra_reason)
+                await self._state_machine.transition(
+                    task_id,
+                    ev.BLOCKED,
+                    extra_payload={
+                        "failure_reason": infra_reason,
+                        "qa_fix_attempts": qa_fix_attempts,
+                    },
+                )
+                return PipelineResult(
+                    success=False,
+                    task_id=task_id,
+                    execution_id=execution_id,
+                    failure_reason=infra_reason,
+                )
 
             if qa_fix_attempts >= qa_config.max_fix_attempts:
                 # Max retries exhausted — block

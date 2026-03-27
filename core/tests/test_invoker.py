@@ -16,6 +16,8 @@ from core.invoker import (
     InvocationResult,
     _watchdog_loop,
     get_traces_dir,
+    has_blocked_marker,
+    has_completed_marker,
     parse_output,
 )
 from core.store import InMemoryStore
@@ -100,6 +102,63 @@ class TestParseOutput:
         status, reason = parse_output("", 1)
         assert status == "crashed"
         assert "code 1" in reason
+
+
+# ---------------------------------------------------------------------------
+# Line-anchored marker detection
+# ---------------------------------------------------------------------------
+
+
+class TestMarkerDetection:
+    def test_npm_install_blocked_substring_does_not_trigger(self):
+        """npm install output containing 'BLOCKED' as substring must NOT match."""
+        output = (
+            "npm warn deprecated BLOCKED_BY_POLICY@1.0.0: use newer version\n"
+            "npm info lifecycle BLOCKED_RESOLVE~install: BLOCKED_RESOLVE@1.0.0\n"
+            "added 142 packages in 3s\n"
+        )
+        assert has_blocked_marker(output) is None
+        status, reason = parse_output(output, 0)
+        assert status == "failed"
+        assert reason == "no completion marker found in output"
+
+    def test_completed_on_own_line(self):
+        """COMPLETED: on its own line must trigger completed detection."""
+        output = "some setup output\nCOMPLETED: all tasks done\nfinal output"
+        assert has_completed_marker(output) is True
+        status, reason = parse_output(output, 0)
+        assert status == "completed"
+        assert reason is None
+
+    def test_blocked_on_own_line(self):
+        """BLOCKED: on its own line with reason must trigger blocked detection."""
+        output = "setup done\nBLOCKED: missing database credentials\n\nmore text"
+        reason = has_blocked_marker(output)
+        assert reason is not None
+        assert "missing database credentials" in reason
+        status, failure = parse_output(output, 0)
+        assert status == "failed"
+        assert "missing database credentials" in failure
+
+    def test_completed_with_leading_whitespace(self):
+        """COMPLETED: with leading whitespace on line should still match."""
+        output = "stuff\n  COMPLETED: done\n"
+        assert has_completed_marker(output) is True
+
+    def test_blocked_with_leading_whitespace(self):
+        """BLOCKED: with leading whitespace on line should still match."""
+        output = "stuff\n  BLOCKED: reason here\n"
+        assert has_blocked_marker(output) is not None
+
+    def test_completed_as_substring_does_not_trigger(self):
+        """COMPLETED: as substring within a longer word should NOT match."""
+        output = "task UNCOMPLETED: some stuff\nother line"
+        assert has_completed_marker(output) is False
+
+    def test_blocked_as_substring_does_not_trigger(self):
+        """BLOCKED: as substring within a longer word should NOT match."""
+        output = "npm UNBLOCKED: resolve\nother line"
+        assert has_blocked_marker(output) is None
 
 
 # ---------------------------------------------------------------------------

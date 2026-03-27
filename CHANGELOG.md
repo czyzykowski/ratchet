@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Execution timeout reaper: periodic cleanup (every 5 min) marks running executions older than 2 hours with no connected worker as failed
+- QA failure classifier (`orchestrator/failure_classifier.py`): classifies failures as `code`, `infra`, or `system`; infra errors skip fix attempts and immediately block with `[INFRA]` prefix
+- Startup execution recovery: on orchestrator restart, all running executions with no connected worker are marked failed
+- Line-anchored marker detection helpers (`has_completed_marker`, `has_blocked_marker`) in `core/invoker.py`
+
+### Changed
+- COMPLETED/BLOCKED marker detection now uses line-anchored regex instead of substring matching, preventing false positives from subprocess output (e.g., npm install logs)
+- Sequencer QA pipeline uses `classify_qa_failure()` before attempting fix loop — infrastructure errors are immediately blocked without wasting retry attempts
+
+### Fixed
+- False BLOCKED detection from subprocess output containing "BLOCKED" as substring
 - CSS design token system: 90+ custom properties in `:root` for colors, shadows, overlays
 - `ErrorBoundary` component wrapping the app to catch React crashes with reload button
 - `:focus-visible` styles for all interactive elements (buttons, task cards, toasts, rows)
