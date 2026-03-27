@@ -6,12 +6,21 @@ Checks:
   2. Orphaned executions — running with no worker heartbeat
   3. Stale in_progress tasks — assigned but not advancing
   4. Dependency chains — blocked tasks holding up others
-  5. Suggested actions for each issue
+  5. Execution waste — how many cycles were spent on infra vs code errors
+  6. Suggested actions for each issue
+
+Actions:
+  --fix-orphans              Mark orphaned running executions as failed
+  --fix-orphans --task-id X  Fix orphans for a specific task only
+  --unblock-infra            Unblock all tasks whose last failure is INFRA-classified
+  --check-false-positives    Scan recent traces for COMPLETED markers on BLOCKED tasks
 
 Usage:
   python scripts/diagnose.py
   python scripts/diagnose.py --task-id <uuid>
-  python scripts/diagnose.py --fix-orphans         # mark orphaned executions as failed
+  python scripts/diagnose.py --fix-orphans
+  python scripts/diagnose.py --unblock-infra
+  python scripts/diagnose.py --check-false-positives
 """
 
 from __future__ import annotations
@@ -20,7 +29,8 @@ import argparse
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone, timedelta
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 
@@ -55,13 +65,17 @@ CODE_PATTERNS = [
 SYSTEM_PATTERNS = [
     ("pipeline crashed", "pipeline_crash", "Pipeline crashed — orchestrator bug or OOM"),
     ("InvalidTransition", "invalid_transition", "State machine transition error — orchestrator bug"),
-    ("BLOCKED", "claude_blocked", "Claude declared BLOCKED — may be false positive from subprocess output"),
+    ("[INFRA]", "infra_classified", "Already classified as infrastructure by QA pipeline"),
     ("non-zero exit", "claude_nonzero", "Claude exited non-zero — check trace for details"),
+    ("BLOCKED", "claude_blocked", "Claude declared BLOCKED — check trace for false positive"),
 ]
 
 
 def classify_failure(reason: str) -> tuple[str, str, str]:
     """Returns (category, code, suggestion)."""
+    # Check for [INFRA] prefix first — already classified by QA pipeline
+    if reason.startswith("[INFRA]"):
+        return "INFRA", "qa_classified", "Already classified as infra by QA pipeline"
     for pattern, code, suggestion in INFRA_PATTERNS:
         if pattern.lower() in reason.lower():
             return "INFRA", code, suggestion
@@ -82,7 +96,73 @@ async def get_connection():
     return await psycopg.AsyncConnection.connect(dsn)
 
 
-async def diagnose_all(fix_orphans: bool = False) -> None:
+async def _refresh_views(conn) -> None:
+    """Refresh all materialized views after data changes."""
+    try:
+        await conn.execute("SELECT refresh_all_views()")
+        await conn.execute("COMMIT")
+    except Exception:
+        await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY current_executions")
+        await conn.execute("COMMIT")
+
+
+async def _fix_orphaned_executions(conn, orphans: list, task_filter: UUID | None = None) -> int:
+    """Mark orphaned executions as failed. Returns count fixed."""
+    to_fix = orphans
+    if task_filter:
+        to_fix = [o for o in orphans if o[1] == task_filter]
+
+    if not to_fix:
+        print("  No orphaned executions to fix.")
+        return 0
+
+    print(f"  Fixing {len(to_fix)} orphaned executions...")
+    for eid, task_id, branch, started, title, pname in to_fix:
+        await conn.execute("""
+            INSERT INTO events (aggregate_id, aggregate_type, event_type, payload)
+            VALUES (%s, 'execution', 'execution.failed', %s)
+        """, (
+            str(eid),
+            '{"status": "failed", "failure_reason": "execution timed out (orphan cleanup)", '
+            '"execution_id": "' + str(eid) + '"}',
+        ))
+    await conn.execute("COMMIT")
+    await _refresh_views(conn)
+    print(f"  Done. {len(to_fix)} executions marked as failed.")
+    return len(to_fix)
+
+
+async def _get_orphaned_executions(conn, task_filter: UUID | None = None) -> list:
+    """Query orphaned running executions."""
+    if task_filter:
+        cur = await conn.execute("""
+            SELECT e.id, e.task_id, e.branch_name, e.started_at, t.title, p.name
+            FROM current_executions e
+            JOIN current_tasks t ON t.id = e.task_id
+            JOIN current_projects p ON p.id = t.project_id
+            WHERE e.status = 'running' AND e.completed_at IS NULL
+              AND e.started_at < now() - interval '2 hours'
+              AND e.task_id = %s
+            ORDER BY e.started_at DESC
+        """, (str(task_filter),))
+    else:
+        cur = await conn.execute("""
+            SELECT e.id, e.task_id, e.branch_name, e.started_at, t.title, p.name
+            FROM current_executions e
+            JOIN current_tasks t ON t.id = e.task_id
+            JOIN current_projects p ON p.id = t.project_id
+            WHERE e.status = 'running' AND e.completed_at IS NULL
+              AND e.started_at < now() - interval '2 hours'
+            ORDER BY e.started_at DESC
+        """)
+    return await cur.fetchall()
+
+
+async def diagnose_all(
+    fix_orphans: bool = False,
+    unblock_infra: bool = False,
+    check_false_positives: bool = False,
+) -> None:
     conn = await get_connection()
 
     print("=" * 70)
@@ -101,6 +181,9 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
     """)
     blocked = await cur.fetchall()
 
+    infra_blocked: list[tuple] = []  # tasks to unblock if --unblock-infra
+    category_counts: Counter[str] = Counter()
+
     print(f"\n── BLOCKED TASKS ({len(blocked)}) ──")
     if not blocked:
         print("  None.")
@@ -116,6 +199,10 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
         row = await cur2.fetchone()
         reason = (row[0] or "no reason") if row else "no reason"
         category, code, suggestion = classify_failure(reason)
+        category_counts[category] += 1
+
+        if category == "INFRA":
+            infra_blocked.append((tid, title, pname, reason))
 
         age = datetime.now(timezone.utc) - updated_at
         age_str = f"{age.days}d" if age.days > 0 else f"{age.seconds // 3600}h"
@@ -136,22 +223,12 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
         print(f"    Action:       scripts/unblock-task.py --task-id {tid}")
 
     # ── 2. Orphaned executions ──────────────────────────────────────
-    cur = await conn.execute("""
-        SELECT e.id, e.task_id, e.branch_name, e.started_at, t.title, p.name
-        FROM current_executions e
-        JOIN current_tasks t ON t.id = e.task_id
-        JOIN current_projects p ON p.id = t.project_id
-        WHERE e.status = 'running' AND e.completed_at IS NULL
-          AND e.started_at < now() - interval '2 hours'
-        ORDER BY e.started_at DESC
-    """)
-    orphans = await cur.fetchall()
+    orphans = await _get_orphaned_executions(conn)
 
     print(f"\n── ORPHANED EXECUTIONS ({len(orphans)}) ──")
     if not orphans:
         print("  None.")
     else:
-        # Group by task
         by_task: dict[str, list] = {}
         for eid, task_id, branch, started, title, pname in orphans:
             key = f"[{pname}] {title}"
@@ -166,19 +243,7 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
                 print(f"    ... and {len(execs) - 5} more")
 
         if fix_orphans:
-            print(f"\n  Fixing {len(orphans)} orphaned executions...")
-            for eid, task_id, branch, started, title, pname in orphans:
-                await conn.execute("""
-                    INSERT INTO events (aggregate_id, aggregate_type, event_type, payload)
-                    VALUES (%s, 'execution', 'execution.completed', %s)
-                """, (
-                    str(eid),
-                    '{"status": "failed", "failure_reason": "execution timed out (orphan cleanup)"}',
-                ))
-            await conn.execute("COMMIT")
-            await conn.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY current_executions")
-            await conn.execute("COMMIT")
-            print(f"  Done. {len(orphans)} executions marked as failed.")
+            await _fix_orphaned_executions(conn, orphans)
         else:
             print(f"\n  Run with --fix-orphans to clean up.")
 
@@ -193,12 +258,12 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
     """)
     dep_tasks = await cur.fetchall()
 
+    held_up_count = 0
     if dep_tasks:
         print(f"\n── DEPENDENCY CHAINS ──")
         for tid, title, status, depends_on, pname in dep_tasks:
             dep_list = depends_on if isinstance(depends_on, list) else []
             if dep_list:
-                # Check if any dep is blocked
                 dep_uuids = [str(d) for d in dep_list]
                 cur2 = await conn.execute("""
                     SELECT id, title, status FROM current_tasks WHERE id = ANY(%s)
@@ -206,6 +271,7 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
                 dep_rows = await cur2.fetchall()
                 blocked_deps = [r for r in dep_rows if r[2] in ('blocked',)]
                 if blocked_deps:
+                    held_up_count += 1
                     print(f"\n  [{pname}] {title} ({status})")
                     print(f"    HELD UP BY:")
                     for did, dtitle, dstatus in blocked_deps:
@@ -229,19 +295,110 @@ async def diagnose_all(fix_orphans: bool = False) -> None:
             age = datetime.now(timezone.utc) - updated
             print(f"  [{pname}] {title}  status={status}  idle {age.days}d {age.seconds//3600}h")
 
+    # ── 5. Execution waste analysis ─────────────────────────────────
+    cur = await conn.execute("""
+        SELECT e.failure_reason, p.name
+        FROM current_executions e
+        JOIN current_tasks t ON t.id = e.task_id
+        JOIN current_projects p ON p.id = t.project_id
+        WHERE e.status = 'failed' AND e.failure_reason IS NOT NULL
+          AND e.started_at > now() - interval '7 days'
+    """)
+    recent_failures = await cur.fetchall()
+
+    if recent_failures:
+        waste: Counter[str] = Counter()
+        for reason, pname in recent_failures:
+            cat, _, _ = classify_failure(reason or "")
+            waste[cat] += 1
+
+        print(f"\n── EXECUTION WASTE (last 7 days) ──")
+        total = sum(waste.values())
+        for cat in ["INFRA", "CODE", "SYSTEM", "UNKNOWN"]:
+            if waste[cat]:
+                pct = waste[cat] * 100 // total
+                print(f"  {cat:8s}  {waste[cat]:3d} executions  ({pct}%)")
+        print(f"  {'TOTAL':8s}  {total:3d} executions")
+
+    # ── 6. False-positive BLOCKED check ─────────────────────────────
+    if check_false_positives:
+        print(f"\n── FALSE-POSITIVE BLOCKED CHECK ──")
+        import re
+        completed_re = re.compile(r"^\s*COMPLETED:", re.MULTILINE)
+
+        cur = await conn.execute("""
+            SELECT t.id, t.title, p.name, e.id as exec_id
+            FROM current_tasks t
+            JOIN current_projects p ON p.id = t.project_id
+            JOIN current_executions e ON e.task_id = t.id
+            WHERE t.status = 'blocked'
+              AND e.failure_reason LIKE '%%BLOCKED%%'
+            ORDER BY e.started_at DESC
+        """)
+        candidates = await cur.fetchall()
+
+        found = 0
+        checked_tasks: set[str] = set()
+        for tid, title, pname, exec_id in candidates:
+            if str(tid) in checked_tasks:
+                continue
+            checked_tasks.add(str(tid))
+
+            cur2 = await conn.execute("""
+                SELECT content FROM execution_traces WHERE execution_id = %s
+            """, (str(exec_id),))
+            trace_row = await cur2.fetchone()
+            if not trace_row or not trace_row[0]:
+                continue
+
+            if completed_re.search(trace_row[0]):
+                found += 1
+                print(f"  [{pname}] {title}")
+                print(f"    Execution {exec_id} has COMPLETED: marker but was marked BLOCKED")
+                print(f"    Action: scripts/unblock-task.py --task-id {tid}")
+
+        if found == 0:
+            print("  No false positives detected.")
+
+    # ── 7. Unblock infra tasks ──────────────────────────────────────
+    if unblock_infra and infra_blocked:
+        print(f"\n── UNBLOCKING {len(infra_blocked)} INFRA-BLOCKED TASKS ──")
+        for tid, title, pname, reason in infra_blocked:
+            await conn.execute("""
+                INSERT INTO events (aggregate_id, aggregate_type, event_type, payload)
+                VALUES (%s, 'task', 'task.status_changed', %s)
+            """, (
+                str(tid),
+                '{"status": "ready_for_implementation", '
+                '"from_status": "blocked", '
+                '"to_status": "ready_for_implementation", '
+                '"reason": "diagnose --unblock-infra"}',
+            ))
+            print(f"  [{pname}] {title} -> ready_for_implementation")
+        await conn.execute("COMMIT")
+        await _refresh_views(conn)
+        print(f"  Done. {len(infra_blocked)} tasks unblocked.")
+    elif unblock_infra:
+        print(f"\n  No INFRA-blocked tasks to unblock.")
+
     # ── Summary ─────────────────────────────────────────────────────
     print(f"\n{'=' * 70}")
     print("SUMMARY")
-    print(f"  Blocked tasks:         {len(blocked)}")
+    print(f"  Blocked tasks:         {len(blocked)}", end="")
+    if category_counts:
+        parts = [f"{v} {k.lower()}" for k, v in category_counts.most_common()]
+        print(f"  ({', '.join(parts)})")
+    else:
+        print()
     print(f"  Orphaned executions:   {len(orphans)}")
-    print(f"  Dependency-held tasks: {sum(1 for _ in dep_tasks if _)}")
+    print(f"  Dependency-held tasks: {held_up_count}")
     print(f"  Stale active tasks:    {len(stale)}")
     print(f"{'=' * 70}")
 
     await conn.close()
 
 
-async def diagnose_task(task_id: UUID) -> None:
+async def diagnose_task(task_id: UUID, fix_orphans: bool = False) -> None:
     conn = await get_connection()
 
     # Task info
@@ -277,6 +434,7 @@ async def diagnose_task(task_id: UUID) -> None:
 
     print(f"\nExecutions: {len(execs)}")
     orphaned = 0
+    waste: Counter[str] = Counter()
     for eid, estatus, branch, reason, started, completed in execs:
         age = datetime.now(timezone.utc) - started
         is_orphan = estatus == "running" and completed is None and age > timedelta(hours=2)
@@ -285,11 +443,43 @@ async def diagnose_task(task_id: UUID) -> None:
         print(f"  {str(eid)[:8]}  {estatus:12s}  {str(branch or '-')[:40]:40s}  {age.days}d ago{marker}")
         if reason:
             category, code, suggestion = classify_failure(reason)
+            waste[category] += 1
             print(f"           [{category}/{code}] {reason[:100].replace(chr(10), ' ')}")
             print(f"           Suggestion: {suggestion}")
 
     if orphaned:
         print(f"\n  {orphaned} orphaned execution(s) detected.")
+        if fix_orphans:
+            task_orphans = await _get_orphaned_executions(conn, task_filter=task_id)
+            await _fix_orphaned_executions(conn, task_orphans, task_filter=task_id)
+
+    # Execution waste for this task
+    if waste:
+        total = sum(waste.values())
+        parts = [f"{v} {k.lower()}" for k, v in waste.most_common()]
+        print(f"\n  Failure breakdown: {', '.join(parts)} ({total} total)")
+
+    # False-positive BLOCKED check — scan traces for COMPLETED marker
+    if status == "blocked":
+        import re
+        completed_re = re.compile(r"^\s*COMPLETED:", re.MULTILINE)
+
+        cur = await conn.execute("""
+            SELECT e.id, et.content
+            FROM current_executions e
+            LEFT JOIN execution_traces et ON et.execution_id = e.id
+            WHERE e.task_id = %s AND e.failure_reason LIKE '%%BLOCKED%%'
+            ORDER BY e.started_at DESC
+            LIMIT 3
+        """, (str(task_id),))
+        trace_rows = await cur.fetchall()
+
+        for exec_id, trace_content in trace_rows:
+            if trace_content and completed_re.search(trace_content):
+                print(f"\n  *** FALSE POSITIVE: execution {exec_id} has COMPLETED: marker in trace")
+                print(f"      but was marked BLOCKED — likely substring false positive")
+                print(f"      Action: scripts/unblock-task.py --task-id {task_id}")
+                break
 
     # Recent events
     cur = await conn.execute("""
@@ -306,6 +496,14 @@ async def diagnose_task(task_id: UUID) -> None:
         pstr = str(payload)[:100].replace("\n", " ")
         print(f"  {occurred.strftime('%m-%d %H:%M')}  {etype:30s}  {pstr}")
 
+    # Suggested actions
+    print(f"\nActions:")
+    if orphaned and not fix_orphans:
+        print(f"  scripts/diagnose.py --task-id {task_id} --fix-orphans")
+    if status == "blocked":
+        print(f"  scripts/unblock-task.py --task-id {task_id}")
+        print(f"  scripts/task-reset.py --task-id {task_id} --reuse-spec")
+
     await conn.close()
 
 
@@ -315,9 +513,17 @@ if __name__ == "__main__":
     parser.add_argument("--task-id", help="Diagnose a specific task (full UUID)")
     parser.add_argument("--fix-orphans", action="store_true",
                         help="Mark orphaned running executions as failed")
+    parser.add_argument("--unblock-infra", action="store_true",
+                        help="Unblock all tasks whose last failure is INFRA-classified")
+    parser.add_argument("--check-false-positives", action="store_true",
+                        help="Scan traces for COMPLETED markers on BLOCKED tasks")
     args = parser.parse_args()
 
     if args.task_id:
-        asyncio.run(diagnose_task(UUID(args.task_id)))
+        asyncio.run(diagnose_task(UUID(args.task_id), fix_orphans=args.fix_orphans))
     else:
-        asyncio.run(diagnose_all(fix_orphans=args.fix_orphans))
+        asyncio.run(diagnose_all(
+            fix_orphans=args.fix_orphans,
+            unblock_infra=args.unblock_infra,
+            check_false_positives=args.check_false_positives,
+        ))

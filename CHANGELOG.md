@@ -15,6 +15,9 @@
 ### Fixed
 - False BLOCKED detection from subprocess output containing "BLOCKED" as substring
 - Sequencer impl/QA test failures: mock `_apply_patch_to_local` to avoid filesystem access, add `get_diff` handler to QA mock, fix task state setup and event assertion
+
+### Changed
+- `scripts/diagnose.py` upgraded to single operational tool: `--fix-orphans` per-task support, `--unblock-infra` bulk unblock, `--check-false-positives` trace scanning, execution waste analysis, per-task failure breakdown, false-positive BLOCKED detection in task deep-dive, proper view refresh after fixes
 - CSS design token system: 90+ custom properties in `:root` for colors, shadows, overlays
 - `ErrorBoundary` component wrapping the app to catch React crashes with reload button
 - `:focus-visible` styles for all interactive elements (buttons, task cards, toasts, rows)
