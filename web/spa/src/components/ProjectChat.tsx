@@ -67,8 +67,19 @@ export function ProjectChat({ projectId }: ProjectChatProps) {
   }, [])
 
   async function initSession() {
-    await createSession()
-    await fetchSessions()
+    // Load existing sessions first; open most recent if available
+    const res = await fetch(`/api/project-chat-sessions?project_id=${projectId}`)
+    if (res.ok) {
+      const data: SessionEntry[] = await res.json()
+      setSessions(data)
+      if (data.length > 0) {
+        await loadSession(data[0].session_id)
+        return
+      }
+    }
+    // No existing sessions — start with empty state (user can click "+ New Chat")
+    setSessionId(null)
+    setMessages([])
   }
 
   async function fetchSessions() {
@@ -178,8 +189,19 @@ export function ProjectChat({ projectId }: ProjectChatProps) {
   }
 
   async function sendMessage(userInput: string, sid?: string) {
-    const activeSessionId = sid ?? sessionId
-    if (!activeSessionId) return
+    let activeSessionId = sid ?? sessionId
+    // Lazily create session on first message
+    if (!activeSessionId) {
+      const res = await fetch('/api/project-chat-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId }),
+      })
+      const data = await res.json()
+      activeSessionId = data.session_id as string
+      setSessionId(activeSessionId)
+      fetchSessions()
+    }
 
     const sentImageId = pendingImageId
     const sentThumbnailUrl = pendingThumbnailUrl
