@@ -14,6 +14,7 @@
 
 ### Fixed
 - False BLOCKED detection from subprocess output containing "BLOCKED" as substring
+- Sequencer impl/QA test failures: mock `_apply_patch_to_local` to avoid filesystem access, add `get_diff` handler to QA mock, fix task state setup and event assertion
 - CSS design token system: 90+ custom properties in `:root` for colors, shadows, overlays
 - `ErrorBoundary` component wrapping the app to catch React crashes with reload button
 - `:focus-visible` styles for all interactive elements (buttons, task cards, toasts, rows)

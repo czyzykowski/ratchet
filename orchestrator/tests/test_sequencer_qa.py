@@ -12,6 +12,7 @@ from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
 from core.remote_protocol import (
     CreateWorktreeResponse,
+    GetDiffResponse,
     GetProjectStatusResponse,
     ReadFileResponse,
     RemoveWorktreeResponse,
@@ -146,13 +147,20 @@ def _make_handler(*, pass_qa: bool = True, ratchet_yaml: str = _RATCHET_YAML):
                 stdout="ok" if pass_qa else "FAILED",
                 stderr="",
             )
+        if t == "get_diff":
+            return GetDiffResponse(
+                type="get_diff_response",
+                request_id=req.request_id,
+                success=True,
+                patch="diff...",
+            )
         if t == "run_claude":
             return RunClaudeResponse(
                 type="run_claude_response",
                 request_id=req.request_id,
                 success=True,
                 status="completed",
-                stdout="COMPLETED",
+                stdout="QA_PASSED: all checks pass",
                 returncode=0,
             )
         if t == "remove_worktree":

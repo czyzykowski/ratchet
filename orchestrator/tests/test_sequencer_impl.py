@@ -72,6 +72,7 @@ async def _seed_task_with_spec(
     sm = TaskStateMachine(store)
     await sm.transition(task.id, ev.SPEC_QA)
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
+    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
 
     task = await TaskManager(store).get_task(task.id)
     assert task is not None
@@ -187,6 +188,7 @@ async def test_impl_pipeline_happy_path_transitions_to_ready_for_qa() -> None:
     with (
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
         patch("orchestrator.sequencer._get_local_head", return_value="abc123"),
+        patch.object(PipelineSequencer, "_apply_patch_to_local"),
     ):
         result = await sequencer.run_impl_pipeline(channel, task, project, spec)
 
@@ -199,7 +201,11 @@ async def test_impl_pipeline_happy_path_transitions_to_ready_for_qa() -> None:
 
 
 @pytest.mark.asyncio
-async def test_impl_pipeline_records_task_assigned_to_worker_event() -> None:
+async def test_impl_pipeline_records_execution_started_event() -> None:
+    """run_impl_pipeline records EXECUTION_STARTED on the task_executions aggregate.
+
+    Note: TASK_ASSIGNED_TO_WORKER is recorded by the dispatcher, not the pipeline.
+    """
     store = InMemoryStore()
     task, project, spec = await _seed_task_with_spec(store)
 
@@ -209,12 +215,13 @@ async def test_impl_pipeline_records_task_assigned_to_worker_event() -> None:
     with (
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
         patch("orchestrator.sequencer._get_local_head", return_value="abc123"),
+        patch.object(PipelineSequencer, "_apply_patch_to_local"),
     ):
         await sequencer.run_impl_pipeline(channel, task, project, spec)
 
-    task_events = await store.get_events(task.id, "task")
-    event_types = [e.event_type for e in task_events]
-    assert ev.TASK_ASSIGNED_TO_WORKER in event_types
+    exec_events = await store.get_events(task.id, "task_executions")
+    event_types = [e.event_type for e in exec_events]
+    assert ev.EXECUTION_STARTED in event_types
 
 
 @pytest.mark.asyncio
@@ -284,6 +291,7 @@ async def test_impl_pipeline_project_missing_sends_setup_project() -> None:
     with (
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
         patch("orchestrator.sequencer._create_patch_bundle_b64", return_value="bundle64"),
+        patch.object(PipelineSequencer, "_apply_patch_to_local"),
     ):
         result = await sequencer.run_impl_pipeline(channel, task, project, spec)
 
@@ -305,6 +313,7 @@ async def test_impl_pipeline_blocked_output_transitions_to_blocked() -> None:
     with (
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
         patch("orchestrator.sequencer._get_local_head", return_value="abc123"),
+        patch.object(PipelineSequencer, "_apply_patch_to_local"),
     ):
         result = await sequencer.run_impl_pipeline(channel, task, project, spec)
 
