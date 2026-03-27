@@ -107,29 +107,35 @@ class PipelineSequencer:
         """Apply a worker's patch to the orchestrator's local repo.
 
         Creates the execution branch if it doesn't exist, applies the patch
-        via git apply, and commits. This ensures the merge pipeline can find
-        the execution branch locally.
-
-        ``base_commit`` must match the commit the worker used when creating
-        its worktree so the patch context lines match the local tree.
+        via git apply, and commits. Raises RuntimeError on any git failure.
         """
         import os
         import tempfile
 
         # Create branch from the same base the worker used
-        subprocess.run(
+        result = subprocess.run(
             ["git", "branch", branch_name, base_commit],
             cwd=local_path,
-            capture_output=True,  # ignore "already exists" errors
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0 and "already exists" not in result.stderr:
+            raise RuntimeError(
+                f"git branch {branch_name} failed: {result.stderr.strip()}"
+            )
 
         # Create worktree for the branch
         wt_path = os.path.join(local_path, ".worktrees", f"patch-{branch_name.split('/')[-1]}")
-        subprocess.run(
+        result = subprocess.run(
             ["git", "worktree", "add", wt_path, branch_name],
             cwd=local_path,
             capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git worktree add failed: {result.stderr.strip()}"
+            )
 
         try:
             # Write patch to temp file and apply
@@ -151,11 +157,16 @@ class PipelineSequencer:
                         "git apply failed: %s — trying with --3way",
                         result.stderr.strip(),
                     )
-                    subprocess.run(
+                    result = subprocess.run(
                         ["git", "apply", "--3way", patch_file],
                         cwd=wt_path,
                         capture_output=True,
+                        text=True,
                     )
+                    if result.returncode != 0:
+                        raise RuntimeError(
+                            f"git apply failed (both direct and --3way): {result.stderr.strip()}"
+                        )
             finally:
                 os.unlink(patch_file)
 
@@ -165,11 +176,16 @@ class PipelineSequencer:
                 cwd=wt_path,
                 capture_output=True,
             )
-            subprocess.run(
+            result = subprocess.run(
                 ["git", "commit", "--allow-empty", "-m", f"feat: worker execution ({branch_name})"],
                 cwd=wt_path,
                 capture_output=True,
+                text=True,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"git commit failed: {result.stderr.strip()}"
+                )
         finally:
             # Remove worktree
             subprocess.run(

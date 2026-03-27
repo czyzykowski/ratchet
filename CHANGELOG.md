@@ -13,6 +13,7 @@
 - Sequencer QA pipeline uses `classify_qa_failure()` before attempting fix loop — infrastructure errors are immediately blocked without wasting retry attempts
 
 ### Fixed
+- `_apply_patch_to_local` now checks subprocess return codes and raises RuntimeError on git failures instead of silently ignoring them
 - False BLOCKED detection from subprocess output containing "BLOCKED" as substring
 - Sequencer impl/QA test failures: mock `_apply_patch_to_local` to avoid filesystem access, add `get_diff` handler to QA mock, fix task state setup and event assertion
 

@@ -365,3 +365,18 @@ async def test_impl_pipeline_mid_pipeline_failure_removes_worktree_and_blocks() 
 
     status = await TaskStateMachine(store).get_current_status(task.id)
     assert status == ev.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_to_local_raises_on_git_failure() -> None:
+    """_apply_patch_to_local raises RuntimeError when git commands fail."""
+    from unittest.mock import MagicMock
+
+    with patch("orchestrator.sequencer.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=1, stderr="fatal: bad revision", stdout=""
+        )
+        with pytest.raises(RuntimeError, match="git branch.*failed"):
+            PipelineSequencer._apply_patch_to_local(
+                "/fake/path", "execution/test-branch", "diff content", "abc123"
+            )
