@@ -19,7 +19,7 @@ from core import events as ev
 from core import git_transfer
 from core.context_assembler import build_prompt, read_intent
 from core.event_queries import get_qa_fix_attempts as _get_qa_fix_attempts
-from core.merge import squash_merge
+from core.merge import apply_patch_to_develop
 from core.models import ExecutionTrace, Project, Spec, Task
 from core.models_config import WORKER_MODEL
 from core.qa_runner import load_qa_config_from_string
@@ -477,7 +477,10 @@ class PipelineSequencer:
 
             # Guard: completed implementation must produce changes
             if is_completed and not patch_text:
-                failure = "Implementation completed but produced no changes (empty diff from worker)"
+                failure = (
+                    "Implementation completed but produced no changes"
+                    " (empty diff from worker)"
+                )
                 logger.error("task=%s: %s", task_id, failure)
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_fail(execution_id, failure)
@@ -1003,12 +1006,14 @@ class PipelineSequencer:
         task: Task,
         project: Project,
     ) -> PipelineResult:
-        """Drive remote worker through the merge pipeline.
+        """Drive merge pipeline: derive patch → send to worker for QA → apply locally.
 
-        Steps: local squash merge → CreateWorktree on merge-verify branch
-        → SetupEnvironment → run QA steps via RunCommand
-        → if pass: advance branch + push → if fail: discard merge
-        → RemoveWorktree → transition result.
+        Steps:
+        1. Find execution branch from task events
+        2. Derive patch via git diff develop..execution/xxx
+        3. Send to worker: CreateWorktree (with patch) + SetupEnvironment + QA
+        4. If QA passes: apply patch to local develop, run hooks, push
+        5. Transition to DEPLOYED or BLOCKED
         """
         task_id = task.id
         project_id = project.id
@@ -1016,33 +1021,18 @@ class PipelineSequencer:
         target_branch = "develop"
         local_path = project.local_path
 
-        # Find execution branch and spec content from task events
+        # Find execution branch from task events
         execution_events = await self._store.get_events(task_id, "task_executions")
         execution_branch: str | None = None
         spec_id_val: UUID | None = None
         for event in reversed(execution_events):
             if event.event_type == ev.EXECUTION_STARTED:
                 bn = event.payload.get("branch_name")
-                # Skip QA branches — we need the impl execution branch
                 if bn and bn.startswith("execution/"):
                     si = event.payload.get("spec_id")
                     execution_branch = bn
                     spec_id_val = UUID(si) if si else None
                     break
-
-        spec_content = ""
-        if spec_id_val is not None:
-            spec_events = await self._store.get_events(spec_id_val, "spec")
-            for spec_event in spec_events:
-                if spec_event.event_type == ev.SPEC_CREATED:
-                    spec_content = spec_event.payload.get("content", "")
-                    break
-
-        intent_content = ""
-        try:
-            intent_content = read_intent(local_path, project.intent_md)
-        except Exception:
-            logger.warning("Could not read INTENT.md for task=%s", task_id)
 
         if not execution_branch:
             failure = "Merge cannot run: no execution branch found for task"
@@ -1054,22 +1044,19 @@ class PipelineSequencer:
                 success=False, task_id=task_id, failure_reason=failure
             )
 
-        # Step 1: perform local squash merge
-        merge_result = squash_merge(
-            local_path=local_path,
-            execution_branch=execution_branch,
-            target_branch=target_branch,
-            title=task.title,
-            task_id=task_id,
-            store=self._store,
-            invoker=None,
-            spec_content=spec_content,
-            intent_content=intent_content,
+        # Derive patch from local execution branch
+        diff_result = subprocess.run(
+            ["git", "diff", f"{target_branch}...{execution_branch}"],
+            cwd=local_path,
+            capture_output=True,
+            text=True,
         )
-
-        if not merge_result.success:
-            failure = merge_result.failure_reason or "squash merge failed"
-            logger.warning("Merge failed for task=%s: %s", task_id, failure)
+        if diff_result.returncode != 0 or not diff_result.stdout.strip():
+            failure = (
+                f"Merge cannot run: execution branch {execution_branch} "
+                f"not found locally or has no changes"
+            )
+            logger.error("task=%s: %s", task_id, failure)
             await self._store.append_event(
                 aggregate_id=task_id,
                 aggregate_type="task",
@@ -1083,17 +1070,16 @@ class PipelineSequencer:
                 success=False, task_id=task_id, failure_reason=failure
             )
 
-        try:
-            # Step 2: ensure worker has the project
-            await self._ensure_project_on_worker(channel, project)
-            merge_head = merge_result.new_sha or _get_local_head(local_path)
+        patch_text = diff_result.stdout
 
-            # Create QA execution record
+        try:
+            # Step 1: ensure worker has the project
+            await self._ensure_project_on_worker(channel, project)
+
+            # Step 2: create execution record
             qa_branch_name = f"merge-qa/{uuid4()}"
             execution_id = await self._record_execution_start(
-                task_id,
-                spec_id_val or uuid4(),
-                qa_branch_name,
+                task_id, spec_id_val or uuid4(), qa_branch_name,
             )
             await self._store.append_event(
                 aggregate_id=task_id,
@@ -1102,13 +1088,15 @@ class PipelineSequencer:
                 payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
             )
 
-            # Step 3: CreateWorktree on merge-verify branch
+            # Step 3: CreateWorktree on develop HEAD with patch applied
+            head_commit = _get_local_head(local_path)
             create_wt_req = CreateWorktreeRequest(
                 type="create_worktree",
                 request_id=str(uuid4()),
                 project_id=str(project_id),
                 execution_id=str(execution_id),
-                base_commit=merge_head,
+                base_commit=head_commit,
+                patch=patch_text,
             )
             create_wt_resp = await channel.send_command(create_wt_req)
             assert isinstance(create_wt_resp, CreateWorktreeResponse)
@@ -1129,7 +1117,6 @@ class PipelineSequencer:
             if project.ratchet_yaml:
                 qa_config = load_qa_config_from_string(project.ratchet_yaml)
 
-            # Run auto-fix before QA steps
             if qa_config is not None and qa_config.auto_fix:
                 for fix_cmd in qa_config.auto_fix:
                     autofix_req = RunCommandRequest(
@@ -1142,7 +1129,7 @@ class PipelineSequencer:
                     try:
                         await channel.send_command(autofix_req)
                     except PipelineAbort:
-                        pass  # auto-fix failures are non-fatal
+                        pass
 
             failed_steps: list[tuple[str, str]] = []
             if qa_config is not None:
@@ -1166,11 +1153,36 @@ class PipelineSequencer:
                         break
 
             if not failed_steps:
-                # QA passed — RemoveWorktree, run deploy hooks, push, deploy
+                # QA passed — clean up worker, apply locally, push
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_complete(execution_id)
 
-                # Run merge/deploy hooks (e.g. alembic upgrade, SPA rebuild)
+                # Apply patch to local develop
+                merge_result = await asyncio.to_thread(
+                    apply_patch_to_develop,
+                    local_path,
+                    patch_text,
+                    task.title,
+                    task_id,
+                    target_branch,
+                )
+                if not merge_result.success:
+                    failure = merge_result.failure_reason or "local patch apply failed"
+                    logger.error("task=%s local apply failed: %s", task_id, failure)
+                    await self._store.append_event(
+                        aggregate_id=task_id,
+                        aggregate_type="task",
+                        event_type=ev.TASK_AUTO_MERGE_FAILED,
+                        payload={"failure_reason": failure},
+                    )
+                    await self._state_machine.transition(
+                        task_id, ev.BLOCKED, extra_payload={"failure_reason": failure}
+                    )
+                    return PipelineResult(
+                        success=False, task_id=task_id, failure_reason=failure
+                    )
+
+                # Run merge/deploy hooks
                 from core.qa_runner import load_merge_config, run_merge_steps
 
                 merge_config = load_merge_config(local_path)
@@ -1195,49 +1207,50 @@ class PipelineSequencer:
                         },
                     )
 
-                # Push the merged branch to remote
+                # Delete the execution branch (no longer needed)
+                await asyncio.to_thread(
+                    lambda: subprocess.run(
+                        ["git", "branch", "-D", execution_branch],
+                        cwd=local_path,
+                        capture_output=True,
+                    )
+                )
+
+                # Push
                 _push_branch(local_path, target_branch)
                 await self._state_machine.transition(task_id, ev.DEPLOYED)
                 logger.info(
                     "Merge pipeline succeeded for task=%s (sha=%s)",
-                    task_id,
-                    merge_result.new_sha,
+                    task_id, merge_result.new_sha,
                 )
                 return PipelineResult(
                     success=True, task_id=task_id, execution_id=execution_id
                 )
             else:
-                # QA failed — discard merge, block task
+                # QA failed — block task, local develop untouched
                 combined_output = "\n\n".join(
                     f"Step '{name}':\n{output}" for name, output in failed_steps
                 )
                 logger.warning(
                     "Merge QA failed for task=%s: %s", task_id, combined_output[:200]
                 )
-                _reset_branch(local_path, target_branch)
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_fail(execution_id, combined_output)
                 await self._state_machine.transition(
-                    task_id,
-                    ev.BLOCKED,
+                    task_id, ev.BLOCKED,
                     extra_payload={"failure_reason": combined_output},
                 )
                 return PipelineResult(
-                    success=False,
-                    task_id=task_id,
-                    execution_id=execution_id,
+                    success=False, task_id=task_id, execution_id=execution_id,
                     failure_reason=combined_output,
                 )
 
         except PipelineAbort as exc:
             logger.error(
                 "Merge pipeline aborted for task=%s at step=%s: %s",
-                task_id,
-                exc.step_name,
-                exc.error,
+                task_id, exc.step_name, exc.error,
             )
             failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
-            _reset_branch(local_path, target_branch)
             return await self._abort_pipeline(
                 channel, task_id, project_id, execution_id, failure
             )

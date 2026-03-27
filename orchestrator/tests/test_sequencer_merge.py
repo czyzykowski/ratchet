@@ -1,18 +1,18 @@
-"""Tests for PipelineSequencer.run_merge_pipeline()."""
+"""Tests for PipelineSequencer.run_merge_pipeline() — remote worker merge."""
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from core import events as ev
 from core.merge import MergeResult
-from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
 from core.remote_protocol import (
     CreateWorktreeResponse,
     GetProjectStatusResponse,
+    ReadFileResponse,
     RemoveWorktreeResponse,
     RunCommandResponse,
     SetupEnvironmentResponse,
@@ -23,10 +23,6 @@ from core.store import InMemoryStore
 from core.task_manager import TaskManager
 from orchestrator.channel import PipelineAbort
 from orchestrator.sequencer import PipelineSequencer
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 class MockChannel:
@@ -44,7 +40,7 @@ class MockChannel:
         return self._handler(request)
 
 
-async def _seed_merge_task(store: InMemoryStore) -> tuple[Task, Project, Spec]:
+async def _seed_merge_task(store: InMemoryStore):
     """Register project, create task + spec, transition to ready_for_deployment."""
     with patch("core.project_manager.validate_repo"):
         project = await ProjectManager(store).register_project(
@@ -63,7 +59,6 @@ async def _seed_merge_task(store: InMemoryStore) -> tuple[Task, Project, Spec]:
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
     await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
 
-    # Record a fake execution branch
     execution_id = uuid4()
     branch_name = f"execution/{execution_id}"
     payload = {
@@ -86,7 +81,7 @@ async def _seed_merge_task(store: InMemoryStore) -> tuple[Task, Project, Spec]:
 
     task = await TaskManager(store).get_task(task.id)
     assert task is not None
-    return task, project, spec
+    return task, project, spec, branch_name
 
 
 def _make_handler(*, pass_qa: bool = True):
@@ -98,7 +93,7 @@ def _make_handler(*, pass_qa: bool = True):
                 request_id=req.request_id,
                 success=True,
                 exists=True,
-                head_commit="merged-sha",
+                head_commit="dev-sha",
             )
         if t == "create_worktree":
             return CreateWorktreeResponse(
@@ -112,6 +107,13 @@ def _make_handler(*, pass_qa: bool = True):
                 type="setup_environment_response",
                 request_id=req.request_id,
                 success=True,
+            )
+        if t == "read_file":
+            return ReadFileResponse(
+                type="read_file_response",
+                request_id=req.request_id,
+                success=True,
+                content=None,
             )
         if t == "run_command":
             rc = 0 if pass_qa else 1
@@ -136,97 +138,94 @@ def _make_handler(*, pass_qa: bool = True):
 
 _RATCHET_YAML = "qa:\n  steps:\n    test: pytest\n"
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
 
 @pytest.mark.asyncio
 async def test_merge_pipeline_happy_path_transitions_to_deployed() -> None:
     store = InMemoryStore()
-    task, project, spec = await _seed_merge_task(store)
+    task, project, spec, branch = await _seed_merge_task(store)
 
     channel = MockChannel(_make_handler(pass_qa=True))
     sequencer = PipelineSequencer(store)
+    project.ratchet_yaml = _RATCHET_YAML
 
-    fake_merge = MergeResult(success=True, new_sha="merged-sha")
+    fake_apply = MergeResult(success=True, new_sha="merged-sha")
+    fake_diff = MagicMock(returncode=0, stdout="diff --git a/f.txt b/f.txt\n+new\n")
 
     with (
-        patch("orchestrator.sequencer.squash_merge", return_value=fake_merge),
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
-        patch("orchestrator.sequencer._get_local_head", return_value="merged-sha"),
+        patch("orchestrator.sequencer._get_local_head", return_value="dev-sha"),
+        patch("orchestrator.sequencer.subprocess.run", return_value=fake_diff),
+        patch("orchestrator.sequencer.apply_patch_to_develop", return_value=fake_apply),
         patch("orchestrator.sequencer._push_branch"),
-        patch("orchestrator.sequencer._reset_branch"),
     ):
-        # Project has ratchet_yaml with QA steps
-        project.ratchet_yaml = _RATCHET_YAML
         result = await sequencer.run_merge_pipeline(channel, task, project)
 
     assert result.success is True
     status = await TaskStateMachine(store).get_current_status(task.id)
     assert status == ev.DEPLOYED
 
+    # Verify CreateWorktree received the patch
+    create_wt = [r for r in channel.sent_requests if r.type == "create_worktree"]
+    assert len(create_wt) == 1
+    assert create_wt[0].patch is not None
+
 
 @pytest.mark.asyncio
-async def test_merge_pipeline_qa_failure_discards_merge_and_blocks() -> None:
+async def test_merge_pipeline_qa_failure_blocks_without_local_changes() -> None:
     store = InMemoryStore()
-    task, project, spec = await _seed_merge_task(store)
+    task, project, spec, branch = await _seed_merge_task(store)
 
     channel = MockChannel(_make_handler(pass_qa=False))
     sequencer = PipelineSequencer(store)
+    project.ratchet_yaml = _RATCHET_YAML
 
-    fake_merge = MergeResult(success=True, new_sha="merged-sha")
+    fake_diff = MagicMock(returncode=0, stdout="diff content")
 
     with (
-        patch("orchestrator.sequencer.squash_merge", return_value=fake_merge),
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
-        patch("orchestrator.sequencer._get_local_head", return_value="merged-sha"),
+        patch("orchestrator.sequencer._get_local_head", return_value="dev-sha"),
+        patch("orchestrator.sequencer.subprocess.run", return_value=fake_diff),
+        patch("orchestrator.sequencer.apply_patch_to_develop") as apply_mock,
         patch("orchestrator.sequencer._push_branch") as push_mock,
-        patch("orchestrator.sequencer._reset_branch") as reset_mock,
     ):
-        project.ratchet_yaml = _RATCHET_YAML
         result = await sequencer.run_merge_pipeline(channel, task, project)
 
     assert result.success is False
     status = await TaskStateMachine(store).get_current_status(task.id)
     assert status == ev.BLOCKED
-    # Branch should be reset but not pushed
-    reset_mock.assert_called_once()
+    # Local develop should NOT be modified
+    apply_mock.assert_not_called()
     push_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_merge_pipeline_squash_merge_failure_blocks_without_worker_commands() -> None:
+async def test_merge_pipeline_missing_execution_branch_blocks() -> None:
     store = InMemoryStore()
-    task, project, spec = await _seed_merge_task(store)
+    task, project, spec, branch = await _seed_merge_task(store)
 
     channel = MockChannel(_make_handler(pass_qa=True))
     sequencer = PipelineSequencer(store)
 
-    fake_merge = MergeResult(success=False, failure_reason="conflict in foo.py")
+    # git diff returns error (branch doesn't exist)
+    fake_diff = MagicMock(returncode=128, stdout="", stderr="fatal: bad revision")
 
     with (
-        patch("orchestrator.sequencer.squash_merge", return_value=fake_merge),
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
-        patch("orchestrator.sequencer._get_local_head", return_value="merged-sha"),
+        patch("orchestrator.sequencer._get_local_head", return_value="dev-sha"),
+        patch("orchestrator.sequencer.subprocess.run", return_value=fake_diff),
     ):
-        project.ratchet_yaml = _RATCHET_YAML
         result = await sequencer.run_merge_pipeline(channel, task, project)
 
     assert result.success is False
-    assert "conflict in foo.py" in (result.failure_reason or "")
     status = await TaskStateMachine(store).get_current_status(task.id)
     assert status == ev.BLOCKED
-
-    # No worker commands should have been sent (merge failed before CreateWorktree)
-    worker_cmds = [r.type for r in channel.sent_requests]
-    assert "create_worktree" not in worker_cmds
+    assert "execution branch" in (result.failure_reason or "").lower()
 
 
 @pytest.mark.asyncio
-async def test_merge_pipeline_worker_abort_discards_merge_and_blocks() -> None:
+async def test_merge_pipeline_worker_abort_blocks() -> None:
     store = InMemoryStore()
-    task, project, spec = await _seed_merge_task(store)
+    task, project, spec, branch = await _seed_merge_task(store)
 
     def handler(req):
         if req.type == "get_project_status":
@@ -235,7 +234,7 @@ async def test_merge_pipeline_worker_abort_discards_merge_and_blocks() -> None:
                 request_id=req.request_id,
                 success=True,
                 exists=True,
-                head_commit="merged-sha",
+                head_commit="dev-sha",
             )
         if req.type == "create_worktree":
             raise PipelineAbort("create_worktree", "network error", req.request_id)
@@ -250,19 +249,16 @@ async def test_merge_pipeline_worker_abort_discards_merge_and_blocks() -> None:
     channel = MockChannel(handler)
     sequencer = PipelineSequencer(store)
 
-    fake_merge = MergeResult(success=True, new_sha="merged-sha")
+    fake_diff = MagicMock(returncode=0, stdout="diff content")
 
     with (
-        patch("orchestrator.sequencer.squash_merge", return_value=fake_merge),
         patch("orchestrator.sequencer.read_intent", return_value="intent"),
-        patch("orchestrator.sequencer._get_local_head", return_value="merged-sha"),
+        patch("orchestrator.sequencer._get_local_head", return_value="dev-sha"),
+        patch("orchestrator.sequencer.subprocess.run", return_value=fake_diff),
         patch("orchestrator.sequencer._push_branch"),
-        patch("orchestrator.sequencer._reset_branch") as reset_mock,
     ):
-        project.ratchet_yaml = _RATCHET_YAML
         result = await sequencer.run_merge_pipeline(channel, task, project)
 
     assert result.success is False
     status = await TaskStateMachine(store).get_current_status(task.id)
     assert status == ev.BLOCKED
-    reset_mock.assert_called_once()

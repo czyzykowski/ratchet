@@ -536,7 +536,7 @@ git commit -m "feat: add apply_patch_to_develop helper for remote merge pipeline
 
 **Depends on:** Tasks 3 and 4
 
-- [ ] Step 1: Write new merge pipeline tests
+- [x] Step 1: Write new merge pipeline tests
 
 Replace the content of `orchestrator/tests/test_sequencer_merge.py` with tests for the new flow. The key changes:
 - No more `squash_merge` mock — the merge happens on the worker
@@ -811,13 +811,13 @@ async def test_merge_pipeline_worker_abort_blocks() -> None:
     assert status == ev.BLOCKED
 ```
 
-- [ ] Step 2: Run new tests — verify they fail (old merge pipeline)
+- [x] Step 2: Run new tests — verify they fail (old merge pipeline)
 
 ```bash
 .venv/bin/python -m pytest orchestrator/tests/test_sequencer_merge.py -v
 ```
 
-- [ ] Step 3: Rewrite `run_merge_pipeline` in `orchestrator/sequencer.py`
+- [x] Step 3: Rewrite `run_merge_pipeline` in `orchestrator/sequencer.py`
 
 Replace the method body (lines 969-1212). Add `from core.merge import apply_patch_to_develop` at the top of the file alongside the existing `from core.merge import squash_merge` import. The new method:
 
@@ -1081,26 +1081,26 @@ Update the import at the top of `orchestrator/sequencer.py`:
 from core.merge import apply_patch_to_develop, squash_merge  # squash_merge kept for backward compat
 ```
 
-- [ ] Step 4: Run merge tests — verify they pass
+- [x] Step 4: Run merge tests — verify they pass
 
 ```bash
 .venv/bin/python -m pytest orchestrator/tests/test_sequencer_merge.py -v
 ```
 
-- [ ] Step 5: Run full test suite
+- [x] Step 5: Run full test suite
 
 ```bash
 .venv/bin/python -m pytest core/tests/ orchestrator/tests/ web/tests/ worker/tests/ --ignore=orchestrator/tests/test_channel.py -v
 ```
 
-- [ ] Step 6: Type check and lint
+- [x] Step 6: Type check and lint
 
 ```bash
 .venv/bin/python -m mypy core/ orchestrator/ web/
 .venv/bin/python -m ruff check core/ orchestrator/ web/
 ```
 
-- [ ] Step 7: Commit
+- [x] Step 7: Commit
 
 ```bash
 git add orchestrator/sequencer.py orchestrator/tests/test_sequencer_merge.py

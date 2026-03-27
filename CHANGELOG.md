@@ -11,6 +11,7 @@
 - Line-anchored marker detection helpers (`has_completed_marker`, `has_blocked_marker`) in `core/invoker.py`
 
 ### Changed
+- Merge pipeline rewritten to use remote worker for QA verification — derives patch from execution branch, sends to worker via `CreateWorktreeRequest.patch`, runs QA on worker, applies patch locally only after QA passes
 - COMPLETED/BLOCKED marker detection now uses line-anchored regex instead of substring matching, preventing false positives from subprocess output (e.g., npm install logs)
 - Sequencer QA pipeline uses `classify_qa_failure()` before attempting fix loop — infrastructure errors are immediately blocked without wasting retry attempts
 
