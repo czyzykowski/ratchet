@@ -94,11 +94,8 @@ export function ProjectPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
-  const [architectureScope, setArchitectureScope] = useState('')
-
   function handleArchitectureClick() {
-    const url = `/projects/${project_id}/architecture`
-    navigate(architectureScope.trim() ? `${url}?scope=${encodeURIComponent(architectureScope.trim())}` : url)
+    navigate(`/projects/${project_id}/architecture`)
   }
 
   useSSE((event) => {
@@ -126,14 +123,6 @@ export function ProjectPage() {
           <button className="btn btn-secondary" onClick={() => setShowChat(true)}>
             Chat
           </button>
-          <input
-            type="text"
-            value={architectureScope}
-            onChange={e => setArchitectureScope(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleArchitectureClick()}
-            placeholder="scope, e.g. core/ or web/routes/api/ (optional)"
-            style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', border: '1px solid #e0e0e0', borderRadius: '4px', width: '140px' }}
-          />
           <button className="btn btn-secondary" onClick={handleArchitectureClick}>
             Architecture
           </button>

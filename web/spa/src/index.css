@@ -1367,13 +1367,44 @@ body, #root {
   color: inherit;
 }
 
-.architecture-scope-banner {
+.chat-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem;
+  height: 100%;
+}
+
+.chat-suggestions-title {
+  font-size: 1rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.chat-suggestions-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.chat-suggestion-btn {
   padding: 0.5rem 1rem;
+  border: 1px solid #e0dcff;
+  border-radius: 8px;
   background: #f8f7ff;
-  border-bottom: 1px solid #e0dcff;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 0.8rem;
   color: #5b50a0;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.chat-suggestion-btn:hover {
+  background: #ede9fe;
+  border-color: #c4b5fd;
 }
 
 .architecture-action-result {

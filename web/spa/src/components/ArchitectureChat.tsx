@@ -6,7 +6,6 @@ import { useSSE } from '../hooks/useSSE'
 
 interface ArchitectureChatProps {
   projectId: string
-  scope?: string
 }
 
 interface SessionEntry {
@@ -33,7 +32,7 @@ function formatRelativeTime(isoString: string | null | undefined): string {
   return `${Math.floor(diffHour / 24)}d ago`
 }
 
-export function ArchitectureChat({ projectId, scope }: ArchitectureChatProps) {
+export function ArchitectureChat({ projectId }: ArchitectureChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -87,7 +86,6 @@ export function ArchitectureChat({ projectId, scope }: ArchitectureChatProps) {
 
   async function createSession() {
     const body: Record<string, unknown> = { project_id: projectId }
-    if (scope) body.scope = scope
     const res = await fetch('/api/architecture-sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -278,12 +276,6 @@ export function ArchitectureChat({ projectId, scope }: ArchitectureChatProps) {
         </div>
       </div>
 
-      {scope && (
-        <div className="architecture-scope-banner">
-          Analyzing: {scope}
-        </div>
-      )}
-
       <div className="chat-with-sidebar">
         <div className="chat-session-list">
           <button
@@ -311,7 +303,20 @@ export function ArchitectureChat({ projectId, scope }: ArchitectureChatProps) {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <div className="chat-messages">
             {messages.length === 0 && !streaming && !chatError && sessionId && (
-              <div className="chat-thinking">Ask about architecture, diagrams, or codebase structure...</div>
+              <div className="chat-suggestions">
+                <p className="chat-suggestions-title">Explore architecture</p>
+                <div className="chat-suggestions-grid">
+                  {['Analyze core/', 'Analyze web/', 'Analyze worker/', 'Analyze orchestrator/'].map(suggestion => (
+                    <button
+                      key={suggestion}
+                      className="chat-suggestion-btn"
+                      onClick={() => { setInput(suggestion); }}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
             {messages.length === 0 && !streaming && !chatError && !sessionId && (
               <div className="chat-thinking">Select a session or create a new one to start...</div>
