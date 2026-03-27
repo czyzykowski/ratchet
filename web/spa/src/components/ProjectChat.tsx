@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Markdown } from './Markdown'
 import { useSSE } from '../hooks/useSSE'
 
 interface ProjectChatProps {
   projectId: string
-  onClose: () => void
 }
 
 interface SessionEntry {
@@ -32,7 +32,7 @@ function formatRelativeTime(isoString: string | null | undefined): string {
   return `${Math.floor(diffHour / 24)}d ago`
 }
 
-export function ProjectChat({ projectId, onClose }: ProjectChatProps) {
+export function ProjectChat({ projectId }: ProjectChatProps) {
   const queryClient = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
@@ -63,8 +63,13 @@ export function ProjectChat({ projectId, onClose }: ProjectChatProps) {
   }, [messages, currentStream])
 
   useEffect(() => {
-    fetchSessions()
+    initSession()
   }, [])
+
+  async function initSession() {
+    await createSession()
+    await fetchSessions()
+  }
 
   async function fetchSessions() {
     setSessionsLoading(true)
@@ -257,10 +262,14 @@ export function ProjectChat({ projectId, onClose }: ProjectChatProps) {
   }
 
   return (
-    <div className="chat-container">
+    <div className="chat-container" style={{ height: '100%' }}>
       <div className="chat-header">
-        <span className="chat-title">Project Chat</span>
-        <button className="modal-close" onClick={onClose}>&#215;</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <Link to={`/projects/${projectId}`} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.25rem 0.75rem' }}>
+            ← Back
+          </Link>
+          <span className="chat-title">Project Chat</span>
+        </div>
       </div>
 
       <div className="chat-with-sidebar">

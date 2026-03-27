@@ -11,6 +11,7 @@ import { SpecDetailPage } from './pages/SpecDetailPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
 import { WorkersPage } from './pages/WorkersPage'
 import { ArchitectureSessionPage } from './pages/ArchitectureSessionPage'
+import { ProjectChatPage } from './pages/ProjectChatPage'
 import { NotificationsContext, useNotificationsState } from './hooks/useNotifications'
 import { useTitleBadge } from './hooks/useTitleBadge'
 import { Notifications } from './components/Notifications'
@@ -36,6 +37,7 @@ function AppInner() {
         <Route path="/board" element={<BoardPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:project_id" element={<ProjectPage />} />
+        <Route path="/projects/:project_id/chat" element={<ProjectChatPage />} />
         <Route path="/projects/:project_id/architecture" element={<ArchitectureSessionPage />} />
         <Route path="/tasks/:task_id" element={<TaskDetailPage />} />
         <Route path="/specs/:spec_id" element={<SpecDetailPage />} />

@@ -9,7 +9,6 @@ import { NewTaskModal } from '../components/NewTaskModal'
 import { NewFeatureModal } from '../components/NewFeatureModal'
 import { FeatureProgressBar } from '../components/FeatureProgressBar'
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal'
-import { ProjectChat } from '../components/ProjectChat'
 import { STATUS_COLORS } from '../utils/statusColors'
 
 const STATUS_ORDER = [
@@ -92,8 +91,10 @@ export function ProjectPage() {
   const [taskModalOpen, setTaskModalOpen] = useState(false)
   const [featureModalOpen, setFeatureModalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [showChat, setShowChat] = useState(false)
   const [featuresCollapsed, setFeaturesCollapsed] = useState(false)
+  function handleChatClick() {
+    navigate(`/projects/${project_id}/chat`)
+  }
   function handleArchitectureClick() {
     navigate(`/projects/${project_id}/architecture`)
   }
@@ -120,7 +121,13 @@ export function ProjectPage() {
       <header className="page-header">
         <h1>{data.project.name}</h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <button className="btn btn-secondary" onClick={() => setShowChat(true)}>
+          <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
+            Add Task
+          </button>
+          <button className="btn btn-primary" onClick={() => setFeatureModalOpen(true)}>
+            Add Feature
+          </button>
+          <button className="btn btn-secondary" onClick={handleChatClick}>
             Chat
           </button>
           <button className="btn btn-secondary" onClick={handleArchitectureClick}>
@@ -128,12 +135,6 @@ export function ProjectPage() {
           </button>
           <button className="btn btn-secondary" onClick={() => setSettingsOpen(true)}>
             Settings
-          </button>
-          <button className="btn btn-secondary" onClick={() => setFeatureModalOpen(true)}>
-            Add Feature
-          </button>
-          <button className="btn btn-primary" onClick={() => setTaskModalOpen(true)}>
-            Add Task
           </button>
         </div>
       </header>
@@ -238,13 +239,6 @@ export function ProjectPage() {
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
         />
-      )}
-      {showChat && project_id && (
-        <div className="modal-overlay" onClick={() => setShowChat(false)}>
-          <div className="modal-content-chat" onClick={e => e.stopPropagation()}>
-            <ProjectChat projectId={project_id} onClose={() => setShowChat(false)} />
-          </div>
-        </div>
       )}
     </div>
   )
