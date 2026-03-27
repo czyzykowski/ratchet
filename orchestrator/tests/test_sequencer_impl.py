@@ -368,6 +368,37 @@ async def test_impl_pipeline_mid_pipeline_failure_removes_worktree_and_blocks() 
 
 
 @pytest.mark.asyncio
+async def test_impl_pipeline_empty_diff_blocks_task() -> None:
+    """When impl completes but GetDiff returns empty patch, task is blocked."""
+    store = InMemoryStore()
+    task, project, spec = await _seed_task_with_spec(store)
+
+    # Empty patch in GetDiff response
+    responses = _make_channel_responses(claude_stdout="COMPLETED: done")
+    # Replace the GetDiff lambda to return empty patch
+    responses[4] = lambda req: GetDiffResponse(
+        type="get_diff_response",
+        request_id=req.request_id,
+        success=True,
+        patch="",
+    )
+
+    channel = LambdaMockChannel(responses)
+    sequencer = PipelineSequencer(store)
+
+    with (
+        patch("orchestrator.sequencer.read_intent", return_value="intent"),
+        patch("orchestrator.sequencer._get_local_head", return_value="abc123"),
+        patch.object(PipelineSequencer, "_apply_patch_to_local"),
+    ):
+        result = await sequencer.run_impl_pipeline(channel, task, project, spec)
+
+    assert result.success is False
+    status = await TaskStateMachine(store).get_current_status(task.id)
+    assert status == ev.BLOCKED
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_to_local_raises_on_git_failure() -> None:
     """_apply_patch_to_local raises RuntimeError when git commands fail."""
     from unittest.mock import MagicMock

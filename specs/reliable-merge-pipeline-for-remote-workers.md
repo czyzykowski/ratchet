@@ -183,7 +183,7 @@ git commit -m "fix: _apply_patch_to_local checks return codes and raises on fail
 
 **Depends on:** Task 1
 
-- [ ] Step 1: Add test for empty diff blocking the task
+- [x] Step 1: Add test for empty diff blocking the task
 
 In `orchestrator/tests/test_sequencer_impl.py`, add:
 
@@ -224,13 +224,13 @@ Add the missing import at the top of the test file if not present:
 from core.remote_protocol import GetDiffResponse
 ```
 
-- [ ] Step 2: Run test — verify it fails (current code transitions to READY_FOR_QA)
+- [x] Step 2: Run test — verify it fails (current code transitions to READY_FOR_QA)
 
 ```bash
 .venv/bin/python -m pytest orchestrator/tests/test_sequencer_impl.py::test_impl_pipeline_empty_diff_blocks_task -v
 ```
 
-- [ ] Step 3: Add empty-diff guard in `run_impl_pipeline`
+- [x] Step 3: Add empty-diff guard in `run_impl_pipeline`
 
 In `orchestrator/sequencer.py`, after line 460 (`patch_text = diff_resp.patch or ""`), before the `if patch_text:` block, add:
 
@@ -251,19 +251,19 @@ In `orchestrator/sequencer.py`, after line 460 (`patch_text = diff_resp.patch or
                 )
 ```
 
-- [ ] Step 4: Run test — verify it passes
+- [x] Step 4: Run test — verify it passes
 
 ```bash
 .venv/bin/python -m pytest orchestrator/tests/test_sequencer_impl.py::test_impl_pipeline_empty_diff_blocks_task -v
 ```
 
-- [ ] Step 5: Run all impl tests
+- [x] Step 5: Run all impl tests
 
 ```bash
 .venv/bin/python -m pytest orchestrator/tests/test_sequencer_impl.py -v
 ```
 
-- [ ] Step 6: Commit
+- [x] Step 6: Commit
 
 ```bash
 git add orchestrator/sequencer.py orchestrator/tests/test_sequencer_impl.py

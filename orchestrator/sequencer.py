@@ -475,6 +475,21 @@ class PipelineSequencer:
             assert isinstance(diff_resp, GetDiffResponse)
             patch_text = diff_resp.patch or ""
 
+            # Guard: completed implementation must produce changes
+            if is_completed and not patch_text:
+                failure = "Implementation completed but produced no changes (empty diff from worker)"
+                logger.error("task=%s: %s", task_id, failure)
+                await self._try_remove_worktree(channel, project_id, execution_id)
+                await self._record_execution_fail(execution_id, failure)
+                await self._state_machine.transition(
+                    task_id, ev.BLOCKED,
+                    extra_payload={"failure_reason": failure},
+                )
+                return PipelineResult(
+                    success=False, task_id=task_id, execution_id=execution_id,
+                    failure_reason=failure,
+                )
+
             # Apply the worker's changes to the orchestrator's execution branch
             if patch_text:
                 await asyncio.to_thread(
