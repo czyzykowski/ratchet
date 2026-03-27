@@ -74,6 +74,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - Traces written to `$XDG_DATA_HOME/ratchet/traces/` (default `~/.local/share/ratchet/traces/`)
 - `flake.nix` shellHook sets `LD_LIBRARY_PATH` for libpq — required for psycopg to find PostgreSQL client library
 - All scripts must be run with `.venv/bin/python` — system Python does not have dependencies
+- **SPA build**: Source is `web/spa/src/`, built with Vite to `web/spa/dist/`. The `dist/` directory is gitignored — rebuild after source changes with `cd web/spa && nix-shell -p nodejs --run "npm install && npm run build"`. Type-check separately with `npm run typecheck`. The FastAPI app serves `dist/` as the SPA at `/_app`.
 - `python -m web` runs everything: web API on port 8000, `/ws/worker` WebSocket endpoint, orchestrator dispatch loop, and a local worker subprocess that connects back via WebSocket
 - `LocalWorkerManager` spawns `python -m worker --remote ws://localhost:{port}/ws/worker` as a subprocess; controlled via `app.state.local_worker` (aliased as `app.state.worker_service`); configured by `WORKER_ENABLED`, `WORKER_CAPABILITIES`, `WEB_PORT` env vars
 - `WorkerRegistry` (on `app.state.registry`) tracks all connected workers (local subprocess + any remote workers)
@@ -99,6 +100,11 @@ python db/smoke_test.py
 
 # Execute a spec
 scripts/run-spec.sh specs/10-update-claude-md.md
+
+# Build SPA (from web/spa/ — requires node via nix-shell)
+cd web/spa
+nix-shell -p nodejs --run "npm install && npm run build"
+cd ../..
 
 # Run web UI with orchestrator + local worker subprocess (single process)
 .venv/bin/python -m web
