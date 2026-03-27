@@ -1303,6 +1303,70 @@ body, #root {
   font-weight: 500;
 }
 
+/* Bootstrap Page — full-page dedicated onboarding experience */
+.bootstrap-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bootstrap-page .chat-with-sidebar {
+  flex: 1;
+  min-height: 0;
+}
+
+.bootstrap-banner {
+  padding: 0.75rem 1rem;
+  background: #16a34a;
+  color: #ffffff;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  align-self: stretch;
+}
+
+.bootstrap-banner a {
+  color: #bbf7d0;
+  text-decoration: underline;
+}
+
+.bootstrap-banner a:hover {
+  color: #ffffff;
+}
+
+.bootstrap-celebration {
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, #7b6cd8 0%, #9c6dd8 100%);
+  color: #ffffff;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  align-self: stretch;
+  animation: celebration-pulse 1.5s ease-in-out 3;
+}
+
+.bootstrap-celebration a {
+  color: #e9d5ff;
+  text-decoration: underline;
+}
+
+.bootstrap-celebration a:hover {
+  color: #ffffff;
+}
+
+@keyframes celebration-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(123, 108, 216, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(123, 108, 216, 0); }
+}
+
+.bootstrap-session-label {
+  font-size: 0.8rem;
+  color: inherit;
+}
+
 .architecture-scope-banner {
   padding: 0.5rem 1rem;
   background: #f8f7ff;

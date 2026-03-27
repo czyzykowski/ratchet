@@ -1,5 +1,6 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import { BoardPage } from './pages/BoardPage'
+import { BootstrapPage } from './pages/BootstrapPage'
 import { ExecutionDetailPage } from './pages/ExecutionDetailPage'
 import { FeatureDetailPage } from './pages/FeatureDetailPage'
 import { FeaturesPage } from './pages/FeaturesPage'
@@ -26,6 +27,7 @@ function AppInner() {
         <NavLink to="/" end>Focus</NavLink>
         <NavLink to="/board">Board</NavLink>
         <NavLink to="/projects">Projects</NavLink>
+        <NavLink to="/bootstrap">Bootstrap</NavLink>
         <NavLink to="/features">Features</NavLink>
         <NavLink to="/workers">Workers</NavLink>
       </nav>
@@ -41,6 +43,8 @@ function AppInner() {
         <Route path="/features/:feature_id" element={<FeatureDetailPage />} />
         <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
         <Route path="/workers" element={<WorkersPage />} />
+        <Route path="/bootstrap" element={<BootstrapPage />} />
+        <Route path="/bootstrap/:session_id" element={<BootstrapPage />} />
       </Routes>
     </div>
   )
