@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 from uuid import uuid4
 
@@ -199,6 +200,125 @@ class TestHandleCreateWorktree:
             resp = await ex.handle(req)
         assert resp.success is False
         assert "fatal" in (resp.error or "")
+
+
+def test_create_worktree_applies_patch(tmp_path: Path) -> None:
+    """CreateWorktree with patch field applies the patch after creating worktree."""
+    # Set up a git repo with a file
+    repo = tmp_path / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "checkout", "-b", "develop"], cwd=repo, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repo, capture_output=True
+    )
+    (repo / "hello.txt").write_text("original\n")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+
+    # Generate a real patch by modifying the file and capturing git diff
+    (repo / "hello.txt").write_text("modified\n")
+    diff_result = subprocess.run(
+        ["git", "diff"], cwd=repo, capture_output=True, text=True
+    )
+    patch_text = diff_result.stdout
+    # Restore original state
+    subprocess.run(["git", "checkout", "--", "hello.txt"], cwd=repo, capture_output=True)
+
+    executor = CommandExecutor("worker-1", {"proj-1": str(repo)})
+
+    request = CreateWorktreeRequest(
+        type="create_worktree",
+        request_id="req-1",
+        project_id="proj-1",
+        execution_id="exec-1",
+        base_commit="develop",
+        patch=patch_text,
+    )
+    response = executor._handle_create_worktree(request)
+
+    assert response.success, response.error
+    worktree_path = response.worktree_path
+    assert worktree_path is not None
+    assert (Path(worktree_path) / "hello.txt").read_text() == "modified\n"
+
+
+def test_create_worktree_without_patch_leaves_files_unchanged(tmp_path: Path) -> None:
+    """CreateWorktree without patch field does not modify worktree contents."""
+    repo = tmp_path / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "checkout", "-b", "develop"], cwd=repo, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repo, capture_output=True
+    )
+    (repo / "hello.txt").write_text("original\n")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+
+    executor = CommandExecutor("worker-1", {"proj-1": str(repo)})
+
+    request = CreateWorktreeRequest(
+        type="create_worktree",
+        request_id="req-1",
+        project_id="proj-1",
+        execution_id="exec-1",
+        base_commit="develop",
+    )
+    response = executor._handle_create_worktree(request)
+
+    assert response.success, response.error
+    worktree_path = response.worktree_path
+    assert worktree_path is not None
+    assert (Path(worktree_path) / "hello.txt").read_text() == "original\n"
+
+
+def test_create_worktree_returns_error_on_bad_patch(tmp_path: Path) -> None:
+    """CreateWorktree with invalid patch returns error."""
+    repo = tmp_path / "project"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "checkout", "-b", "develop"], cwd=repo, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repo, capture_output=True
+    )
+    (repo / "hello.txt").write_text("original\n")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True)
+
+    executor = CommandExecutor("worker-1", {"proj-1": str(repo)})
+
+    # Use a structurally valid patch that targets content not in the file
+    bad_patch = (
+        "diff --git a/hello.txt b/hello.txt\n"
+        "--- a/hello.txt\n"
+        "+++ b/hello.txt\n"
+        "@@ -1 +1 @@\n"
+        "-content that does not exist\n"
+        "+replaced\n"
+    )
+    request = CreateWorktreeRequest(
+        type="create_worktree",
+        request_id="req-1",
+        project_id="proj-1",
+        execution_id="exec-1",
+        base_commit="develop",
+        patch=bad_patch,
+    )
+    response = executor._handle_create_worktree(request)
+
+    assert response.success is False
+    assert response.error is not None
+    assert "git apply failed" in response.error
 
 
 # ---------------------------------------------------------------------------

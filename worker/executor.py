@@ -264,6 +264,31 @@ class CommandExecutor:
                     error=result.stderr.strip(),
                 )
             self._current_execution_id = request.execution_id
+            # Apply patch if provided (used by merge pipeline)
+            if request.patch:
+                import tempfile
+
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".patch", delete=False
+                ) as f:
+                    f.write(request.patch)
+                    patch_file = f.name
+                try:
+                    apply_result = subprocess.run(
+                        ["git", "apply", "--allow-empty", patch_file],
+                        cwd=worktree_path,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if apply_result.returncode != 0:
+                        return CreateWorktreeResponse(
+                            type="create_worktree_response",
+                            request_id=request.request_id,
+                            success=False,
+                            error=f"git apply failed: {apply_result.stderr.strip()}",
+                        )
+                finally:
+                    os.unlink(patch_file)
             return CreateWorktreeResponse(
                 type="create_worktree_response",
                 request_id=request.request_id,

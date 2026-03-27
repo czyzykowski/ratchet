@@ -281,7 +281,7 @@ git commit -m "fix: block task when implementation completes with empty diff"
 
 **Depends on:** None (independent)
 
-- [ ] Step 1: Add test for CreateWorktree with patch in `worker/tests/test_executor.py`
+- [x] Step 1: Add test for CreateWorktree with patch in `worker/tests/test_executor.py`
 
 Find the existing `test_create_worktree` tests and add a new one:
 
@@ -328,13 +328,13 @@ def test_create_worktree_applies_patch(tmp_path):
 
 Add necessary imports at top of test file: `from pathlib import Path`, `from core.remote_protocol import CreateWorktreeRequest`.
 
-- [ ] Step 2: Run test — verify it fails (field doesn't exist yet)
+- [x] Step 2: Run test — verify it fails (field doesn't exist yet)
 
 ```bash
 .venv/bin/python -m pytest worker/tests/test_executor.py::test_create_worktree_applies_patch -v
 ```
 
-- [ ] Step 3: Add `patch` field to `CreateWorktreeRequest` in `core/remote_protocol.py:170-177`
+- [x] Step 3: Add `patch` field to `CreateWorktreeRequest` in `core/remote_protocol.py:170-177`
 
 ```python
 class CreateWorktreeRequest(BaseModel):
@@ -348,7 +348,7 @@ class CreateWorktreeRequest(BaseModel):
     patch: str | None = None
 ```
 
-- [ ] Step 4: Update worker executor `_handle_create_worktree` in `worker/executor.py:213-279`
+- [x] Step 4: Update worker executor `_handle_create_worktree` in `worker/executor.py:213-279`
 
 After the worktree is successfully created (after line 266 `self._current_execution_id = request.execution_id`), before the success return, add patch application:
 
@@ -379,19 +379,19 @@ After the worktree is successfully created (after line 266 `self._current_execut
                     os.unlink(patch_file)
 ```
 
-- [ ] Step 5: Run test — verify it passes
+- [x] Step 5: Run test — verify it passes
 
 ```bash
 .venv/bin/python -m pytest worker/tests/test_executor.py::test_create_worktree_applies_patch -v
 ```
 
-- [ ] Step 6: Run all executor tests
+- [x] Step 6: Run all executor tests
 
 ```bash
 .venv/bin/python -m pytest worker/tests/test_executor.py -v
 ```
 
-- [ ] Step 7: Commit
+- [x] Step 7: Commit
 
 ```bash
 git add core/remote_protocol.py worker/executor.py worker/tests/test_executor.py

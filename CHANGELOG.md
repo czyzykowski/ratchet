@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Optional `patch` field on `CreateWorktreeRequest` — worker applies patch via `git apply` after worktree creation (used by merge pipeline)
 - Execution timeout reaper: periodic cleanup (every 5 min) marks running executions older than 2 hours with no connected worker as failed
 - QA failure classifier (`orchestrator/failure_classifier.py`): classifies failures as `code`, `infra`, or `system`; infra errors skip fix attempts and immediately block with `[INFRA]` prefix
 - Startup execution recovery: on orchestrator restart, all running executions with no connected worker are marked failed

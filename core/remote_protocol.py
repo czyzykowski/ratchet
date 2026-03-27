@@ -175,6 +175,7 @@ class CreateWorktreeRequest(BaseModel):
     project_id: str
     execution_id: str
     base_commit: str
+    patch: str | None = None
 
 
 class RemoveWorktreeRequest(BaseModel):
