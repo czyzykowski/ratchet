@@ -148,9 +148,14 @@
 .md-prose [data-streamdown="code-block"] .justify-end {
   justify-content: flex-end;
 }
-.md-prose [data-streamdown="code-block"] .gap-2 {
+.md-prose .gap-1 { gap: 0.25rem; }
+.md-prose [data-streamdown="code-block"] .gap-2,
+.md-prose .gap-2 {
   gap: 0.5rem;
 }
+.md-prose .flex-col { flex-direction: column; }
+.md-prose .relative { position: relative; }
+.md-prose .inline-flex { display: inline-flex; }
 .md-prose [data-streamdown="code-block"] .shrink-0 {
   flex-shrink: 0;
 }
@@ -161,13 +166,48 @@
   z-index: 10;
 }
 
-/* Code block header and line numbers */
+/* Code block header — collapse when empty (no language label) */
 .md-prose [data-streamdown="code-block-header"] {
   font-size: 0.75rem;
   color: #9ca3af;
-  height: 2rem;
   display: flex;
   align-items: center;
+}
+.md-prose [data-streamdown="code-block-header"]:empty,
+.md-prose [data-streamdown="code-block-header"]:not(:has(span:not(:empty))) {
+  height: 0;
+  overflow: hidden;
+}
+
+/* Code block toolbar — position absolutely so it takes no space */
+.md-prose [data-streamdown="code-block"] {
+  position: relative;
+}
+.md-prose [data-streamdown="code-block"] > div:nth-child(2) {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  height: auto;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.md-prose [data-streamdown="code-block"]:hover > div:nth-child(2) {
+  opacity: 1;
+}
+.md-prose [data-streamdown="code-block"] > div:nth-child(2) > div {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.125rem 0.25rem;
 }
 
 /* Line number counters — hide for cleaner display */
@@ -189,6 +229,42 @@
   border-radius: 12px;
 }
 
+/* Streamdown table wrapper — toolbar + table body */
+.md-prose > div > div.my-4.flex.flex-col,
+.md-prose div[class*="rounded-lg"][class*="flex-col"] {
+  display: block;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 0.25rem;
+  margin: 0.5rem 0;
+  position: relative;
+}
+
+/* Table toolbar — absolutely positioned, show on hover */
+.md-prose div[class*="rounded-lg"][class*="flex-col"] > div:first-child {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.125rem 0.25rem;
+}
+.md-prose div[class*="rounded-lg"][class*="flex-col"]:hover > div:first-child {
+  opacity: 1;
+}
+.md-prose div[class*="rounded-lg"][class*="flex-col"] > div:first-child .relative {
+  display: inline-flex;
+}
+
 /* Table container from Streamdown */
 .md-prose .border-collapse {
   border-collapse: collapse;
@@ -204,6 +280,9 @@
 }
 .md-prose .whitespace-nowrap {
   white-space: nowrap;
+}
+.md-prose .whitespace-normal {
+  white-space: normal;
 }
 .md-prose .font-semibold {
   font-weight: 600;
@@ -222,18 +301,42 @@
 .md-prose .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
 .md-prose .px-1\.5 { padding-left: 0.375rem; padding-right: 0.375rem; }
 .md-prose .py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.md-prose .p-1 { padding: 0.25rem; }
 .md-prose .p-2 { padding: 0.5rem; }
 .md-prose .p-4 { padding: 1rem; }
+.md-prose .h-8 { height: 2rem; }
+.md-prose .my-4 { margin-top: 1rem; margin-bottom: 1rem; }
+.md-prose .-mt-10 { margin-top: -2.5rem; }
 
 /* Muted color tokens used by Streamdown */
 .md-prose .text-muted-foreground { color: #9ca3af; }
-.md-prose .bg-muted { background: #f6f6f6; }
-.md-prose .bg-muted\/80 { background: rgba(246, 246, 246, 0.8); }
-.md-prose .bg-sidebar { background: #fafafa; }
+.md-prose .bg-muted { background: #f0f0f0; }
+.md-prose .bg-muted\/80 { background: rgba(230, 230, 230, 0.8); }
+.md-prose .bg-sidebar { background: #f8f8f8; }
 .md-prose .bg-background { background: #ffffff; }
 .md-prose .border-border { border-color: #e0e0e0; }
 .md-prose .border { border: 1px solid #e0e0e0; }
 .md-prose .rounded { border-radius: 4px; }
+
+/* Streamdown table — strong visual presence so it doesn't blend with bg */
+.md-prose [data-streamdown="table-wrapper"] {
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+.md-prose [data-streamdown="table-wrapper"] table {
+  margin: 0;
+}
+.md-prose [data-streamdown="table-wrapper"] th {
+  background: #f0eeff;
+  border-bottom: 2px solid #d5d0f0;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+.md-prose [data-streamdown="table-wrapper"] td {
+  border-bottom: 1px solid #e8e8e8;
+}
 
 /* List styling fixes for Streamdown's Tailwind classes */
 .md-prose .list-disc { list-style-type: disc; }
