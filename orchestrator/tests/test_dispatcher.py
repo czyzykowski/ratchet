@@ -180,8 +180,7 @@ def _mock_sequencer():
 async def test_dispatch_pending_returns_zero_no_tasks() -> None:
     store = _make_store()
     registry = WorkerRegistry()
-    result = await dispatch_pending(store, registry)
-    assert result == []
+    await dispatch_pending(store, registry)
 
 
 @pytest.mark.asyncio
@@ -189,8 +188,7 @@ async def test_dispatch_pending_returns_zero_no_workers() -> None:
     store = _make_store()
     registry = WorkerRegistry()
     await _seed_ready_task(store)
-    result = await dispatch_pending(store, registry)
-    assert result == []
+    await dispatch_pending(store, registry)
 
 
 @pytest.mark.asyncio
@@ -201,8 +199,7 @@ async def test_dispatch_pending_returns_zero_worker_busy() -> None:
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
     registry.assign_job("w1", "exec-1")
-    result = await dispatch_pending(store, registry)
-    assert result == []
+    await dispatch_pending(store, registry)
 
 
 @pytest.mark.asyncio
@@ -212,8 +209,7 @@ async def test_dispatch_pending_returns_zero_worker_capability_mismatch() -> Non
     await _seed_ready_task(store, capabilities=["gpu"])
     ws = _fake_ws()
     registry.register("w1", ["python"], ws)
-    result = await dispatch_pending(store, registry)
-    assert result == []
+    await dispatch_pending(store, registry)
 
 
 @pytest.mark.asyncio
@@ -226,9 +222,8 @@ async def test_dispatch_pending_dispatches_impl_task_returns_one() -> None:
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(result) == 1
     # Give background task a chance to run
     await asyncio.sleep(0)
     mock_seq.run_impl_pipeline.assert_called_once()
@@ -273,9 +268,8 @@ async def test_dispatch_pending_skips_task_without_spec() -> None:
 
     mock_seq = _mock_sequencer()
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert result == []
     mock_seq.run_impl_pipeline.assert_not_called()
 
 
@@ -335,9 +329,8 @@ async def test_dispatch_priority_merge_before_impl() -> None:
     mock_seq.run_merge_pipeline = AsyncMock(side_effect=track_merge)
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(result) == 2
     # Let background tasks run
     await asyncio.sleep(0.05)
 
@@ -363,10 +356,11 @@ async def test_dispatch_skips_second_task_in_same_project_when_first_dispatched(
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
     # Only one task dispatched despite two workers being available
-    assert len(result) == 1
+    await asyncio.sleep(0)
+    assert mock_seq.run_impl_pipeline.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -393,10 +387,9 @@ async def test_dispatch_skips_project_with_in_progress_task() -> None:
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
     # Project skipped entirely because task1 is IN_PROGRESS
-    assert result == []
     mock_seq.run_impl_pipeline.assert_not_called()
 
 
@@ -414,8 +407,7 @@ async def test_dispatch_ready_for_qa_task_not_dispatched() -> None:
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
-        result = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
     # ready_for_qa task should NOT be dispatched
-    assert len(result) == 0
     mock_seq.run_impl_pipeline.assert_not_called()

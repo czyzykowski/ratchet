@@ -7,18 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from core import events as ev
 from core.models import Project, Spec, Task
 from core.project_manager import ProjectManager
-from core.remote_protocol import (
-    ExecutionCompletedMessage,
-    ExecutionFailedMessage,
-    ExecutionStartedMessage,
-)
 from core.spec_manager import SpecManager
 from core.state_machine import TaskStateMachine
 from core.store import Store
@@ -29,22 +23,11 @@ from orchestrator.sequencer import PipelineSequencer
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class DispatchResult:
-    """Result of a single dispatch action."""
-
-    action: str  # "impl" | "merge" | "resume" | "idle"
-    task_id: UUID | None = None
-    success: bool = True
-    detail: str = ""
-
-
-async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[DispatchResult]:
+async def dispatch_pending(store: Store, registry: WorkerRegistry) -> None:
     """Discover ready tasks in priority order and dispatch to available workers.
 
     Priority: merge (ready_for_deployment) → impl (ready_for_implementation).
     Enforces one-pipeline-per-project: skips projects that already have an IN_PROGRESS task.
-    Returns count of tasks dispatched in this pass.
     """
     project_manager = ProjectManager(store)
     task_manager = TaskManager(store)
@@ -148,7 +131,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
     resume_candidates.sort(key=lambda c: c[0].created_at)
     impl_candidates.sort(key=lambda c: c[0].created_at)
 
-    results: list[DispatchResult] = []
     dispatched_projects: set[UUID] = set()
     state_machine = TaskStateMachine(store)
 
@@ -164,7 +146,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
         SYNCHRONOUSLY (before creating the async pipeline task) to prevent
         duplicate dispatch on the next dispatch_pending cycle.
         """
-        nonlocal results
         if project_t.id in dispatched_projects:
             return False
         required = list(effective_capabilities(task_t, project_t))
@@ -247,9 +228,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
                     pass
 
         asyncio.create_task(_run_pipeline())
-        results.append(DispatchResult(
-            action=pipeline_type, task_id=task_t.id, success=True
-        ))
         logger.info(
             "Dispatched %s pipeline for task=%s to worker=%s",
             pipeline_type,
@@ -342,7 +320,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
             baseline_passed_projects.add(impl_project.id)
             await _start_pipeline("impl", impl_task, impl_project, impl_spec)
 
-    return results
 
 
 async def _poll_pr_merges(store: Store) -> None:
@@ -619,31 +596,3 @@ async def dispatch_loop(
         else:
             await asyncio.sleep(interval_seconds)
 
-
-class JobDispatcher:
-    """Backward-compatible dispatcher class used by the orchestrator server."""
-
-    def __init__(self, registry: WorkerRegistry) -> None:
-        self._registry = registry
-
-    async def dispatch_loop(self) -> None:
-        try:
-            while True:
-                await asyncio.sleep(2.0)
-                logger.debug("dispatch loop running (no store configured)")
-        except asyncio.CancelledError:
-            raise
-
-    def handle_execution_started(self, worker_id: str, msg: ExecutionStartedMessage) -> None:
-        logger.debug("execution started: worker=%s execution=%s", worker_id, msg.execution_id)
-
-    def handle_execution_completed(self, worker_id: str, msg: ExecutionCompletedMessage) -> None:
-        logger.debug("execution completed: worker=%s execution=%s", worker_id, msg.execution_id)
-
-    def handle_execution_failed(self, worker_id: str, msg: ExecutionFailedMessage) -> None:
-        logger.debug(
-            "execution failed: worker=%s execution=%s reason=%s",
-            worker_id,
-            msg.execution_id,
-            msg.failure_reason,
-        )

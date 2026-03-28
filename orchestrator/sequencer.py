@@ -1205,22 +1205,3 @@ def _push_branch(local_path: str, branch: str) -> None:
         )
     except Exception:
         logger.warning("Failed to push branch %s for path=%s", branch, local_path)
-
-
-def _reset_branch(local_path: str, branch: str) -> None:
-    """Reset branch to origin after a failed merge. Best-effort."""
-    try:
-        subprocess.run(
-            ["git", "fetch", "origin", branch],
-            cwd=local_path,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "branch", "-f", branch, f"origin/{branch}"],
-            cwd=local_path,
-            capture_output=True,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to reset branch %s to origin for path=%s", branch, local_path
-        )

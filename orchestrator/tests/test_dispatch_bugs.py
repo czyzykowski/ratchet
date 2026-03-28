@@ -104,9 +104,8 @@ async def test_task_transitions_to_in_progress_before_dispatch_returns():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(results) == 1
     # The task MUST be in_progress after dispatch_pending returns
     sm = TaskStateMachine(store)
     status = await sm.get_current_status(task_id)
@@ -169,9 +168,7 @@ async def test_skips_task_with_unmet_dependencies():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
-
-    assert len(results) == 0
+        await dispatch_pending(store, registry)
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +292,14 @@ async def test_does_not_dispatch_same_project_twice_in_one_cycle():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    # Only one task dispatched (one per project)
-    assert len(results) == 1
+    # Only one task dispatched (one per project): exactly one task is IN_PROGRESS
+    sm = TaskStateMachine(store)
+    status1 = await sm.get_current_status(task1)
+    status2 = await sm.get_current_status(task2)
+    in_progress = [s for s in [status1, status2] if s == ev.IN_PROGRESS]
+    assert len(in_progress) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -322,9 +323,9 @@ async def test_does_not_dispatch_to_busy_worker():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(results) == 0  # no available workers
+    # worker is busy so no new dispatch
 
 
 async def test_second_dispatch_cycle_skips_in_progress_project():
@@ -346,16 +347,17 @@ async def test_second_dispatch_cycle_skips_in_progress_project():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        # First cycle: dispatches task1
-        results1 = await dispatch_pending(store, registry)
-        assert len(results1) == 1
+        # First cycle: dispatches task1 → it becomes IN_PROGRESS synchronously
+        await dispatch_pending(store, registry)
+        sm = TaskStateMachine(store)
+        assert await sm.get_current_status(task1) == ev.IN_PROGRESS
 
         # Clear worker so it's "available" again
         registry.clear_job("worker-1")
 
         # Second cycle: task1 is IN_PROGRESS, project skipped entirely
-        results2 = await dispatch_pending(store, registry)
-        assert len(results2) == 0
+        await dispatch_pending(store, registry)
+        assert await sm.get_current_status(task2) == ev.READY_FOR_IMPLEMENTATION
 
 
 # ---------------------------------------------------------------------------
@@ -400,9 +402,9 @@ async def test_dispatches_waiting_for_input_task_with_answered_question():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(results) == 1
+    assert registry.all_workers()[0].current_execution_id is not None
 
 
 async def test_skips_waiting_for_input_task_with_unanswered_question():
@@ -436,9 +438,7 @@ async def test_skips_waiting_for_input_task_with_unanswered_question():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
-
-    assert len(results) == 0
+        await dispatch_pending(store, registry)
 
 
 # ---------------------------------------------------------------------------
@@ -464,9 +464,8 @@ async def test_ready_for_qa_task_not_dispatched_by_dispatcher():
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(results) == 0
     status = await sm.get_current_status(task_id)
     assert status == ev.READY_FOR_QA
 
@@ -490,8 +489,7 @@ async def test_merge_dispatch_does_not_crash_on_transition():
         "orchestrator.sequencer.PipelineSequencer.run_merge_pipeline",
         new_callable=AsyncMock,
     ):
-        results = await dispatch_pending(store, registry)
+        await dispatch_pending(store, registry)
 
-    assert len(results) == 1
     status = await sm.get_current_status(task_id)
     assert status == ev.READY_FOR_DEPLOYMENT

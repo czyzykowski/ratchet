@@ -16,9 +16,6 @@ from web.board_builder import (
     load_board,
 )
 
-__all__ = ["get_task_status"]
-
-
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Print the current task board.")
     parser.add_argument(

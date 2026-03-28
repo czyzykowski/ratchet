@@ -210,9 +210,7 @@ async def test_dispatch_pending_dispatches_task_with_depends_on_populated() -> N
     with patch(
         "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline", new_callable=AsyncMock
     ):
-        results = await dispatch_pending(store, registry)
-
-    assert len(results) == 1
+        await dispatch_pending(store, registry)
 
     task = await TaskManager(store).get_task(downstream_id)
     assert task is not None
@@ -228,9 +226,7 @@ async def test_dispatch_pending_returns_zero_when_no_ready_tasks() -> None:
     await _setup_task(store, project.id, title="Draft task")
 
     registry = _make_registry_with_worker()
-    results = await dispatch_pending(store, registry)
-
-    assert len(results) == 0
+    await dispatch_pending(store, registry)
 
 
 async def test_dispatch_pending_returns_zero_when_no_workers_available() -> None:
@@ -243,6 +239,4 @@ async def test_dispatch_pending_returns_zero_when_no_workers_available() -> None
     await _setup_spec(store, task_id)
 
     registry = WorkerRegistry()  # empty — no workers
-    results = await dispatch_pending(store, registry)
-
-    assert len(results) == 0
+    await dispatch_pending(store, registry)

@@ -11,10 +11,3 @@ def effective_capabilities(task: Task, project: Project) -> set[str]:
     if project.required_capabilities:
         caps |= set(project.required_capabilities)
     return caps
-
-
-def capabilities_met(
-    task: Task, project: Project, local_capabilities: list[str]
-) -> bool:
-    """True if local worker capabilities satisfy task + project requirements."""
-    return effective_capabilities(task, project).issubset(set(local_capabilities))
