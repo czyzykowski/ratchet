@@ -30,7 +30,7 @@ import asyncio
 import os
 import sys
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 
@@ -45,7 +45,8 @@ def _require_db_url() -> None:
 INFRA_PATTERNS = [
     ("nix/store", "nix_store_missing", "Nix store path missing — run `nix develop` to repopulate"),
     ("dlopen", "dylib_load_failed", "Dynamic library load failure — rebuild in nix-shell"),
-    ("Library not loaded", "dylib_load_failed", "Dynamic library load failure — rebuild in nix-shell"),
+    ("Library not loaded", "dylib_load_failed",
+     "Dynamic library load failure — rebuild in nix-shell"),
     ("MODULE_NOT_FOUND", "node_module_missing", "Node module missing — run `npm install`"),
     ("ENOSPC", "disk_full", "Disk full"),
     ("permission denied", "permission_denied", "Permission denied — check file ownership"),
@@ -64,7 +65,8 @@ CODE_PATTERNS = [
 
 SYSTEM_PATTERNS = [
     ("pipeline crashed", "pipeline_crash", "Pipeline crashed — orchestrator bug or OOM"),
-    ("InvalidTransition", "invalid_transition", "State machine transition error — orchestrator bug"),
+    ("InvalidTransition", "invalid_transition",
+     "State machine transition error — orchestrator bug"),
     ("[INFRA]", "infra_classified", "Already classified as infrastructure by QA pipeline"),
     ("non-zero exit", "claude_nonzero", "Claude exited non-zero — check trace for details"),
     ("BLOCKED", "claude_blocked", "Claude declared BLOCKED — check trace for false positive"),
@@ -167,7 +169,7 @@ async def diagnose_all(
 
     print("=" * 70)
     print("RATCHET DIAGNOSTIC REPORT")
-    print(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 70)
 
     # ── 1. Blocked tasks ────────────────────────────────────────────
@@ -204,7 +206,7 @@ async def diagnose_all(
         if category == "INFRA":
             infra_blocked.append((tid, title, pname, reason))
 
-        age = datetime.now(timezone.utc) - updated_at
+        age = datetime.now(UTC) - updated_at
         age_str = f"{age.days}d" if age.days > 0 else f"{age.seconds // 3600}h"
 
         # Count executions
@@ -216,7 +218,10 @@ async def diagnose_all(
 
         print(f"\n  [{pname}] {title}")
         print(f"    ID:           {tid}")
-        print(f"    Blocked for:  {age_str}  |  Refinements: {refine_count}  |  Executions: {exec_total} ({exec_orphaned} orphaned)")
+        print(
+            f"    Blocked for:  {age_str}  |  Refinements: {refine_count}"
+            f"  |  Executions: {exec_total} ({exec_orphaned} orphaned)"
+        )
         print(f"    Category:     {category} ({code})")
         print(f"    Reason:       {reason[:150].replace(chr(10), ' ')}")
         print(f"    Suggestion:   {suggestion}")
@@ -237,7 +242,7 @@ async def diagnose_all(
         for task_label, execs in by_task.items():
             print(f"\n  {task_label}")
             for eid, started in execs[:5]:
-                age = datetime.now(timezone.utc) - started
+                age = datetime.now(UTC) - started
                 print(f"    {eid}  started {age.days}d {age.seconds//3600}h ago")
             if len(execs) > 5:
                 print(f"    ... and {len(execs) - 5} more")
@@ -245,7 +250,7 @@ async def diagnose_all(
         if fix_orphans:
             await _fix_orphaned_executions(conn, orphans)
         else:
-            print(f"\n  Run with --fix-orphans to clean up.")
+            print("\n  Run with --fix-orphans to clean up.")
 
     # ── 3. Dependency chains ────────────────────────────────────────
     cur = await conn.execute("""
@@ -260,7 +265,7 @@ async def diagnose_all(
 
     held_up_count = 0
     if dep_tasks:
-        print(f"\n── DEPENDENCY CHAINS ──")
+        print("\n── DEPENDENCY CHAINS ──")
         for tid, title, status, depends_on, pname in dep_tasks:
             dep_list = depends_on if isinstance(depends_on, list) else []
             if dep_list:
@@ -273,7 +278,7 @@ async def diagnose_all(
                 if blocked_deps:
                     held_up_count += 1
                     print(f"\n  [{pname}] {title} ({status})")
-                    print(f"    HELD UP BY:")
+                    print("    HELD UP BY:")
                     for did, dtitle, dstatus in blocked_deps:
                         print(f"      [{dstatus}] {dtitle}")
 
@@ -292,7 +297,7 @@ async def diagnose_all(
     if stale:
         print(f"\n── STALE ACTIVE TASKS ({len(stale)}) ──")
         for tid, title, status, pname, updated in stale:
-            age = datetime.now(timezone.utc) - updated
+            age = datetime.now(UTC) - updated
             print(f"  [{pname}] {title}  status={status}  idle {age.days}d {age.seconds//3600}h")
 
     # ── 5. Execution waste analysis ─────────────────────────────────
@@ -312,7 +317,7 @@ async def diagnose_all(
             cat, _, _ = classify_failure(reason or "")
             waste[cat] += 1
 
-        print(f"\n── EXECUTION WASTE (last 7 days) ──")
+        print("\n── EXECUTION WASTE (last 7 days) ──")
         total = sum(waste.values())
         for cat in ["INFRA", "CODE", "SYSTEM", "UNKNOWN"]:
             if waste[cat]:
@@ -322,7 +327,7 @@ async def diagnose_all(
 
     # ── 6. False-positive BLOCKED check ─────────────────────────────
     if check_false_positives:
-        print(f"\n── FALSE-POSITIVE BLOCKED CHECK ──")
+        print("\n── FALSE-POSITIVE BLOCKED CHECK ──")
         import re
         completed_re = re.compile(r"^\s*COMPLETED:", re.MULTILINE)
 
@@ -379,7 +384,7 @@ async def diagnose_all(
         await _refresh_views(conn)
         print(f"  Done. {len(infra_blocked)} tasks unblocked.")
     elif unblock_infra:
-        print(f"\n  No INFRA-blocked tasks to unblock.")
+        print("\n  No INFRA-blocked tasks to unblock.")
 
     # ── Summary ─────────────────────────────────────────────────────
     print(f"\n{'=' * 70}")
@@ -436,11 +441,12 @@ async def diagnose_task(task_id: UUID, fix_orphans: bool = False) -> None:
     orphaned = 0
     waste: Counter[str] = Counter()
     for eid, estatus, branch, reason, started, completed in execs:
-        age = datetime.now(timezone.utc) - started
+        age = datetime.now(UTC) - started
         is_orphan = estatus == "running" and completed is None and age > timedelta(hours=2)
         orphaned += int(is_orphan)
         marker = " *** ORPHAN" if is_orphan else ""
-        print(f"  {str(eid)[:8]}  {estatus:12s}  {str(branch or '-')[:40]:40s}  {age.days}d ago{marker}")
+        br = str(branch or '-')[:40]
+        print(f"  {str(eid)[:8]}  {estatus:12s}  {br:40s}  {age.days}d ago{marker}")
         if reason:
             category, code, suggestion = classify_failure(reason)
             waste[category] += 1
@@ -477,7 +483,7 @@ async def diagnose_task(task_id: UUID, fix_orphans: bool = False) -> None:
         for exec_id, trace_content in trace_rows:
             if trace_content and completed_re.search(trace_content):
                 print(f"\n  *** FALSE POSITIVE: execution {exec_id} has COMPLETED: marker in trace")
-                print(f"      but was marked BLOCKED — likely substring false positive")
+                print("      but was marked BLOCKED — likely substring false positive")
                 print(f"      Action: scripts/unblock-task.py --task-id {task_id}")
                 break
 
@@ -491,13 +497,13 @@ async def diagnose_task(task_id: UUID, fix_orphans: bool = False) -> None:
     """, (str(task_id),))
     events = await cur.fetchall()
 
-    print(f"\nRecent events:")
+    print("\nRecent events:")
     for etype, payload, occurred in events:
         pstr = str(payload)[:100].replace("\n", " ")
         print(f"  {occurred.strftime('%m-%d %H:%M')}  {etype:30s}  {pstr}")
 
     # Suggested actions
-    print(f"\nActions:")
+    print("\nActions:")
     if orphaned and not fix_orphans:
         print(f"  scripts/diagnose.py --task-id {task_id} --fix-orphans")
     if status == "blocked":

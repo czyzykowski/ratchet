@@ -488,13 +488,8 @@ class PipelineSequencer:
             _has_completed = has_completed_marker(stdout)
             _has_blocked = has_blocked_marker(stdout) is not None
             is_completed = _has_completed and not _has_blocked
-            is_blocked = (
-                _has_blocked
-                or claude_resp.status == "blocked"
-                or (not _has_completed
-                    and claude_resp.returncode is not None
-                    and claude_resp.returncode != 0)
-            )
+            # is_blocked is implicit: not is_completed covers all blocked cases
+            # (BLOCKED marker, status=="blocked", or non-zero exit without COMPLETED)
 
             if not is_completed:
                 failure = f"Claude returned BLOCKED or non-zero exit: {stdout[:500]}"
@@ -913,13 +908,8 @@ class PipelineSequencer:
             _has_completed = has_completed_marker(stdout)
             _has_blocked = has_blocked_marker(stdout) is not None
             is_completed = _has_completed and not _has_blocked
-            is_blocked = (
-                _has_blocked
-                or claude_resp.status == "blocked"
-                or (not _has_completed
-                    and claude_resp.returncode is not None
-                    and claude_resp.returncode != 0)
-            )
+            # is_blocked is implicit: not is_completed covers all blocked cases
+            # (BLOCKED marker, status=="blocked", or non-zero exit without COMPLETED)
 
             await self._try_remove_worktree(channel, project_id, execution_id)
 
