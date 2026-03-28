@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Pluggable sandbox protocol for isolated Claude Code execution with NullSandbox passthrough default
 - `worker/__main__.py` accepts `--sandbox {auto,none,<name>}` CLI argument (default `auto`)
 - `CommandExecutor` resolves sandbox backend at construction time and logs selected backend
 - `CommandExecutor._handle_run_claude()` passes `sandbox` and `sandbox_config` to `ClaudeRequest`; catches sandbox start failures as non-zero exit responses

@@ -15,6 +15,7 @@ core/
   state_machine.py — InvalidTransitionError, TaskStateMachine
   spec_manager.py  — SpecManager
   event_queries.py — has_pending_baseline_qa_failure (core event query helpers)
+  sandbox.py       — Sandbox protocol, NullSandbox, SandboxRegistry, SandboxConfig, build_sandbox_config
   db.py            — async connection pool, reads DATABASE_URL from environment
   execution_manager.py — ExecutionManager, prepare/cleanup worktree environment
   context_assembler.py — ContextAssembler, ExecutionContext, assembles Claude Code prompt
@@ -119,6 +120,10 @@ cd ../..
 
 # Connect a remote worker to an orchestrator
 .venv/bin/python -m worker --remote ws://localhost:8000/ws/worker --capabilities default
+
+# Connect a remote worker with sandbox configuration
+# --sandbox accepts: auto (default), none, or a registered backend name
+.venv/bin/python -m worker --remote ws://localhost:8000/ws/worker --capabilities default --sandbox auto
 
 # Run operational scripts (must use .venv/bin/python)
 .venv/bin/python scripts/board.py
