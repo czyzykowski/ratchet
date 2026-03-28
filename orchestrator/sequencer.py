@@ -124,8 +124,20 @@ class PipelineSequencer:
                 f"git branch {branch_name} failed: {result.stderr.strip()}"
             )
 
-        # Create worktree for the branch
+        # Create worktree for the branch — prune stale worktrees first
+        # to avoid "already used by worktree" errors from leftover state
+        subprocess.run(
+            ["git", "worktree", "prune"],
+            cwd=local_path,
+            capture_output=True,
+        )
         wt_path = os.path.join(local_path, ".worktrees", f"patch-{branch_name.split('/')[-1]}")
+        # Remove any existing worktree at this path
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", wt_path],
+            cwd=local_path,
+            capture_output=True,
+        )
         result = subprocess.run(
             ["git", "worktree", "add", wt_path, branch_name],
             cwd=local_path,
