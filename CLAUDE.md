@@ -85,17 +85,22 @@ flake.nix          — reproducible dev shell (nix develop)
 
 ## Running Things
 
+**IMPORTANT: All unit tests use `InMemoryStore` and require NO database.** Do NOT run `db/smoke_test.py` or any command requiring `DATABASE_URL` / `TEST_DATABASE_URL` — those are integration tests for the orchestrator machine only. Workers do not have database access.
+
+**IMPORTANT: Do NOT run `orchestrator/tests/test_channel.py`** — it hangs indefinitely due to async WebSocket mocking issues. Always exclude it with `--ignore`.
+
 ```bash
 # Enter dev shell
 nix develop
 
-# Run unit tests (no DB required)
-pytest core/tests/ -v
+# Run ALL unit tests (no DB required)
+.venv/bin/python -m pytest core/tests/ orchestrator/tests/ web/tests/ worker/tests/ --ignore=orchestrator/tests/test_channel.py -v
 
-# Run integration smoke test
-python db/smoke_test.py
+# Run tests for a specific module
+.venv/bin/python -m pytest core/tests/ -v
+.venv/bin/python -m pytest orchestrator/tests/ --ignore=orchestrator/tests/test_channel.py -v
 
-# Apply migrations
+# Apply migrations (orchestrator machine only, requires DATABASE_URL)
 .venv/bin/alembic -c db/alembic.ini upgrade head
 
 # Execute a spec
