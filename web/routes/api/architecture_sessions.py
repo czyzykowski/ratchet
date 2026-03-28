@@ -96,6 +96,11 @@ def _build_architecture_system_prompt(
         "```\n\n"
         "The `dependencies` field is a list of 1-based order indices"
         " referencing other specs in the same feature.\n\n"
+        "To add a spec to an existing task (advances it to ready_for_implementation):\n\n"
+        "```action\n"
+        '{"action": "add_spec", "task_id": "<uuid>",'
+        ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
+        "```\n\n"
         "Rules:\n"
         "- Explain the architectural problem before proposing a task\n"
         "- Only propose tasks for concrete, actionable improvements\n"
