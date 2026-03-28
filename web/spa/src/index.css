@@ -730,6 +730,28 @@ body, #root {
   border-color: var(--color-danger-border);
 }
 
+/* Live session terminal */
+.session-terminal {
+  background: #0d0d0d;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+.session-terminal-placeholder {
+  color: #666;
+  padding: 0.5rem;
+}
+
+.session-terminal-line {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #1a1a1a;
+}
+
 .modal-actions {
   margin-top: 1.25rem;
   padding-top: 1rem;

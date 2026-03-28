@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import { Markdown } from '../components/Markdown'
 import { capabilityColor } from '../utils/capabilityColor'
+import { useSSE } from '../hooks/useSSE'
 
 interface TaskDetail {
   id: string
@@ -65,6 +66,91 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString()
 }
 
+interface SessionProgressData {
+  messages: Record<string, unknown>[]
+  total_messages: number
+  file_size_bytes: number
+}
+
+function SessionProgressPanel({ executionId, enabled }: { executionId: string; enabled: boolean }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['session-progress', executionId],
+    queryFn: async (): Promise<SessionProgressData> => {
+      const res = await fetch(`/api/executions/${executionId}/session-progress`)
+      if (!res.ok) throw new Error(`${res.status}`)
+      return res.json()
+    },
+    enabled,
+    refetchInterval: enabled ? 8000 : false,
+    retry: false,
+  })
+
+  if (!enabled) return null
+
+  const is404 = error instanceof Error && error.message === '404'
+
+  return (
+    <div className="modal-field">
+      <div className="modal-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        Live Session
+        {(isLoading || is404) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />}
+        {data && (
+          <span className="text-secondary" style={{ fontSize: '0.75rem', fontWeight: 'normal' }}>
+            {data.total_messages} messages · {data.file_size_bytes} bytes
+          </span>
+        )}
+      </div>
+      <div className="session-terminal">
+        {is404 && (
+          <div className="session-terminal-placeholder">Waiting for execution to start...</div>
+        )}
+        {!is404 && isLoading && !data && (
+          <div className="session-terminal-placeholder">Connecting to session...</div>
+        )}
+        {data && data.messages.length === 0 && (
+          <div className="session-terminal-placeholder">No messages yet...</div>
+        )}
+        {data && data.messages.map((msg, i) => {
+          const msgType = msg.type as string
+          const content = msg.content
+          let preview = ''
+          let label = msgType
+          let labelColor = '#a0a0a0'
+
+          if (msgType === 'assistant' && typeof content === 'string') {
+            preview = content.slice(0, 200)
+            labelColor = '#7eb8f7'
+          } else if (msgType === 'assistant' && Array.isArray(content)) {
+            const text = content.find((b: Record<string, unknown>) => b.type === 'text')
+            preview = typeof text?.text === 'string' ? text.text.slice(0, 200) : ''
+            labelColor = '#7eb8f7'
+          } else if (msgType === 'tool_use') {
+            const toolName = msg.name as string | undefined
+            label = `tool: ${toolName ?? '?'}`
+            const input = msg.input as Record<string, unknown> | undefined
+            const filePath = input?.file_path ?? input?.path ?? input?.command
+            preview = typeof filePath === 'string' ? filePath.slice(0, 100) : ''
+            labelColor = '#f9c74f'
+          } else if (msgType === 'tool_result') {
+            const isError = msg.is_error
+            label = isError ? 'tool_result: error' : 'tool_result: ok'
+            labelColor = isError ? '#f44336' : '#4caf50'
+          } else if (typeof content === 'string') {
+            preview = content.slice(0, 200)
+          }
+
+          return (
+            <div key={i} className="session-terminal-line">
+              <span style={{ color: labelColor, marginRight: '0.5rem' }}>[{label}]</span>
+              {preview && <span style={{ color: '#ccc' }}>{preview}</span>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function TaskDetailPage() {
   const { task_id } = useParams<{ task_id: string }>()
   const queryClient = useQueryClient()
@@ -73,6 +159,17 @@ export function TaskDetailPage() {
     queryKey: ['task', task_id],
     queryFn: () => apiFetch<TaskDetailResponse>(`/api/tasks/${task_id}`),
     enabled: !!task_id,
+    refetchInterval: (query) => {
+      const status = query.state.data?.task.status
+      return status === 'in_progress' || status === 'ready_for_qa' || status === 'ready_for_merge'
+        ? 5000 : false
+    },
+  })
+
+  useSSE((event) => {
+    if (event.type === 'task_updated' && task_id) {
+      queryClient.invalidateQueries({ queryKey: ['task', task_id] })
+    }
   })
 
   async function handleReset() {
@@ -246,6 +343,13 @@ export function TaskDetailPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {task.status === 'in_progress' && executions.length > 0 && (
+        <SessionProgressPanel
+          executionId={executions[0].id}
+          enabled={task.status === 'in_progress'}
+        />
       )}
 
       {pr_info && (

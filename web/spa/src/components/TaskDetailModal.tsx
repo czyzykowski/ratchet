@@ -5,6 +5,7 @@ import { CreateSpecChat } from './CreateSpecChat'
 import { Markdown } from './Markdown'
 import { fetchTaskQA, submitAnswer } from '../api/qa'
 import { capabilityColor } from '../utils/capabilityColor'
+import { useSSE } from '../hooks/useSSE'
 
 interface TaskDetailModalProps {
   taskId: string | null
@@ -90,34 +91,27 @@ function SessionProgressPanel({ executionId, enabled }: { executionId: string; e
   if (!enabled) return null
 
   const is404 = error instanceof Error && error.message === '404'
-  if (is404) return null
 
   return (
     <div className="modal-field">
       <div className="modal-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         Live Session
-        {isLoading && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#7b6cd8', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />}
+        {(isLoading || is404) && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />}
         {data && (
-          <span style={{ color: '#a0a0a0', fontSize: '0.75rem', fontWeight: 'normal' }}>
+          <span className="text-secondary" style={{ fontSize: '0.75rem', fontWeight: 'normal' }}>
             {data.total_messages} messages · {data.file_size_bytes} bytes
           </span>
         )}
       </div>
-      <div style={{
-        background: '#0d0d0d',
-        border: '1px solid #2a2a2a',
-        borderRadius: 4,
-        padding: '0.5rem',
-        maxHeight: 300,
-        overflowY: 'auto',
-        fontFamily: 'monospace',
-        fontSize: '0.75rem',
-      }}>
-        {isLoading && !data && (
-          <div style={{ color: '#666', padding: '0.5rem' }}>Waiting for session data...</div>
+      <div className="session-terminal">
+        {is404 && (
+          <div className="session-terminal-placeholder">Waiting for execution to start...</div>
+        )}
+        {!is404 && isLoading && !data && (
+          <div className="session-terminal-placeholder">Connecting to session...</div>
         )}
         {data && data.messages.length === 0 && (
-          <div style={{ color: '#666', padding: '0.5rem' }}>No messages yet...</div>
+          <div className="session-terminal-placeholder">No messages yet...</div>
         )}
         {data && data.messages.map((msg, i) => {
           const msgType = msg.type as string
@@ -149,7 +143,7 @@ function SessionProgressPanel({ executionId, enabled }: { executionId: string; e
           }
 
           return (
-            <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #1a1a1a' }}>
+            <div key={i} className="session-terminal-line">
               <span style={{ color: labelColor, marginRight: '0.5rem' }}>[{label}]</span>
               {preview && <span style={{ color: '#ccc' }}>{preview}</span>}
             </div>
@@ -189,6 +183,18 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
     queryKey: ['task', taskId],
     queryFn: () => fetchTaskDetail(taskId!),
     enabled: taskId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.task.status
+      // Poll every 5s for active tasks so Live Session panel appears
+      return status === 'in_progress' || status === 'ready_for_qa' || status === 'ready_for_merge'
+        ? 5000 : false
+    },
+  })
+
+  useSSE((event) => {
+    if (event.type === 'task_updated' && taskId) {
+      queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+    }
   })
 
   const [showChat, setShowChat] = useState(false)
