@@ -55,6 +55,7 @@ class CommandExecutor:
         self._projects: dict[str, str] = dict(projects)
         self._workspace = workspace
         self._current_execution_id: str | None = None
+        self._base_commit: str | None = None
 
     async def handle(self, request: AnyCommandRequest) -> AnyCommandResponse:
         """Dispatch a command request to the appropriate handler."""
@@ -264,6 +265,7 @@ class CommandExecutor:
                     error=result.stderr.strip(),
                 )
             self._current_execution_id = request.execution_id
+            self._base_commit = base
             # Apply patch if provided (used by merge pipeline)
             if request.patch:
                 import tempfile
@@ -344,7 +346,7 @@ class CommandExecutor:
             worktree_path = self._worktree_path(
                 request.project_id, request.execution_id
             )
-            patch = git_transfer.create_patch(worktree_path)
+            patch = git_transfer.create_patch(worktree_path, self._base_commit)
             return GetDiffResponse(
                 type="get_diff_response",
                 request_id=request.request_id,

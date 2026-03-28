@@ -42,7 +42,27 @@ def extract_bundle(bundle_bytes: bytes, dest_dir: str) -> None:
         Path(tmp_file.name).unlink(missing_ok=True)
 
 
-def create_patch(repo_path: str) -> str:
+def create_patch(repo_path: str, base_commit: str | None = None) -> str:
+    """Create a patch of changes in the worktree.
+
+    If base_commit is provided, diffs committed changes between base and HEAD
+    (captures commits made by Claude). Otherwise falls back to uncommitted
+    changes via ``git diff HEAD``.
+    """
+    if base_commit:
+        # Diff committed changes: base_commit..HEAD
+        result = subprocess.run(
+            ["git", "diff", f"{base_commit}..HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+        patch = result.stdout
+        if patch:
+            return patch
+        # Fall through to uncommitted diff if committed diff is empty
+
     result = subprocess.run(
         ["git", "diff", "HEAD"],
         cwd=repo_path,
