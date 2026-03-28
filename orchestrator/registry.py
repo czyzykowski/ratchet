@@ -55,5 +55,11 @@ class WorkerRegistry:
     def get_worker(self, worker_id: str) -> WorkerConnection | None:
         return self._workers.get(worker_id)
 
+    def get_worker_by_execution(self, execution_id: str) -> WorkerConnection | None:
+        for conn in self._workers.values():
+            if conn.current_execution_id == execution_id:
+                return conn
+        return None
+
     def all_workers(self) -> list[WorkerConnection]:
         return list(self._workers.values())

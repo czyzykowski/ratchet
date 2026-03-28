@@ -66,6 +66,100 @@ interface TaskDetailResponse {
   feature_title: string | null
 }
 
+interface SessionProgressData {
+  messages: Record<string, unknown>[]
+  total_messages: number
+  file_size_bytes: number
+}
+
+async function fetchSessionProgress(executionId: string): Promise<SessionProgressData> {
+  const res = await fetch(`/api/executions/${executionId}/session-progress`)
+  if (!res.ok) throw new Error(`${res.status}`)
+  return res.json()
+}
+
+function SessionProgressPanel({ executionId, enabled }: { executionId: string; enabled: boolean }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['session-progress', executionId],
+    queryFn: () => fetchSessionProgress(executionId),
+    enabled,
+    refetchInterval: enabled ? 8000 : false,
+    retry: false,
+  })
+
+  if (!enabled) return null
+
+  const is404 = error instanceof Error && error.message === '404'
+  if (is404) return null
+
+  return (
+    <div className="modal-field">
+      <div className="modal-label" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        Live Session
+        {isLoading && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#7b6cd8', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />}
+        {data && (
+          <span style={{ color: '#a0a0a0', fontSize: '0.75rem', fontWeight: 'normal' }}>
+            {data.total_messages} messages · {data.file_size_bytes} bytes
+          </span>
+        )}
+      </div>
+      <div style={{
+        background: '#0d0d0d',
+        border: '1px solid #2a2a2a',
+        borderRadius: 4,
+        padding: '0.5rem',
+        maxHeight: 300,
+        overflowY: 'auto',
+        fontFamily: 'monospace',
+        fontSize: '0.75rem',
+      }}>
+        {isLoading && !data && (
+          <div style={{ color: '#666', padding: '0.5rem' }}>Waiting for session data...</div>
+        )}
+        {data && data.messages.length === 0 && (
+          <div style={{ color: '#666', padding: '0.5rem' }}>No messages yet...</div>
+        )}
+        {data && data.messages.map((msg, i) => {
+          const msgType = msg.type as string
+          const content = msg.content
+          let preview = ''
+          let label = msgType
+          let labelColor = '#a0a0a0'
+
+          if (msgType === 'assistant' && typeof content === 'string') {
+            preview = content.slice(0, 200)
+            labelColor = '#7eb8f7'
+          } else if (msgType === 'assistant' && Array.isArray(content)) {
+            const text = content.find((b: Record<string, unknown>) => b.type === 'text')
+            preview = typeof text?.text === 'string' ? text.text.slice(0, 200) : ''
+            labelColor = '#7eb8f7'
+          } else if (msgType === 'tool_use') {
+            const toolName = msg.name as string | undefined
+            label = `tool: ${toolName ?? '?'}`
+            const input = msg.input as Record<string, unknown> | undefined
+            const filePath = input?.file_path ?? input?.path ?? input?.command
+            preview = typeof filePath === 'string' ? filePath.slice(0, 100) : ''
+            labelColor = '#f9c74f'
+          } else if (msgType === 'tool_result') {
+            const isError = msg.is_error
+            label = isError ? 'tool_result: error' : 'tool_result: ok'
+            labelColor = isError ? '#f44336' : '#4caf50'
+          } else if (typeof content === 'string') {
+            preview = content.slice(0, 200)
+          }
+
+          return (
+            <div key={i} style={{ padding: '0.2rem 0', borderBottom: '1px solid #1a1a1a' }}>
+              <span style={{ color: labelColor, marginRight: '0.5rem' }}>[{label}]</span>
+              {preview && <span style={{ color: '#ccc' }}>{preview}</span>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 const ARCHIVABLE_STATUSES = [
   'ready_for_spec',
   'spec_qa',
@@ -528,6 +622,13 @@ export function TaskDetailModal({ taskId, onClose }: TaskDetailModalProps) {
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {data.task.status === 'in_progress' && latestExecution && (
+              <SessionProgressPanel
+                executionId={latestExecution.id}
+                enabled={data.task.status === 'in_progress'}
+              />
             )}
 
             {data.pr_info && (

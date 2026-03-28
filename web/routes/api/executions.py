@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from core import events as ev
+from core.remote_protocol import GetSessionProgressRequest
 
 router = APIRouter()
+
+_SESSION_PROGRESS_TIMEOUT = 5.0
 
 
 @router.get("/executions/{execution_id}")
@@ -47,3 +51,37 @@ async def get_execution(execution_id: UUID, request: Request) -> JSONResponse:
     trace_content: str | None = trace.content if trace is not None else None
 
     return JSONResponse({"execution": execution, "trace": trace_content})
+
+
+@router.get("/executions/{execution_id}/session-progress")
+async def get_session_progress(execution_id: UUID, request: Request) -> JSONResponse:
+    registry = request.app.state.registry
+    conn = registry.get_worker_by_execution(str(execution_id))
+
+    if conn is None or conn.channel is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "Execution not currently running"},
+        )
+
+    session_req = GetSessionProgressRequest(
+        type="get_session_progress",
+        request_id=str(uuid4()),
+        execution_id=str(execution_id),
+    )
+
+    try:
+        resp = await asyncio.wait_for(
+            conn.channel.send_command(session_req),
+            timeout=_SESSION_PROGRESS_TIMEOUT,
+        )
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail={"error": "Worker timed out"})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc)})
+
+    return JSONResponse({
+        "messages": resp.messages,
+        "total_messages": resp.total_messages,
+        "file_size_bytes": resp.file_size_bytes,
+    })

@@ -597,3 +597,139 @@ class TestHandleGetStatus:
         req = GetStatusRequest(type="get_status", request_id=_rid())
         resp = await ex.handle(req)
         assert resp.current_execution_id == "exec-42"  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# GetSessionProgress
+# ---------------------------------------------------------------------------
+
+
+class TestHandleGetSessionProgress:
+    async def test_returns_empty_when_no_jsonl_file(self, tmp_path: Path) -> None:
+        from core.remote_protocol import GetSessionProgressRequest
+
+        ex = _executor()
+        ex._current_cwd = str(tmp_path / "nonexistent_worktree")
+        req = GetSessionProgressRequest(
+            type="get_session_progress", request_id=_rid(), execution_id="exec-1"
+        )
+        resp = await ex.handle(req)
+        assert resp.success is True  # type: ignore[union-attr]
+        assert resp.messages == []  # type: ignore[union-attr]
+        assert resp.total_messages == 0  # type: ignore[union-attr]
+
+    async def test_returns_last_20_messages_from_jsonl(self, tmp_path: Path) -> None:
+        import json
+        import os
+
+        from core.remote_protocol import GetSessionProgressRequest
+
+        # Create a fake Claude projects directory structure
+        cwd = tmp_path / "worktree"
+        cwd.mkdir()
+        slug = os.path.abspath(str(cwd)).replace("/", "-").replace(".", "-")
+        project_dir = Path.home() / ".claude" / "projects" / slug
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        # Write 25 messages to a JSONL file
+        jsonl_file = project_dir / "session.jsonl"
+        messages = [{"index": i, "type": "assistant", "content": f"msg {i}"} for i in range(25)]
+        with open(jsonl_file, "w") as f:
+            for msg in messages:
+                f.write(json.dumps(msg) + "\n")
+
+        try:
+            ex = _executor()
+            ex._current_cwd = str(cwd)
+            req = GetSessionProgressRequest(
+                type="get_session_progress", request_id=_rid(), execution_id="exec-1"
+            )
+            resp = await ex.handle(req)
+            assert resp.success is True  # type: ignore[union-attr]
+            assert resp.total_messages == 25  # type: ignore[union-attr]
+            assert len(resp.messages) == 20  # type: ignore[union-attr]
+            # Should be the last 20
+            assert resp.messages[0]["index"] == 5  # type: ignore[union-attr]
+            assert resp.messages[-1]["index"] == 24  # type: ignore[union-attr]
+        finally:
+            import shutil
+            shutil.rmtree(project_dir)
+
+    async def test_handles_incomplete_last_line_gracefully(self, tmp_path: Path) -> None:
+        import json
+        import os
+
+        from core.remote_protocol import GetSessionProgressRequest
+
+        cwd = tmp_path / "worktree2"
+        cwd.mkdir()
+        slug = os.path.abspath(str(cwd)).replace("/", "-").replace(".", "-")
+        project_dir = Path.home() / ".claude" / "projects" / slug
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        jsonl_file = project_dir / "session.jsonl"
+        with open(jsonl_file, "w") as f:
+            f.write(json.dumps({"type": "assistant", "content": "complete"}) + "\n")
+            f.write('{"type": "assistant", "content": "incomplete')  # truncated JSON
+
+        try:
+            ex = _executor()
+            ex._current_cwd = str(cwd)
+            req = GetSessionProgressRequest(
+                type="get_session_progress", request_id=_rid(), execution_id="exec-1"
+            )
+            resp = await ex.handle(req)
+            assert resp.success is True  # type: ignore[union-attr]
+            assert resp.total_messages == 1  # type: ignore[union-attr]
+            assert len(resp.messages) == 1  # type: ignore[union-attr]
+        finally:
+            import shutil
+            shutil.rmtree(project_dir)
+
+    async def test_returns_empty_when_current_cwd_is_none(self) -> None:
+        from core.remote_protocol import GetSessionProgressRequest
+
+        ex = _executor()
+        # _current_cwd not set
+        req = GetSessionProgressRequest(
+            type="get_session_progress", request_id=_rid(), execution_id="exec-1"
+        )
+        resp = await ex.handle(req)
+        assert resp.success is True  # type: ignore[union-attr]
+        assert resp.messages == []  # type: ignore[union-attr]
+
+    async def test_create_worktree_sets_current_cwd(self) -> None:
+        ex = _executor({"proj1": "/repo"})
+        import subprocess
+        mock_cp = subprocess.CompletedProcess([], 0, "", "")
+        with (
+            patch("subprocess.run", return_value=mock_cp),
+            patch("os.makedirs"),
+        ):
+            from core.remote_protocol import CreateWorktreeRequest
+            req = CreateWorktreeRequest(
+                type="create_worktree",
+                request_id=_rid(),
+                project_id="proj1",
+                execution_id="exec-cwd",
+                base_commit="abc123",
+            )
+            await ex.handle(req)
+        assert ex._current_cwd == "/repo/.worktrees/exec-cwd"
+
+    async def test_remove_worktree_clears_current_cwd(self) -> None:
+        import subprocess
+        ex = _executor({"proj1": "/repo"})
+        ex._current_cwd = "/repo/.worktrees/exec-1"
+        ex._current_execution_id = "exec-1"
+        mock_cp = subprocess.CompletedProcess([], 0, "", "")
+        with patch("subprocess.run", return_value=mock_cp):
+            from core.remote_protocol import RemoveWorktreeRequest
+            req = RemoveWorktreeRequest(
+                type="remove_worktree",
+                request_id=_rid(),
+                project_id="proj1",
+                execution_id="exec-1",
+            )
+            await ex.handle(req)
+        assert ex._current_cwd is None

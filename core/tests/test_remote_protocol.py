@@ -808,3 +808,100 @@ def test_extra_field_on_command_response_raises():
             '{"type": "get_status_response", "request_id": "x",'
             ' "success": true, "extra_field": "foo"}'
         )
+
+
+# ---------------------------------------------------------------------------
+# GetSessionProgress request/response tests
+# ---------------------------------------------------------------------------
+
+
+def test_get_session_progress_request_round_trip():
+    from core.remote_protocol import GetSessionProgressRequest
+
+    msg = GetSessionProgressRequest(
+        type="get_session_progress",
+        request_id="req-sp-1",
+        execution_id="exec-uuid",
+    )
+    parsed = parse_command_request(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressRequest)
+    assert parsed.request_id == "req-sp-1"
+    assert parsed.execution_id == "exec-uuid"
+
+
+def test_get_session_progress_request_parseable_by_orchestrator_parser():
+    from core.remote_protocol import GetSessionProgressRequest
+
+    msg = GetSessionProgressRequest(
+        type="get_session_progress",
+        request_id="req-sp-1",
+        execution_id="exec-uuid",
+    )
+    parsed = parse_orchestrator_message(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressRequest)
+
+
+def test_get_session_progress_response_success_round_trip():
+    from core.remote_protocol import GetSessionProgressResponse
+
+    msg = GetSessionProgressResponse(
+        type="get_session_progress_response",
+        request_id="req-sp-1",
+        success=True,
+        messages=[{"type": "assistant", "content": "hello"}],
+        total_messages=5,
+        file_size_bytes=1024,
+    )
+    parsed = parse_command_response(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressResponse)
+    assert parsed.success is True
+    assert parsed.messages == [{"type": "assistant", "content": "hello"}]
+    assert parsed.total_messages == 5
+    assert parsed.file_size_bytes == 1024
+
+
+def test_get_session_progress_response_empty_messages_round_trip():
+    from core.remote_protocol import GetSessionProgressResponse
+
+    msg = GetSessionProgressResponse(
+        type="get_session_progress_response",
+        request_id="req-sp-1",
+        success=True,
+        messages=[],
+        total_messages=0,
+        file_size_bytes=0,
+    )
+    parsed = parse_command_response(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressResponse)
+    assert parsed.messages == []
+
+
+def test_get_session_progress_response_error_round_trip():
+    from core.remote_protocol import GetSessionProgressResponse
+
+    msg = GetSessionProgressResponse(
+        type="get_session_progress_response",
+        request_id="req-sp-1",
+        success=False,
+        error="JSONL file not found",
+    )
+    parsed = parse_command_response(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressResponse)
+    assert parsed.success is False
+    assert parsed.error == "JSONL file not found"
+    assert parsed.messages is None
+
+
+def test_get_session_progress_response_parseable_by_worker_parser():
+    from core.remote_protocol import GetSessionProgressResponse
+
+    msg = GetSessionProgressResponse(
+        type="get_session_progress_response",
+        request_id="req-sp-1",
+        success=True,
+        messages=[],
+        total_messages=0,
+        file_size_bytes=0,
+    )
+    parsed = parse_worker_message(msg.model_dump_json())
+    assert isinstance(parsed, GetSessionProgressResponse)

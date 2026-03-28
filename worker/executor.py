@@ -19,6 +19,8 @@ from core.remote_protocol import (
     GetDiffResponse,
     GetProjectStatusRequest,
     GetProjectStatusResponse,
+    GetSessionProgressRequest,
+    GetSessionProgressResponse,
     GetStatusRequest,
     GetStatusResponse,
     ReadFileRequest,
@@ -41,6 +43,7 @@ from worker.worktree import safe_symlink
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CMD_TIMEOUT = 300
+SESSION_PROGRESS_TAIL = 20
 
 
 class CommandExecutor:
@@ -56,6 +59,7 @@ class CommandExecutor:
         self._workspace = workspace
         self._current_execution_id: str | None = None
         self._base_commit: str | None = None
+        self._current_cwd: str | None = None
 
     async def handle(self, request: AnyCommandRequest) -> AnyCommandResponse:
         """Dispatch a command request to the appropriate handler."""
@@ -81,6 +85,8 @@ class CommandExecutor:
             return self._handle_setup_environment(request)
         elif isinstance(request, GetStatusRequest):
             return self._handle_get_status(request)
+        elif isinstance(request, GetSessionProgressRequest):
+            return self._handle_get_session_progress(request)
         else:
             raise ValueError(f"Unknown request type: {request.type}")
 
@@ -266,6 +272,7 @@ class CommandExecutor:
                 )
             self._current_execution_id = request.execution_id
             self._base_commit = base
+            self._current_cwd = worktree_path
             # Apply patch if provided (used by merge pipeline)
             if request.patch:
                 import tempfile
@@ -328,6 +335,7 @@ class CommandExecutor:
                 )
             if self._current_execution_id == request.execution_id:
                 self._current_execution_id = None
+                self._current_cwd = None
             return RemoveWorktreeResponse(
                 type="remove_worktree_response",
                 request_id=request.request_id,
@@ -516,4 +524,76 @@ class CommandExecutor:
             request_id=request.request_id,
             success=True,
             current_execution_id=self._current_execution_id,
+        )
+
+    def _handle_get_session_progress(
+        self, request: GetSessionProgressRequest
+    ) -> GetSessionProgressResponse:
+        import glob as _glob
+        import json
+
+        if self._current_cwd is None:
+            return GetSessionProgressResponse(
+                type="get_session_progress_response",
+                request_id=request.request_id,
+                success=True,
+                messages=[],
+                total_messages=0,
+                file_size_bytes=0,
+            )
+
+        slug = os.path.abspath(self._current_cwd).replace("/", "-").replace(".", "-")
+        project_dir = os.path.join(
+            os.path.expanduser("~"), ".claude", "projects", slug
+        )
+        if not os.path.isdir(project_dir):
+            return GetSessionProgressResponse(
+                type="get_session_progress_response",
+                request_id=request.request_id,
+                success=True,
+                messages=[],
+                total_messages=0,
+                file_size_bytes=0,
+            )
+
+        jsonl_files = sorted(
+            _glob.glob(os.path.join(project_dir, "*.jsonl")),
+            key=os.path.getmtime,
+        )
+        if not jsonl_files:
+            return GetSessionProgressResponse(
+                type="get_session_progress_response",
+                request_id=request.request_id,
+                success=True,
+                messages=[],
+                total_messages=0,
+                file_size_bytes=0,
+            )
+
+        jsonl_path = jsonl_files[-1]
+        file_size = os.path.getsize(jsonl_path)
+        parsed: list[dict[str, object]] = []
+        try:
+            with open(jsonl_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass  # skip incomplete last line
+        except OSError:
+            pass
+
+        total = len(parsed)
+        tail = parsed[-SESSION_PROGRESS_TAIL:] if total > SESSION_PROGRESS_TAIL else parsed
+
+        return GetSessionProgressResponse(
+            type="get_session_progress_response",
+            request_id=request.request_id,
+            success=True,
+            messages=tail,
+            total_messages=total,
+            file_size_bytes=file_size,
         )

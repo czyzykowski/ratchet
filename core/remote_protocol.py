@@ -245,6 +245,14 @@ class GetStatusRequest(BaseModel):
     request_id: str
 
 
+class GetSessionProgressRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["get_session_progress"]
+    request_id: str
+    execution_id: str
+
+
 # ---------------------------------------------------------------------------
 # Command response models (Worker → Orchestrator)
 # ---------------------------------------------------------------------------
@@ -364,6 +372,18 @@ class GetStatusResponse(BaseModel):
     current_execution_id: str | None = None
 
 
+class GetSessionProgressResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["get_session_progress_response"]
+    request_id: str
+    success: bool
+    error: str | None = None
+    messages: list[dict[str, object]] | None = None  # last N parsed JSONL objects
+    total_messages: int | None = None  # total message count in the file
+    file_size_bytes: int | None = None  # for staleness detection
+
+
 # ---------------------------------------------------------------------------
 # Discriminated unions
 # ---------------------------------------------------------------------------
@@ -379,7 +399,8 @@ AnyCommandRequest = Annotated[
     | RunCommandRequest
     | ReadFileRequest
     | SetupEnvironmentRequest
-    | GetStatusRequest,
+    | GetStatusRequest
+    | GetSessionProgressRequest,
     Field(discriminator="type"),
 ]
 
@@ -394,7 +415,8 @@ AnyCommandResponse = Annotated[
     | RunCommandResponse
     | ReadFileResponse
     | SetupEnvironmentResponse
-    | GetStatusResponse,
+    | GetStatusResponse
+    | GetSessionProgressResponse,
     Field(discriminator="type"),
 ]
 
@@ -416,7 +438,8 @@ AnyWorkerMessage = Annotated[
     | RunCommandResponse
     | ReadFileResponse
     | SetupEnvironmentResponse
-    | GetStatusResponse,
+    | GetStatusResponse
+    | GetSessionProgressResponse,
     Field(discriminator="type"),
 ]
 
@@ -435,7 +458,8 @@ AnyOrchestratorMessage = Annotated[
     | RunCommandRequest
     | ReadFileRequest
     | SetupEnvironmentRequest
-    | GetStatusRequest,
+    | GetStatusRequest
+    | GetSessionProgressRequest,
     Field(discriminator="type"),
 ]
 
