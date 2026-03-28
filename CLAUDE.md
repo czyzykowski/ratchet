@@ -82,6 +82,7 @@ flake.nix          — reproducible dev shell (nix develop)
 - Auto-merge: on each dispatch cycle, the worker attempts a local squash merge for one `ready_for_merge` task per project; `TASK_AUTO_MERGE_FAILED` prevents retry — use `scripts/merge-task.py` for manual merge
 - **Workers run in remote mode only**: `python -m worker` requires `--remote <URL>`; the orchestrator's `dispatch_loop` discovers tasks and drives workers via WebSocket commands — there is no local dispatch fallback
 - **Infrastructure changes break in-flight tasks**: Changes to shared modules (`core/remote_protocol.py`, `orchestrator/sequencer.py`, `worker/executor.py`, `ratchet.yaml`) affect ALL in-flight task executions because QA runs on worktrees that inherit from `develop`. The Claude QA fix loop cannot repair these errors because they are in develop code, not in the task's code. Always run the full QA gauntlet before committing: `ruff check core/ worker/ web/ orchestrator/ remote_worker/` and `mypy core/ worker/ web/ orchestrator/ remote_worker/` and `pytest core/tests/ web/tests/ worker/tests/`
+- **Git worktree cleanup**: Each execution creates a git worktree at `.worktrees/<execution_id>`. Worktrees from crashed or orphaned executions accumulate and block new executions (git refuses to checkout a branch already used by another worktree). The `_apply_patch_to_local` method runs `git worktree prune` before creating new worktrees. If worktrees accumulate anyway, clean up manually: `git worktree list` then `git worktree remove --force <path>` for stale entries.
 
 ## Running Things
 
