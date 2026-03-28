@@ -88,9 +88,20 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> None:
                 if deploy_cfg.mode != "local":
                     continue  # PR-based deploys handled by poll_pr_merges
 
-                # Check not already failed auto-merge
+                # Check not already failed auto-merge — skip if the most
+                # recent merge-related event is a failure. If the task was
+                # re-queued (transitioned to ready_for_merge after the failure),
+                # allow retry.
                 task_events = await store.get_events(task_id, "task")
-                if not any(e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events):
+                last_merge_fail_seq = 0
+                last_ready_for_merge_seq = 0
+                for evt in task_events:
+                    if evt.event_type == ev.TASK_AUTO_MERGE_FAILED:
+                        last_merge_fail_seq = evt.sequence
+                    elif (evt.event_type == ev.TASK_STATUS_CHANGED
+                          and evt.payload.get("to_status") == ev.READY_FOR_DEPLOYMENT):
+                        last_ready_for_merge_seq = evt.sequence
+                if last_merge_fail_seq == 0 or last_ready_for_merge_seq > last_merge_fail_seq:
                     merge_candidates.append((task, project))
 
             elif task.status == ev.WAITING_FOR_INPUT:
