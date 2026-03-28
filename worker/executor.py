@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 import os
@@ -401,7 +400,7 @@ class CommandExecutor:
                 allowed_tools=",".join(request.tools),
             )
             self._current_execution_id = request.execution_id
-            result = await asyncio.to_thread(claude_subprocess.run, claude_request)
+            result = await claude_subprocess.async_start(claude_request)
             status = "completed" if result.returncode == 0 else "failed"
             session_jsonl = self._read_session_jsonl(request.cwd)
             return RunClaudeResponse(

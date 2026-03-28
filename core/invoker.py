@@ -236,6 +236,12 @@ class ClaudeCodeInvoker:
             daemon=True,
         )
         watchdog_thread.start()
+        # TODO: watchdog support for non-streaming sandbox backends
+        # When a real sandbox backend is added, Sandbox.start() blocks until
+        # completion with no streaming output. The watchdog will fire false
+        # "no activity" warnings. Options: (1) disable watchdog when sandbox
+        # is set, (2) add a Sandbox.supports_streaming property, or
+        # (3) have sandbox backends periodically report activity.
 
         result = handle.wait()
 

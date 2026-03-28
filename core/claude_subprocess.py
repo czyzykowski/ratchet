@@ -8,14 +8,19 @@ This module has zero ratchet dependencies — stdlib only.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from subprocess import PIPE
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.sandbox import Sandbox, SandboxConfig
 
 
 @dataclass(frozen=True)
@@ -27,6 +32,8 @@ class ClaudeRequest:
     model: str
     allowed_tools: str = ""
     timeout: float | None = None
+    sandbox: Sandbox | None = field(default=None, compare=False)
+    sandbox_config: SandboxConfig | None = field(default=None, compare=False)
 
 
 @dataclass
@@ -166,6 +173,23 @@ def run(
     When on_stdout_line is provided, each stdout line is forwarded
     to the callback as it arrives (for streaming output to terminal).
     """
+    if request.sandbox is not None:
+        from core.sandbox import SandboxConfig as _SandboxConfig
+
+        cmd = _build_cmd(request)
+        config = request.sandbox_config if request.sandbox_config is not None else _SandboxConfig()
+        loop = asyncio.new_event_loop()
+        try:
+            coro = request.sandbox.start(cmd, config, request.cwd)
+            sandbox_result = loop.run_until_complete(coro)
+        finally:
+            loop.close()
+        return ClaudeResult(
+            stdout=sandbox_result.stdout,
+            stderr=sandbox_result.stderr,
+            returncode=sandbox_result.returncode,
+        )
+
     cmd = _build_cmd(request)
     env = _build_env()
 
@@ -216,3 +240,21 @@ def run(
         stderr="".join(stderr_lines),
         returncode=returncode,
     )
+
+
+async def async_start(request: ClaudeRequest) -> ClaudeResult:
+    """Async entry point: awaits sandbox.start() when sandbox is set, otherwise
+    delegates to asyncio.to_thread for the blocking start().wait() path."""
+    if request.sandbox is not None:
+        from core.sandbox import SandboxConfig as _SandboxConfig
+
+        cmd = _build_cmd(request)
+        config = request.sandbox_config if request.sandbox_config is not None else _SandboxConfig()
+        sandbox_result = await request.sandbox.start(cmd, config, request.cwd)
+        return ClaudeResult(
+            stdout=sandbox_result.stdout,
+            stderr=sandbox_result.stderr,
+            returncode=sandbox_result.returncode,
+        )
+
+    return await asyncio.to_thread(lambda: start(request).wait())

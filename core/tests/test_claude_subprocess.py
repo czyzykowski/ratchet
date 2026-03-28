@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import io
+import tempfile
 import threading
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.claude_subprocess import ClaudeRequest, ClaudeResult, StreamingHandle, run, start
+from core.claude_subprocess import (
+    ClaudeRequest,
+    ClaudeResult,
+    StreamingHandle,
+    async_start,
+    run,
+    start,
+)
+from core.sandbox import SandboxConfig, SandboxResult
 
 
 def _fake_popen(
@@ -150,3 +160,119 @@ def test_start_terminate_kills_process() -> None:
 
     handle.terminate()
     mock_proc.terminate.assert_called_once()
+
+
+def _make_mock_sandbox(
+    returncode: int = 0, stdout: str = "sandbox output\n", stderr: str = ""
+) -> MagicMock:
+    """Create a mock Sandbox with async start()."""
+    mock = MagicMock()
+    mock.start = AsyncMock(
+        return_value=SandboxResult(returncode=returncode, stdout=stdout, stderr=stderr)
+    )
+    return mock
+
+
+def test_run_delegates_to_sandbox_when_set() -> None:
+    mock_sandbox = _make_mock_sandbox(stdout="sandbox output\n")
+    config = SandboxConfig(env={"FOO": "bar"})
+    request = ClaudeRequest(
+        prompt="hi",
+        cwd="/fake/dir",
+        model="m",
+        sandbox=mock_sandbox,
+        sandbox_config=config,
+    )
+
+    result = run(request)
+
+    mock_sandbox.start.assert_called_once()
+    call_args = mock_sandbox.start.call_args
+    cmd, cfg, cwd = call_args[0]
+    assert "claude" in cmd
+    assert cfg is config
+    assert cwd == "/fake/dir"
+    assert result.stdout == "sandbox output\n"
+    assert result.returncode == 0
+
+
+def test_run_uses_subprocess_when_sandbox_is_none() -> None:
+    request = ClaudeRequest(prompt="x", cwd="/fake", model="m")
+    mock_proc = _fake_popen(stdout="direct output\n")
+
+    with patch("core.claude_subprocess.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        result = run(request)
+
+    mock_popen.assert_called_once()
+    assert result.stdout == "direct output\n"
+
+
+async def test_async_start_delegates_to_sandbox() -> None:
+    mock_sandbox = _make_mock_sandbox(stdout="async sandbox\n", returncode=0)
+    config = SandboxConfig(env={"X": "y"})
+    request = ClaudeRequest(
+        prompt="hi",
+        cwd="/fake/dir",
+        model="m",
+        sandbox=mock_sandbox,
+        sandbox_config=config,
+    )
+
+    result = await async_start(request)
+
+    mock_sandbox.start.assert_called_once()
+    call_args = mock_sandbox.start.call_args
+    cmd, cfg, cwd = call_args[0]
+    assert "claude" in cmd
+    assert cfg is config
+    assert cwd == "/fake/dir"
+    assert result.stdout == "async sandbox\n"
+    assert result.returncode == 0
+
+
+async def test_async_start_falls_back_to_thread_when_no_sandbox() -> None:
+    request = ClaudeRequest(prompt="hi", cwd="/fake", model="m")
+    mock_proc = _fake_popen(stdout="thread output\n", returncode=0)
+
+    with patch("core.claude_subprocess.subprocess.Popen", return_value=mock_proc) as mock_popen:
+        result = await async_start(request)
+
+    mock_popen.assert_called_once()
+    assert result.stdout == "thread output\n"
+    assert result.returncode == 0
+
+
+def test_run_sandbox_receives_nix_wrapped_command() -> None:
+    mock_sandbox = _make_mock_sandbox()
+    with tempfile.TemporaryDirectory() as td:
+        Path(td, "flake.nix").touch()
+        request = ClaudeRequest(
+            prompt="hi",
+            cwd=td,
+            model="m",
+            sandbox=mock_sandbox,
+        )
+        run(request)
+
+    call_args = mock_sandbox.start.call_args
+    cmd = call_args[0][0]
+    assert cmd[:3] == ["nix", "develop", "--command"]
+
+
+def test_run_sandbox_config_defaults_to_empty() -> None:
+    mock_sandbox = _make_mock_sandbox()
+    request = ClaudeRequest(
+        prompt="hi",
+        cwd="/fake",
+        model="m",
+        sandbox=mock_sandbox,
+        sandbox_config=None,
+    )
+
+    run(request)
+
+    call_args = mock_sandbox.start.call_args
+    cfg = call_args[0][1]
+    assert isinstance(cfg, SandboxConfig)
+    assert cfg.env == {}
+    assert cfg.writable_paths == []

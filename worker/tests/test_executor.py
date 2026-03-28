@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 from uuid import uuid4
 
 from core.claude_subprocess import ClaudeResult
@@ -422,7 +422,7 @@ class TestHandleRunClaude:
             cwd="/repo/.worktrees/exec-1",
         )
         mock_result = ClaudeResult(stdout="COMPLETED", stderr="", returncode=0)
-        with patch("core.claude_subprocess.run", return_value=mock_result):
+        with patch("core.claude_subprocess.async_start", new=AsyncMock(return_value=mock_result)):
             resp = await ex.handle(req)
         assert resp.success is True
         assert resp.status == "completed"  # type: ignore[union-attr]
@@ -442,7 +442,7 @@ class TestHandleRunClaude:
             cwd="/repo",
         )
         mock_result = ClaudeResult(stdout="BLOCKED: reason", stderr="", returncode=1)
-        with patch("core.claude_subprocess.run", return_value=mock_result):
+        with patch("core.claude_subprocess.async_start", new=AsyncMock(return_value=mock_result)):
             resp = await ex.handle(req)
         assert resp.success is True
         assert resp.status == "failed"  # type: ignore[union-attr]

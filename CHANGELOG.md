@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- `ClaudeRequest` accepts optional `sandbox` and `sandbox_config` fields for sandbox-delegated execution
+- `async_start()` async entry point in `core/claude_subprocess.py`: awaits sandbox when set, uses `asyncio.to_thread` otherwise
+- `run()` in `core/claude_subprocess.py` delegates to `sandbox.start()` when sandbox is set
+- `worker/executor.py` uses `async_start()` instead of `asyncio.to_thread(run, ...)`
+- Watchdog TODO comment in `core/invoker.py` for future non-streaming sandbox support
 - `build_sandbox_config()` builder for constructing SandboxConfig from worktree/project paths
 - `apply_patch_to_develop()` helper in `core/merge.py` — applies a pre-verified patch to the target branch via temporary worktree for the remote merge pipeline
 - Optional `patch` field on `CreateWorktreeRequest` — worker applies patch via `git apply` after worktree creation (used by merge pipeline)
