@@ -27,6 +27,12 @@ parser.add_argument(
     default="~/ratchet-projects",
     help="Root directory for new project clones (default: ~/ratchet-projects)",
 )
+parser.add_argument(
+    "--sandbox",
+    default="auto",
+    metavar="BACKEND",
+    help="Sandbox backend: auto (default), none, or a registered backend name",
+)
 args = parser.parse_args()
 capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
 
@@ -39,5 +45,7 @@ for pair in args.projects.split(","):
 
 workspace = os.path.expanduser(args.workspace)
 
-worker = RemoteWorker(args.remote, capabilities, projects, workspace=workspace)
+worker = RemoteWorker(
+    args.remote, capabilities, projects, workspace=workspace, sandbox_name=args.sandbox
+)
 asyncio.run(worker.run())

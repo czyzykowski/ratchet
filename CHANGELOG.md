@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- `worker/__main__.py` accepts `--sandbox {auto,none,<name>}` CLI argument (default `auto`)
+- `CommandExecutor` resolves sandbox backend at construction time and logs selected backend
+- `CommandExecutor._handle_run_claude()` passes `sandbox` and `sandbox_config` to `ClaudeRequest`; catches sandbox start failures as non-zero exit responses
+- `CommandExecutor._read_session_jsonl_from()` reads session JSONL from arbitrary base directory (sandbox ephemeral path)
+- Session JSONL reading in `_handle_run_claude()` and `_handle_get_session_progress()` checks sandbox ephemeral path first
+- `CommandExecutor._handle_remove_worktree()` calls `sandbox.cleanup()` after git worktree removal
 - `ClaudeRequest` accepts optional `sandbox` and `sandbox_config` fields for sandbox-delegated execution
 - `async_start()` async entry point in `core/claude_subprocess.py`: awaits sandbox when set, uses `asyncio.to_thread` otherwise
 - `run()` in `core/claude_subprocess.py` delegates to `sandbox.start()` when sandbox is set

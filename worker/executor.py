@@ -52,13 +52,52 @@ class CommandExecutor:
     projects dict. Each handler is independently testable.
     """
 
-    def __init__(self, worker_id: str, projects: dict[str, str], workspace: str = "") -> None:
+    def __init__(
+        self,
+        worker_id: str,
+        projects: dict[str, str],
+        workspace: str = "",
+        sandbox_name: str = "auto",
+    ) -> None:
         self._worker_id = worker_id
         self._projects: dict[str, str] = dict(projects)
         self._workspace = workspace
         self._current_execution_id: str | None = None
         self._base_commit: str | None = None
         self._current_cwd: str | None = None
+
+        from core.sandbox import NullSandbox, Sandbox, default_registry  # noqa: F401
+
+        resolved_sandbox: Sandbox
+        if sandbox_name == "none":
+            resolved_sandbox = NullSandbox()
+        elif sandbox_name == "auto":
+            import threading as _threading
+
+            _result: list[Sandbox] = []
+            _exc: list[BaseException] = []
+
+            def _run_auto_detect() -> None:
+                import asyncio as _asyncio
+
+                _loop = _asyncio.new_event_loop()
+                try:
+                    _result.append(_loop.run_until_complete(default_registry.auto_detect()))
+                except Exception as e:
+                    _exc.append(e)
+                finally:
+                    _loop.close()
+
+            _t = _threading.Thread(target=_run_auto_detect, daemon=True)
+            _t.start()
+            _t.join()
+            if _exc:
+                raise _exc[0]
+            resolved_sandbox = _result[0]
+        else:
+            resolved_sandbox = default_registry.get(sandbox_name)
+        self._sandbox: Sandbox = resolved_sandbox
+        logger.info("Sandbox backend: %s", self._sandbox.name())
 
     async def handle(self, request: AnyCommandRequest) -> AnyCommandResponse:
         """Dispatch a command request to the appropriate handler."""
@@ -71,7 +110,7 @@ class CommandExecutor:
         elif isinstance(request, CreateWorktreeRequest):
             return self._handle_create_worktree(request)
         elif isinstance(request, RemoveWorktreeRequest):
-            return self._handle_remove_worktree(request)
+            return await self._handle_remove_worktree(request)
         elif isinstance(request, GetDiffRequest):
             return self._handle_get_diff(request)
         elif isinstance(request, RunClaudeRequest):
@@ -311,7 +350,7 @@ class CommandExecutor:
                 error=str(exc),
             )
 
-    def _handle_remove_worktree(
+    async def _handle_remove_worktree(
         self, request: RemoveWorktreeRequest
     ) -> RemoveWorktreeResponse:
         try:
@@ -332,6 +371,10 @@ class CommandExecutor:
                     success=False,
                     error=result.stderr.strip(),
                 )
+            try:
+                await self._sandbox.cleanup()
+            except Exception as exc:
+                logger.warning("Sandbox cleanup failed: %s", exc)
             if self._current_execution_id == request.execution_id:
                 self._current_execution_id = None
                 self._current_cwd = None
@@ -391,18 +434,72 @@ class CommandExecutor:
         except OSError:
             return None
 
+    @staticmethod
+    def _read_session_jsonl_from(base_claude_dir: str, cwd: str) -> str | None:
+        """Read session JSONL from a custom base directory (e.g., sandbox ephemeral path)."""
+        import glob as _glob
+
+        slug = os.path.abspath(cwd).replace("/", "-").replace(".", "-")
+        project_dir = os.path.join(base_claude_dir, "projects", slug)
+        if not os.path.isdir(project_dir):
+            return None
+        jsonl_files = sorted(
+            _glob.glob(os.path.join(project_dir, "*.jsonl")),
+            key=os.path.getmtime,
+        )
+        if not jsonl_files:
+            return None
+        try:
+            with open(jsonl_files[-1]) as f:
+                return f.read()
+        except OSError:
+            return None
+
     async def _handle_run_claude(self, request: RunClaudeRequest) -> RunClaudeResponse:
         try:
+            from core.sandbox import build_sandbox_config
+
+            worktree_cwd = request.cwd
+            wt_marker = "/.worktrees/"
+            if wt_marker in worktree_cwd:
+                project_path = worktree_cwd[: worktree_cwd.index(wt_marker)]
+            else:
+                project_path = worktree_cwd
+
+            sandbox_config = build_sandbox_config(
+                worktree_path=worktree_cwd,
+                project_path=project_path,
+                symlinked_dirs=[".venv", "node_modules", ".env", ".deno"],
+            )
+
             claude_request = ClaudeRequest(
                 prompt=request.prompt,
                 cwd=request.cwd,
                 model=request.model,
                 allowed_tools=",".join(request.tools),
+                sandbox=self._sandbox,
+                sandbox_config=sandbox_config,
             )
             self._current_execution_id = request.execution_id
-            result = await claude_subprocess.async_start(claude_request)
+            try:
+                result = await claude_subprocess.async_start(claude_request)
+            except Exception as exc:
+                return RunClaudeResponse(
+                    type="run_claude_response",
+                    request_id=request.request_id,
+                    success=True,
+                    stdout="",
+                    stderr=f"Sandbox start failed: {exc}",
+                    returncode=1,
+                    status="failed",
+                    session_jsonl=None,
+                )
             status = "completed" if result.returncode == 0 else "failed"
-            session_jsonl = self._read_session_jsonl(request.cwd)
+            ephemeral_claude = self._sandbox.get_ephemeral_path("~/.claude")
+            if ephemeral_claude is not None:
+                session_jsonl = self._read_session_jsonl_from(ephemeral_claude, request.cwd)
+            else:
+                session_jsonl = self._read_session_jsonl(request.cwd)
             return RunClaudeResponse(
                 type="run_claude_response",
                 request_id=request.request_id,
@@ -542,9 +639,11 @@ class CommandExecutor:
             )
 
         slug = os.path.abspath(self._current_cwd).replace("/", "-").replace(".", "-")
-        project_dir = os.path.join(
-            os.path.expanduser("~"), ".claude", "projects", slug
+        ephemeral_claude = self._sandbox.get_ephemeral_path("~/.claude")
+        base_claude = ephemeral_claude if ephemeral_claude is not None else os.path.join(
+            os.path.expanduser("~"), ".claude"
         )
+        project_dir = os.path.join(base_claude, "projects", slug)
         if not os.path.isdir(project_dir):
             return GetSessionProgressResponse(
                 type="get_session_progress_response",
