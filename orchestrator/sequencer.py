@@ -846,15 +846,17 @@ class PipelineSequencer:
 
             if not failed_steps:
                 # All QA steps passed — run Claude review
-                diff_req = GetDiffRequest(
-                    type="get_diff",
-                    request_id=str(uuid4()),
-                    project_id=str(project_id),
-                    execution_id=str(execution_id),
+                # Use the full implementation diff (develop..execution branch)
+                # computed on the orchestrator, not GetDiff from the worker
+                # (which only shows auto-fix changes since the QA worktree
+                # was created from the execution branch).
+                local_path = project.local_path
+                impl_diff_result = await asyncio.to_thread(
+                    subprocess.run,
+                    ["git", "diff", f"develop...{execution_branch}"],
+                    **{"cwd": local_path, "capture_output": True, "text": True},
                 )
-                diff_resp = await channel.send_command(diff_req)
-                assert isinstance(diff_resp, GetDiffResponse)
-                diff_text = diff_resp.patch or ""
+                diff_text = impl_diff_result.stdout if impl_diff_result.returncode == 0 else ""
 
                 from core.qa_runner import build_review_prompt, parse_review_output
 

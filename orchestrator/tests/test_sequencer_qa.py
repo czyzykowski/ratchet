@@ -181,13 +181,18 @@ def _make_handler(*, pass_qa: bool = True, ratchet_yaml: str = _RATCHET_YAML):
 
 @pytest.mark.asyncio
 async def test_qa_pipeline_happy_path_transitions_to_ready_for_deployment() -> None:
+    from unittest.mock import MagicMock
     store = InMemoryStore()
     task, project, spec = await _seed_qa_task(store)
 
     channel = MockChannel(_make_handler(pass_qa=True))
     sequencer = PipelineSequencer(store)
 
-    with patch("orchestrator.sequencer._get_local_head", return_value="abc123"):
+    fake_diff = MagicMock(returncode=0, stdout="diff --git a/f.txt b/f.txt\n+new\n")
+    with (
+        patch("orchestrator.sequencer._get_local_head", return_value="abc123"),
+        patch("orchestrator.sequencer.subprocess.run", return_value=fake_diff),
+    ):
         result = await sequencer.run_qa_pipeline(channel, task, project, spec)
 
     assert result.success is True
