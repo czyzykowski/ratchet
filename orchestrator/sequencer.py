@@ -851,12 +851,15 @@ class PipelineSequencer:
                 # (which only shows auto-fix changes since the QA worktree
                 # was created from the execution branch).
                 local_path = project.local_path
-                impl_diff_result = await asyncio.to_thread(
-                    subprocess.run,
-                    ["git", "diff", f"develop...{execution_branch}"],
-                    **{"cwd": local_path, "capture_output": True, "text": True},
-                )
-                diff_text = impl_diff_result.stdout if impl_diff_result.returncode == 0 else ""
+
+                def _get_impl_diff() -> str:
+                    r = subprocess.run(
+                        ["git", "diff", f"develop...{execution_branch}"],
+                        cwd=local_path, capture_output=True, text=True,
+                    )
+                    return r.stdout if r.returncode == 0 else ""
+
+                diff_text = await asyncio.to_thread(_get_impl_diff)
 
                 from core.qa_runner import build_review_prompt, parse_review_output
 
