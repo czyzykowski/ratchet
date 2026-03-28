@@ -482,12 +482,19 @@ class PipelineSequencer:
 
             from core.invoker import has_blocked_marker, has_completed_marker
 
+            # COMPLETED: marker takes priority over non-zero return code.
+            # Background tasks in Claude Code can cause non-zero exits even
+            # when the main task completed successfully.
+            _has_completed = has_completed_marker(stdout)
+            _has_blocked = has_blocked_marker(stdout) is not None
+            is_completed = _has_completed and not _has_blocked
             is_blocked = (
-                has_blocked_marker(stdout) is not None
+                _has_blocked
                 or claude_resp.status == "blocked"
-                or (claude_resp.returncode is not None and claude_resp.returncode != 0)
+                or (not _has_completed
+                    and claude_resp.returncode is not None
+                    and claude_resp.returncode != 0)
             )
-            is_completed = has_completed_marker(stdout) and not is_blocked
 
             if not is_completed:
                 failure = f"Claude returned BLOCKED or non-zero exit: {stdout[:500]}"
@@ -900,12 +907,19 @@ class PipelineSequencer:
             stdout = claude_resp.stdout or ""
             from core.invoker import has_blocked_marker, has_completed_marker
 
+            # COMPLETED: marker takes priority over non-zero return code.
+            # Background tasks in Claude Code can cause non-zero exits even
+            # when the main task completed successfully.
+            _has_completed = has_completed_marker(stdout)
+            _has_blocked = has_blocked_marker(stdout) is not None
+            is_completed = _has_completed and not _has_blocked
             is_blocked = (
-                has_blocked_marker(stdout) is not None
+                _has_blocked
                 or claude_resp.status == "blocked"
-                or (claude_resp.returncode is not None and claude_resp.returncode != 0)
+                or (not _has_completed
+                    and claude_resp.returncode is not None
+                    and claude_resp.returncode != 0)
             )
-            is_completed = has_completed_marker(stdout) and not is_blocked
 
             await self._try_remove_worktree(channel, project_id, execution_id)
 
