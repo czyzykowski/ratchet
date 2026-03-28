@@ -112,34 +112,23 @@ class PipelineSequencer:
         import os
         import tempfile
 
-        # Create branch from the same base the worker used
-        result = subprocess.run(
-            ["git", "branch", branch_name, base_commit],
-            cwd=local_path,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0 and "already exists" not in result.stderr:
-            raise RuntimeError(
-                f"git branch {branch_name} failed: {result.stderr.strip()}"
-            )
-
-        # Create worktree for the branch — prune stale worktrees first
-        # to avoid "already used by worktree" errors from leftover state
+        # Create detached worktree at the base commit to apply the patch.
+        # We use --detach because the execution branch may be checked out
+        # by the worker's active worktree (git forbids two worktrees on
+        # the same branch).
         subprocess.run(
             ["git", "worktree", "prune"],
             cwd=local_path,
             capture_output=True,
         )
         wt_path = os.path.join(local_path, ".worktrees", f"patch-{branch_name.split('/')[-1]}")
-        # Remove any existing worktree at this path
         subprocess.run(
             ["git", "worktree", "remove", "--force", wt_path],
             cwd=local_path,
             capture_output=True,
         )
         result = subprocess.run(
-            ["git", "worktree", "add", wt_path, branch_name],
+            ["git", "worktree", "add", "--detach", wt_path, base_commit],
             cwd=local_path,
             capture_output=True,
             text=True,
@@ -197,6 +186,19 @@ class PipelineSequencer:
             if result.returncode != 0:
                 raise RuntimeError(
                     f"git commit failed: {result.stderr.strip()}"
+                )
+
+            # Create or update the execution branch to point to this commit.
+            # Use update-ref so it works even if the branch is checked out
+            # elsewhere (e.g., the worker's active worktree).
+            new_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=wt_path, capture_output=True, text=True,
+            ).stdout.strip()
+            if new_sha:
+                subprocess.run(
+                    ["git", "update-ref", f"refs/heads/{branch_name}", new_sha],
+                    cwd=local_path, capture_output=True,
                 )
         finally:
             # Remove worktree

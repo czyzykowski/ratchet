@@ -407,7 +407,7 @@ async def test_apply_patch_to_local_raises_on_git_failure() -> None:
         mock_run.return_value = MagicMock(
             returncode=1, stderr="fatal: bad revision", stdout=""
         )
-        with pytest.raises(RuntimeError, match="git branch.*failed"):
+        with pytest.raises(RuntimeError, match="git worktree add failed"):
             PipelineSequencer._apply_patch_to_local(
                 "/fake/path", "execution/test-branch", "diff content", "abc123"
             )
