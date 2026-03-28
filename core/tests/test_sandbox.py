@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from core.sandbox import NullSandbox, SandboxConfig, SandboxRegistry, default_registry
+from core.sandbox import (
+    NullSandbox,
+    SandboxConfig,
+    SandboxRegistry,
+    build_sandbox_config,
+    default_registry,
+)
 
 
 @pytest.mark.asyncio
@@ -84,3 +92,75 @@ async def test_registry_auto_detect_fallback() -> None:
 @pytest.mark.asyncio
 async def test_registry_available_includes_null() -> None:
     assert "null" in await default_registry.available()
+
+
+# --- build_sandbox_config tests ---
+
+
+def _cfg(symlinked_dirs: list[str] | None = None) -> object:
+    return dict(
+        worktree_path="/tmp/wt",
+        project_path="/projects/repo",
+        symlinked_dirs=symlinked_dirs or [],
+    )
+
+
+def test_build_sandbox_config_worktree_in_writable() -> None:
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert "/tmp/wt" in config.writable_paths
+
+
+def test_build_sandbox_config_existing_symlink_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os.path, "realpath", lambda p: "/projects/repo/.venv")
+    monkeypatch.setattr(os.path, "exists", lambda p: p == "/projects/repo/.venv")
+    config = build_sandbox_config(**_cfg([".venv"]))  # type: ignore[arg-type]
+    assert "/projects/repo/.venv" in config.writable_paths
+
+
+def test_build_sandbox_config_missing_symlink_excluded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os.path, "realpath", lambda p: "/projects/repo/node_modules")
+    monkeypatch.setattr(os.path, "exists", lambda p: False)
+    config = build_sandbox_config(**_cfg(["node_modules"]))  # type: ignore[arg-type]
+    assert "/projects/repo/node_modules" not in config.writable_paths
+    assert config.writable_paths == ["/tmp/wt"]
+
+
+def test_build_sandbox_config_nix_store_readonly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os.path, "exists", lambda p: p == "/nix/store")
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert "/nix/store" in config.readonly_paths
+
+
+def test_build_sandbox_config_nix_store_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os.path, "exists", lambda p: False)
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert config.readonly_paths == []
+
+
+def test_build_sandbox_config_ephemeral_claude_dir() -> None:
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert os.path.expanduser("~/.claude") in config.ephemeral_home_dirs
+
+
+def test_build_sandbox_config_claude_env_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "environ", {"CLAUDE_API_KEY": "x", "ANTHROPIC_API_KEY": "y"})
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert config.env.get("CLAUDE_API_KEY") == "x"
+    assert config.env.get("ANTHROPIC_API_KEY") == "y"
+
+
+def test_build_sandbox_config_standard_env_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "environ", {"PATH": "/usr/bin", "HOME": "/home/user", "USER": "user"})
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert config.env.get("PATH") == "/usr/bin"
+    assert config.env.get("HOME") == "/home/user"
+    assert config.env.get("USER") == "user"
+
+
+def test_build_sandbox_config_missing_env_excluded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "environ", {})
+    config = build_sandbox_config(**_cfg())  # type: ignore[arg-type]
+    assert "NIX_PATH" not in config.env
+    assert "NIX_PROFILES" not in config.env
+    assert "LANG" not in config.env
+    assert "TERM" not in config.env

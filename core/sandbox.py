@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from asyncio import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -100,3 +101,37 @@ class SandboxRegistry:
 
 default_registry = SandboxRegistry()
 default_registry.register("null", NullSandbox, priority=999)
+
+
+def build_sandbox_config(
+    worktree_path: str,
+    project_path: str,
+    symlinked_dirs: list[str],
+) -> SandboxConfig:
+    """Construct a SandboxConfig for Claude Code execution in a worktree."""
+    writable_paths = [worktree_path]
+    for dirname in symlinked_dirs:
+        joined = os.path.join(project_path, dirname)
+        resolved = os.path.realpath(joined)
+        if os.path.exists(resolved):
+            writable_paths.append(resolved)
+
+    readonly_paths = ["/nix/store"] if os.path.exists("/nix/store") else []
+
+    ephemeral_home_dirs = [os.path.expanduser("~/.claude")]
+
+    _fixed_keys = ["PATH", "HOME", "USER", "NIX_PATH", "NIX_PROFILES", "LANG", "TERM"]
+    env: dict[str, str] = {}
+    for key in _fixed_keys:
+        if key in os.environ:
+            env[key] = os.environ[key]
+    for key, value in os.environ.items():
+        if re.match(r"^(CLAUDE_|ANTHROPIC_)", key):
+            env[key] = value
+
+    return SandboxConfig(
+        writable_paths=writable_paths,
+        readonly_paths=readonly_paths,
+        ephemeral_home_dirs=ephemeral_home_dirs,
+        env=env,
+    )

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `build_sandbox_config()` builder for constructing SandboxConfig from worktree/project paths
 - `apply_patch_to_develop()` helper in `core/merge.py` — applies a pre-verified patch to the target branch via temporary worktree for the remote merge pipeline
 - Optional `patch` field on `CreateWorktreeRequest` — worker applies patch via `git apply` after worktree creation (used by merge pipeline)
 - Execution timeout reaper: periodic cleanup (every 5 min) marks running executions older than 2 hours with no connected worker as failed
