@@ -57,7 +57,7 @@ async def _seed_merge_task(store: InMemoryStore):
     sm = TaskStateMachine(store)
     await sm.transition(task.id, ev.SPEC_QA)
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
-    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+    await sm.transition(task.id, ev.IN_PROGRESS)
 
     execution_id = uuid4()
     branch_name = f"execution/{execution_id}"

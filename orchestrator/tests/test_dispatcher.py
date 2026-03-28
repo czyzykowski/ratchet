@@ -92,7 +92,7 @@ async def _seed_qa_task(
     sm = TaskStateMachine(store)
     await sm.transition(task.id, ev.SPEC_QA)
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
-    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+    await sm.transition(task.id, ev.IN_PROGRESS)
 
     execution_id = uuid4()
     payload = {
@@ -137,7 +137,7 @@ async def _seed_merge_task(
     sm = TaskStateMachine(store)
     await sm.transition(task.id, ev.SPEC_QA)
     await sm.transition(task.id, ev.READY_FOR_IMPLEMENTATION)
-    await sm.transition(task.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+    await sm.transition(task.id, ev.IN_PROGRESS)
 
     execution_id = uuid4()
     payload = {
@@ -167,7 +167,6 @@ def _mock_sequencer():
     """Return a mock PipelineSequencer with async no-op pipeline methods."""
     mock = MagicMock()
     mock.run_impl_pipeline = AsyncMock(return_value=None)
-    mock.run_qa_pipeline = AsyncMock(return_value=None)
     mock.run_merge_pipeline = AsyncMock(return_value=None)
     return mock
 
@@ -310,47 +309,40 @@ async def test_dispatch_loop_calls_dispatch_pending_multiple_times() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_priority_merge_before_qa_before_impl() -> None:
-    """Merge tasks dispatched before QA tasks, QA before impl."""
+async def test_dispatch_priority_merge_before_impl() -> None:
+    """Merge tasks dispatched before impl tasks."""
     store = _make_store()
     registry = WorkerRegistry()
 
-    # Three separate projects, each with a different pipeline type
+    # Two separate projects, each with a different pipeline type
     impl_task, _, _ = await _seed_ready_task(store)
-    qa_task, _, _ = await _seed_qa_task(store)
     merge_task, _, _ = await _seed_merge_task(store)
 
-    # Three workers available
+    # Two workers available
     _register_worker(registry, "w1", ["python"])
     _register_worker(registry, "w2", ["python"])
-    _register_worker(registry, "w3", ["python"])
 
-    dispatched_pipelines: list[str] = []
+    dispatched_pipelines: list[tuple[str, object]] = []
 
     async def track_impl(channel, task, project, spec):
         dispatched_pipelines.append(("impl", task.id))
-
-    async def track_qa(channel, task, project, spec):
-        dispatched_pipelines.append(("qa", task.id))
 
     async def track_merge(channel, task, project):
         dispatched_pipelines.append(("merge", task.id))
 
     mock_seq = MagicMock()
     mock_seq.run_impl_pipeline = AsyncMock(side_effect=track_impl)
-    mock_seq.run_qa_pipeline = AsyncMock(side_effect=track_qa)
     mock_seq.run_merge_pipeline = AsyncMock(side_effect=track_merge)
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert len(result) == 3
+    assert len(result) == 2
     # Let background tasks run
     await asyncio.sleep(0.05)
 
     pipeline_types = [p[0] for p in dispatched_pipelines]
     assert "merge" in pipeline_types
-    assert "qa" in pipeline_types
     assert "impl" in pipeline_types
 
 
@@ -387,7 +379,7 @@ async def test_dispatch_skips_project_with_in_progress_task() -> None:
 
     # Transition task1 to IN_PROGRESS (simulates another worker already handling it)
     sm = TaskStateMachine(store)
-    await sm.transition(task1.id, ev.IN_PROGRESS, extra_payload={"qa_fix_attempts": 0})
+    await sm.transition(task1.id, ev.IN_PROGRESS)
 
     # Create a second task in same project (it's ready_for_implementation)
     task2 = await TaskManager(store).create_task(project.id, "Second task")
@@ -409,24 +401,21 @@ async def test_dispatch_skips_project_with_in_progress_task() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dispatch_mix_of_pipeline_types_to_separate_workers() -> None:
-    """Impl and QA tasks from different projects dispatched to separate workers."""
+async def test_dispatch_ready_for_qa_task_not_dispatched() -> None:
+    """Tasks in ready_for_qa are NOT dispatched by the dispatcher (QA runs inside impl pipeline)."""
     store = _make_store()
     registry = WorkerRegistry()
 
-    impl_task, _, _ = await _seed_ready_task(store)
+    # Create a task in ready_for_qa
     qa_task, _, _ = await _seed_qa_task(store)
 
     _register_worker(registry, "w1", ["python"])
-    _register_worker(registry, "w2", ["python"])
 
     mock_seq = _mock_sequencer()
 
     with patch("orchestrator.dispatcher.PipelineSequencer", return_value=mock_seq):
         result = await dispatch_pending(store, registry)
 
-    assert len(result) == 2
-    await asyncio.sleep(0)
-    # Both pipeline types were dispatched
-    mock_seq.run_impl_pipeline.assert_called_once()
-    mock_seq.run_qa_pipeline.assert_called_once()
+    # ready_for_qa task should NOT be dispatched
+    assert len(result) == 0
+    mock_seq.run_impl_pipeline.assert_not_called()

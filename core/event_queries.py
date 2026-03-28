@@ -35,11 +35,3 @@ def should_skip_baseline_qa(task_events: list[Any]) -> bool:
     return last_failed_seq is None or last_force_seq > last_failed_seq
 
 
-def get_qa_fix_attempts(task_events: list[Any]) -> int:
-    """Read qa_fix_attempts from the latest TASK_STATUS_CHANGED event."""
-    for event in reversed(task_events):
-        if event.event_type == ev.TASK_STATUS_CHANGED:
-            val = event.payload.get("qa_fix_attempts")
-            if val is not None:
-                return int(val)
-    return 0

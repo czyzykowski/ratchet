@@ -18,7 +18,6 @@ from uuid import UUID, uuid4
 from core import events as ev
 from core import git_transfer
 from core.context_assembler import build_prompt, read_intent
-from core.event_queries import get_qa_fix_attempts as _get_qa_fix_attempts
 from core.merge import apply_patch_to_develop
 from core.models import ExecutionTrace, Project, Spec, Task
 from core.models_config import WORKER_MODEL
@@ -380,21 +379,44 @@ class PipelineSequencer:
         project: Project,
         spec: Spec,
     ) -> PipelineResult:
-        """Drive remote worker through the implementation pipeline.
+        """Drive remote worker through the implementation pipeline, including QA fix loop.
 
         Steps: GetProjectStatus → (SetupProject/UpdateProject) → record execution
-        → transition to IN_PROGRESS → CreateWorktree → SetupEnvironment
-        → RunClaude → GetDiff → RemoveWorktree → transition result.
+        → CreateWorktree → SetupEnvironment → RunClaude (impl)
+        → [transition to READY_FOR_QA] → ReadFile(ratchet.yaml) → QA fix loop
+        → GetDiff → apply patch → RemoveWorktree → transition to READY_FOR_DEPLOYMENT.
+
+        The QA fix loop runs entirely within the same worktree: auto-fix commands,
+        QA step commands, Claude fix attempts (up to max_fix_attempts), then Claude review.
+        Only one execution record is created per task attempt.
         """
         task_id = task.id
         project_id = project.id
         execution_id: UUID | None = None
+        trace_parts: list[str] = []
+
+        def _save_trace() -> None:
+            if execution_id is None:
+                return
+            now = datetime.now(UTC)
+            content = (
+                f"# Execution Trace: {execution_id}\n"
+                f"# Task: {task_id}\n\n"
+            ) + "\n\n".join(trace_parts)
+            self._store.save_trace(ExecutionTrace(
+                execution_id=execution_id,
+                task_id=task_id,
+                spec_id=spec.id,
+                content=content,
+                started_at=now,
+                created_at=now,
+            ))
 
         try:
             # Step 1: ensure worker has the project
             head_commit = await self._ensure_project_on_worker(channel, project)
 
-            # Step 2: record execution start (branch name uses execution_id for consistency)
+            # Step 2: record execution start
             # Note: TASK_ASSIGNED_TO_WORKER and IN_PROGRESS transition are done
             # by the dispatcher BEFORE this pipeline runs, to prevent duplicate dispatch.
             exec_uuid = uuid4()
@@ -404,7 +426,7 @@ class PipelineSequencer:
                 base_commit=head_commit,
             )
 
-            # Step 5: CreateWorktree
+            # Step 3: CreateWorktree
             create_wt_req = CreateWorktreeRequest(
                 type="create_worktree",
                 request_id=str(uuid4()),
@@ -416,7 +438,7 @@ class PipelineSequencer:
             assert isinstance(create_wt_resp, CreateWorktreeResponse)
             worktree_path = create_wt_resp.worktree_path or f"/remote/{execution_id}"
 
-            # Step 6: SetupEnvironment — symlink shared deps into worktree
+            # Step 4: SetupEnvironment — symlink shared deps into worktree
             setup_env_req = SetupEnvironmentRequest(
                 type="setup_environment",
                 request_id=str(uuid4()),
@@ -426,7 +448,7 @@ class PipelineSequencer:
             )
             await channel.send_command(setup_env_req)
 
-            # Step 7: assemble prompt
+            # Step 5: assemble prompt
             intent_content = ""
             try:
                 intent_content = read_intent(project.local_path, project.intent_md)
@@ -435,7 +457,7 @@ class PipelineSequencer:
 
             prompt = build_prompt(intent_content, spec.content)
 
-            # Step 8: RunClaude
+            # Step 6: RunClaude (implementation)
             run_claude_req = RunClaudeRequest(
                 type="run_claude",
                 request_id=str(uuid4()),
@@ -448,27 +470,16 @@ class PipelineSequencer:
             claude_resp = await channel.send_command(run_claude_req)
             assert isinstance(claude_resp, RunClaudeResponse)
 
-            # Step 9: save trace and parse output for COMPLETED/BLOCKED markers
             stdout = claude_resp.stdout or ""
             stderr = claude_resp.stderr or ""
             session_jsonl = claude_resp.session_jsonl or ""
-            trace_content = (
-                f"# Execution Trace: {execution_id}\n"
-                f"# Task: {task_id}\n"
+            trace_parts.append(
+                f"=== IMPLEMENTATION ===\n"
                 f"# Returncode: {claude_resp.returncode}\n\n"
                 f"## Claude Output\n\n```\n{stdout}\n{stderr}\n```\n\n"
                 f"## Session Transcript (JSONL)\n\n```jsonl\n{session_jsonl}\n```"
             )
-            now = datetime.now(UTC)
-            trace = ExecutionTrace(
-                execution_id=execution_id,
-                task_id=task_id,
-                spec_id=spec.id,
-                content=trace_content,
-                started_at=now,
-                created_at=now,
-            )
-            self._store.save_trace(trace)
+
             from core.invoker import has_blocked_marker, has_completed_marker
 
             is_blocked = (
@@ -478,23 +489,8 @@ class PipelineSequencer:
             )
             is_completed = has_completed_marker(stdout) and not is_blocked
 
-            # Step 10: GetDiff and apply to orchestrator's local repo
-            get_diff_req = GetDiffRequest(
-                type="get_diff",
-                request_id=str(uuid4()),
-                project_id=str(project_id),
-                execution_id=str(execution_id),
-            )
-            diff_resp = await channel.send_command(get_diff_req)
-            assert isinstance(diff_resp, GetDiffResponse)
-            patch_text = diff_resp.patch or ""
-
-            # Guard: completed implementation must produce changes
-            if is_completed and not patch_text:
-                failure = (
-                    "Implementation completed but produced no changes"
-                    " (empty diff from worker)"
-                )
+            if not is_completed:
+                failure = f"Claude returned BLOCKED or non-zero exit: {stdout[:500]}"
                 logger.error("task=%s: %s", task_id, failure)
                 await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_fail(execution_id, failure)
@@ -502,13 +498,64 @@ class PipelineSequencer:
                     task_id, ev.BLOCKED,
                     extra_payload={"failure_reason": failure},
                 )
+                _save_trace()
                 return PipelineResult(
                     success=False, task_id=task_id, execution_id=execution_id,
                     failure_reason=failure,
                 )
 
-            # Apply the worker's changes to the orchestrator's execution branch
-            if patch_text:
+            # Step 7: transition to ready_for_qa (internal marker — dispatcher does not re-dispatch)
+            await self._state_machine.transition(task_id, ev.READY_FOR_QA)
+
+            # Step 8: ReadFile(ratchet.yaml) — parse QA config
+            read_file_req = ReadFileRequest(
+                type="read_file",
+                request_id=str(uuid4()),
+                project_id=str(project_id),
+                execution_id=str(execution_id),
+                path="ratchet.yaml",
+            )
+            read_file_resp = await channel.send_command(read_file_req)
+            assert isinstance(read_file_resp, ReadFileResponse)
+
+            qa_config = None
+            if read_file_resp.content:
+                qa_config = load_qa_config_from_string(read_file_resp.content)
+
+            if qa_config is None:
+                # No QA config — get diff, apply patch, cleanup, done
+                logger.info(
+                    "No QA config found for task=%s, transitioning to ready_for_deployment",
+                    task_id,
+                )
+                get_diff_req = GetDiffRequest(
+                    type="get_diff",
+                    request_id=str(uuid4()),
+                    project_id=str(project_id),
+                    execution_id=str(execution_id),
+                )
+                diff_resp = await channel.send_command(get_diff_req)
+                assert isinstance(diff_resp, GetDiffResponse)
+                patch_text = diff_resp.patch or ""
+
+                if not patch_text:
+                    failure = (
+                        "Implementation completed but produced no changes"
+                        " (empty diff from worker)"
+                    )
+                    logger.error("task=%s: %s", task_id, failure)
+                    await self._try_remove_worktree(channel, project_id, execution_id)
+                    await self._record_execution_fail(execution_id, failure)
+                    await self._state_machine.transition(
+                        task_id, ev.BLOCKED,
+                        extra_payload={"failure_reason": failure},
+                    )
+                    _save_trace()
+                    return PipelineResult(
+                        success=False, task_id=task_id, execution_id=execution_id,
+                        failure_reason=failure,
+                    )
+
                 await asyncio.to_thread(
                     self._apply_patch_to_local,
                     project.local_path,
@@ -516,31 +563,222 @@ class PipelineSequencer:
                     patch_text,
                     base_commit=head_commit,
                 )
-
-            # Step 11: RemoveWorktree
-            await self._try_remove_worktree(channel, project_id, execution_id)
-
-            # Step 12: transition based on outcome
-            if is_completed:
+                await self._try_remove_worktree(channel, project_id, execution_id)
                 await self._record_execution_complete(execution_id)
-                await self._state_machine.transition(task_id, ev.READY_FOR_QA)
+                await self._state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+                _save_trace()
                 return PipelineResult(
                     success=True, task_id=task_id, execution_id=execution_id
                 )
-            else:
-                failure = f"Claude returned BLOCKED or non-zero exit: {stdout[:500]}"
-                await self._record_execution_fail(execution_id, failure)
-                await self._state_machine.transition(
+
+            # Step 9: QA fix loop — runs entirely within the same worktree
+            qa_fix_attempts = 0
+
+            while True:
+                # Auto-fix commands (non-fatal, e.g. ruff check --fix)
+                if qa_config.auto_fix:
+                    for fix_cmd in qa_config.auto_fix:
+                        autofix_req = RunCommandRequest(
+                            type="run_command",
+                            request_id=str(uuid4()),
+                            execution_id=str(execution_id),
+                            cmd=["bash", "-c", fix_cmd],
+                            cwd=worktree_path,
+                        )
+                        try:
+                            await channel.send_command(autofix_req)
+                        except PipelineAbort:
+                            pass  # auto-fix failures are non-fatal
+
+                # Run each QA step via RunCommand
+                qa_run_num = qa_fix_attempts + 1
+                failed_steps: list[tuple[str, str]] = []
+                qa_step_lines: list[str] = []
+                for step in qa_config.steps:
+                    cmd_req = RunCommandRequest(
+                        type="run_command",
+                        request_id=str(uuid4()),
+                        execution_id=str(execution_id),
+                        cmd=["bash", "-c", step.command],
+                        cwd=worktree_path,
+                    )
+                    try:
+                        cmd_resp = await channel.send_command(cmd_req)
+                        assert isinstance(cmd_resp, RunCommandResponse)
+                        if cmd_resp.returncode != 0:
+                            output = (cmd_resp.stdout or "") + (cmd_resp.stderr or "")
+                            failed_steps.append((step.name, output))
+                            qa_step_lines.append(f"[{step.name}] FAIL — {output[:200]}")
+                            break  # stop at first failure
+                        else:
+                            qa_step_lines.append(f"[{step.name}] PASS")
+                    except PipelineAbort as exc:
+                        failed_steps.append((step.name, exc.error))
+                        qa_step_lines.append(f"[{step.name}] FAIL — {exc.error[:200]}")
+                        break
+
+                trace_parts.append(
+                    f"=== QA RUN {qa_run_num} ===\n" + "\n".join(qa_step_lines)
+                )
+
+                if not failed_steps:
+                    # All QA steps passed — get diff and run Claude review
+                    get_diff_req = GetDiffRequest(
+                        type="get_diff",
+                        request_id=str(uuid4()),
+                        project_id=str(project_id),
+                        execution_id=str(execution_id),
+                    )
+                    diff_resp = await channel.send_command(get_diff_req)
+                    assert isinstance(diff_resp, GetDiffResponse)
+                    patch_text = diff_resp.patch or ""
+
+                    if not patch_text:
+                        failure = (
+                            "Implementation completed but produced no changes"
+                            " (empty diff from worker)"
+                        )
+                        logger.error("task=%s: %s", task_id, failure)
+                        await self._try_remove_worktree(channel, project_id, execution_id)
+                        await self._record_execution_fail(execution_id, failure)
+                        await self._state_machine.transition(
+                            task_id, ev.BLOCKED,
+                            extra_payload={"failure_reason": failure},
+                        )
+                        _save_trace()
+                        return PipelineResult(
+                            success=False, task_id=task_id, execution_id=execution_id,
+                            failure_reason=failure,
+                        )
+
+                    from core.qa_runner import build_review_prompt, parse_review_output
+
+                    review_prompt = build_review_prompt(spec.content, patch_text, [])
+                    review_req = RunClaudeRequest(
+                        type="run_claude",
+                        request_id=str(uuid4()),
+                        execution_id=str(execution_id),
+                        prompt=review_prompt,
+                        model=WORKER_MODEL,
+                        tools=["Bash", "Read", "Glob", "Grep"],
+                        cwd=worktree_path,
+                    )
+                    review_resp = await channel.send_command(review_req)
+                    assert isinstance(review_resp, RunClaudeResponse)
+
+                    review_output = (review_resp.stdout or "") + (review_resp.stderr or "")
+                    review_result = parse_review_output(review_output)
+
+                    trace_parts.append(
+                        f"=== CLAUDE REVIEW ===\n## Claude Output\n\n```\n{review_output}\n```"
+                    )
+
+                    await self._try_remove_worktree(channel, project_id, execution_id)
+
+                    if review_result.verdict == "passed":
+                        logger.info("QA review passed for task=%s", task_id)
+                        await asyncio.to_thread(
+                            self._apply_patch_to_local,
+                            project.local_path,
+                            branch_name,
+                            patch_text,
+                            base_commit=head_commit,
+                        )
+                        await self._record_execution_complete(execution_id)
+                        await self._state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
+                        _save_trace()
+                        return PipelineResult(
+                            success=True, task_id=task_id, execution_id=execution_id
+                        )
+                    else:
+                        logger.info("QA review failed for task=%s", task_id)
+                        failure = review_result.full_output
+                        await self._record_execution_fail(execution_id, failure)
+                        await self._state_machine.transition(
+                            task_id, ev.BLOCKED,
+                            extra_payload={"failure_reason": failure},
+                        )
+                        _save_trace()
+                        return PipelineResult(
+                            success=False, task_id=task_id, execution_id=execution_id,
+                            failure_reason=failure,
+                        )
+
+                # QA failed — decide whether to fix or block
+                combined_output = "\n\n".join(
+                    f"Step '{name}':\n{output}" for name, output in failed_steps
+                )
+
+                from orchestrator.failure_classifier import classify_qa_failure
+
+                failure_category = classify_qa_failure(combined_output)
+                if failure_category == "infra":
+                    logger.info(
+                        "QA failure classified as infrastructure for task=%s,"
+                        " skipping fix attempts",
+                        task_id,
+                    )
+                    infra_reason = f"[INFRA] {combined_output}"
+                    await self._try_remove_worktree(channel, project_id, execution_id)
+                    await self._record_execution_fail(execution_id, infra_reason)
+                    await self._state_machine.transition(
+                        task_id, ev.BLOCKED,
+                        extra_payload={"failure_reason": infra_reason},
+                    )
+                    _save_trace()
+                    return PipelineResult(
+                        success=False, task_id=task_id, execution_id=execution_id,
+                        failure_reason=infra_reason,
+                    )
+
+                if qa_fix_attempts >= qa_config.max_fix_attempts:
+                    logger.info(
+                        "Max QA fix attempts reached for task=%s, transitioning to blocked",
+                        task_id,
+                    )
+                    await self._try_remove_worktree(channel, project_id, execution_id)
+                    await self._record_execution_fail(execution_id, combined_output)
+                    await self._state_machine.transition(
+                        task_id, ev.BLOCKED,
+                        extra_payload={"failure_reason": combined_output},
+                    )
+                    _save_trace()
+                    return PipelineResult(
+                        success=False, task_id=task_id, execution_id=execution_id,
+                        failure_reason=combined_output,
+                    )
+
+                # Attempt a Claude fix
+                fix_prompt = (
+                    f"{spec.content}\n\n"
+                    f"QA tools found errors after implementation was marked complete:"
+                    f"\n{combined_output}"
+                )
+                logger.info(
+                    "QA fix attempt %d/%d for task=%s",
+                    qa_fix_attempts + 1,
+                    qa_config.max_fix_attempts,
                     task_id,
-                    ev.BLOCKED,
-                    extra_payload={"failure_reason": failure},
                 )
-                return PipelineResult(
-                    success=False,
-                    task_id=task_id,
-                    execution_id=execution_id,
-                    failure_reason=failure,
+                fix_req = RunClaudeRequest(
+                    type="run_claude",
+                    request_id=str(uuid4()),
+                    execution_id=str(execution_id),
+                    prompt=fix_prompt,
+                    model=WORKER_MODEL,
+                    tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+                    cwd=worktree_path,
                 )
+                fix_resp = await channel.send_command(fix_req)
+                assert isinstance(fix_resp, RunClaudeResponse)
+
+                fix_stdout = (fix_resp.stdout or "") + (fix_resp.stderr or "")
+                trace_parts.append(
+                    f"=== QA FIX ATTEMPT {qa_fix_attempts + 1} ===\n"
+                    f"## Claude Output\n\n```\n{fix_stdout}\n```"
+                )
+
+                qa_fix_attempts += 1
 
         except PipelineAbort as exc:
             logger.error(
@@ -550,6 +788,7 @@ class PipelineSequencer:
                 exc.error,
             )
             failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
+            _save_trace()
             return await self._abort_pipeline(
                 channel, task_id, project_id, execution_id, failure
             )
@@ -691,326 +930,6 @@ class PipelineSequencer:
         except PipelineAbort as exc:
             failure = f"Resume aborted at {exc.step_name!r}: {exc.error}"
             logger.error("Resume pipeline aborted for task=%s: %s", task_id, failure)
-            return await self._abort_pipeline(
-                channel, task_id, project_id, execution_id, failure
-            )
-
-    # ------------------------------------------------------------------
-    # QA pipeline
-    # ------------------------------------------------------------------
-
-    async def run_qa_pipeline(
-        self,
-        channel: WorkerChannel,
-        task: Task,
-        project: Project,
-        spec: Spec,
-    ) -> PipelineResult:
-        """Drive remote worker through the QA pipeline.
-
-        Steps: find execution branch → CreateWorktree → SetupEnvironment
-        → ReadFile(ratchet.yaml) → RunCommand for each QA step
-        → (if failures and retries left: RunClaude fix → re-run)
-        → RemoveWorktree → transition result.
-        """
-        task_id = task.id
-        project_id = project.id
-        execution_id: UUID | None = None
-
-        # Find the impl execution branch (not QA branches) from task events
-        execution_events = await self._store.get_events(task_id, "task_executions")
-        execution_branch: str | None = None
-        for event in reversed(execution_events):
-            if event.event_type == ev.EXECUTION_STARTED:
-                bn = event.payload.get("branch_name")
-                if bn and bn.startswith("execution/"):
-                    execution_branch = bn
-                    break
-
-        if not execution_branch:
-            failure = "QA cannot run: no execution branch found for task"
-            logger.error("task=%s: %s", task_id, failure)
-            await self._state_machine.transition(
-                task_id, ev.BLOCKED, extra_payload={"failure_reason": failure}
-            )
-            return PipelineResult(
-                success=False, task_id=task_id, failure_reason=failure
-            )
-
-        # Get current QA fix attempts from task events
-        task_events = await self._store.get_events(task_id, "task")
-        qa_fix_attempts = _get_qa_fix_attempts(task_events)
-
-        try:
-            # Step 1: ensure worker has the project
-            await self._ensure_project_on_worker(channel, project)
-
-            # Step 2: create execution record for QA
-            qa_branch_name = f"qa/{uuid4()}"
-            execution_id = await self._record_execution_start(
-                task_id, spec.id, qa_branch_name
-            )
-            await self._store.append_event(
-                aggregate_id=task_id,
-                aggregate_type="task",
-                event_type=ev.TASK_ASSIGNED_TO_WORKER,
-                payload={"worker_id": channel.worker_id, "execution_id": str(execution_id)},
-            )
-
-            # Step 3: CreateWorktree on execution branch
-            create_wt_req = CreateWorktreeRequest(
-                type="create_worktree",
-                request_id=str(uuid4()),
-                project_id=str(project_id),
-                execution_id=str(execution_id),
-                base_commit=execution_branch,
-            )
-            create_wt_resp = await channel.send_command(create_wt_req)
-            assert isinstance(create_wt_resp, CreateWorktreeResponse)
-            worktree_path = create_wt_resp.worktree_path or f"/remote/{execution_id}"
-
-            # Step 4: SetupEnvironment
-            setup_env_req = SetupEnvironmentRequest(
-                type="setup_environment",
-                request_id=str(uuid4()),
-                project_id=str(project_id),
-                execution_id=str(execution_id),
-                symlinks=_STANDARD_SYMLINKS,
-            )
-            await channel.send_command(setup_env_req)
-
-            # Step 5: ReadFile(ratchet.yaml) → parse QA config
-            read_file_req = ReadFileRequest(
-                type="read_file",
-                request_id=str(uuid4()),
-                project_id=str(project_id),
-                execution_id=str(execution_id),
-                path="ratchet.yaml",
-            )
-            read_file_resp = await channel.send_command(read_file_req)
-            assert isinstance(read_file_resp, ReadFileResponse)
-
-            qa_config = None
-            if read_file_resp.content:
-                qa_config = load_qa_config_from_string(read_file_resp.content)
-
-            if qa_config is None:
-                # No QA config — skip QA and advance
-                logger.info(
-                    "No QA config found for task=%s, transitioning to ready_for_deployment",
-                    task_id,
-                )
-                await self._try_remove_worktree(channel, project_id, execution_id)
-                await self._record_execution_complete(execution_id)
-                await self._state_machine.transition(task_id, ev.READY_FOR_DEPLOYMENT)
-                return PipelineResult(
-                    success=True, task_id=task_id, execution_id=execution_id
-                )
-
-            # Step 5b: run auto-fix commands (e.g. ruff check --fix)
-            if qa_config.auto_fix:
-                for fix_cmd in qa_config.auto_fix:
-                    autofix_req = RunCommandRequest(
-                        type="run_command",
-                        request_id=str(uuid4()),
-                        execution_id=str(execution_id),
-                        cmd=["bash", "-c", fix_cmd],
-                        cwd=worktree_path,
-                    )
-                    try:
-                        await channel.send_command(autofix_req)
-                    except PipelineAbort:
-                        pass  # auto-fix failures are non-fatal
-
-            # Step 6: run each QA step via RunCommand
-            failed_steps: list[tuple[str, str]] = []
-            for step in qa_config.steps:
-                cmd_req = RunCommandRequest(
-                    type="run_command",
-                    request_id=str(uuid4()),
-                    execution_id=str(execution_id),
-                    cmd=["bash", "-c", step.command],
-                    cwd=worktree_path,
-                )
-                try:
-                    cmd_resp = await channel.send_command(cmd_req)
-                    assert isinstance(cmd_resp, RunCommandResponse)
-                    if cmd_resp.returncode != 0:
-                        output = (cmd_resp.stdout or "") + (cmd_resp.stderr or "")
-                        failed_steps.append((step.name, output))
-                        break  # stop at first failure
-                except PipelineAbort as exc:
-                    # RunCommand itself failed (transport/executor error)
-                    failed_steps.append((step.name, exc.error))
-                    break
-
-            if not failed_steps:
-                # All QA steps passed — run Claude review
-                # Use the full implementation diff (develop..execution branch)
-                # computed on the orchestrator, not GetDiff from the worker
-                # (which only shows auto-fix changes since the QA worktree
-                # was created from the execution branch).
-                local_path = project.local_path
-
-                def _get_impl_diff() -> str:
-                    r = subprocess.run(
-                        ["git", "diff", f"develop...{execution_branch}"],
-                        cwd=local_path, capture_output=True, text=True,
-                    )
-                    return r.stdout if r.returncode == 0 else ""
-
-                diff_text = await asyncio.to_thread(_get_impl_diff)
-
-                from core.qa_runner import build_review_prompt, parse_review_output
-
-                review_prompt = build_review_prompt(
-                    spec.content, diff_text, []
-                )
-                review_req = RunClaudeRequest(
-                    type="run_claude",
-                    request_id=str(uuid4()),
-                    execution_id=str(execution_id),
-                    prompt=review_prompt,
-                    model=WORKER_MODEL,
-                    tools=["Bash", "Read", "Glob", "Grep"],
-                    cwd=worktree_path,
-                )
-                review_resp = await channel.send_command(review_req)
-                assert isinstance(review_resp, RunClaudeResponse)
-
-                review_output = (review_resp.stdout or "") + (review_resp.stderr or "")
-                review_result = parse_review_output(review_output)
-
-                await self._try_remove_worktree(channel, project_id, execution_id)
-                await self._record_execution_complete(execution_id)
-
-                if review_result.verdict == "passed":
-                    logger.info("QA review passed for task=%s", task_id)
-                    current = await self._state_machine.get_current_status(task_id)
-                    if current != ev.READY_FOR_DEPLOYMENT:
-                        await self._state_machine.transition(
-                            task_id, ev.READY_FOR_DEPLOYMENT
-                        )
-                    return PipelineResult(
-                        success=True, task_id=task_id, execution_id=execution_id
-                    )
-                else:
-                    logger.info("QA review failed for task=%s", task_id)
-                    await self._state_machine.transition(
-                        task_id,
-                        ev.BLOCKED,
-                        extra_payload={"failure_reason": review_result.full_output},
-                    )
-                    return PipelineResult(
-                        success=False,
-                        task_id=task_id,
-                        execution_id=execution_id,
-                        failure_reason=review_result.full_output,
-                    )
-
-            # Some steps failed
-            combined_output = "\n\n".join(
-                f"Step '{name}':\n{output}" for name, output in failed_steps
-            )
-
-            # Classify failure before deciding whether to attempt fixes
-            from orchestrator.failure_classifier import classify_qa_failure
-
-            failure_category = classify_qa_failure(combined_output)
-            if failure_category == "infra":
-                logger.info(
-                    "QA failure classified as infrastructure for task=%s, skipping fix attempts",
-                    task_id,
-                )
-                infra_reason = f"[INFRA] {combined_output}"
-                await self._try_remove_worktree(channel, project_id, execution_id)
-                await self._record_execution_fail(execution_id, infra_reason)
-                await self._state_machine.transition(
-                    task_id,
-                    ev.BLOCKED,
-                    extra_payload={
-                        "failure_reason": infra_reason,
-                        "qa_fix_attempts": qa_fix_attempts,
-                    },
-                )
-                return PipelineResult(
-                    success=False,
-                    task_id=task_id,
-                    execution_id=execution_id,
-                    failure_reason=infra_reason,
-                )
-
-            if qa_fix_attempts >= qa_config.max_fix_attempts:
-                # Max retries exhausted — block
-                logger.info(
-                    "Max QA fix attempts reached for task=%s, transitioning to blocked",
-                    task_id,
-                )
-                await self._try_remove_worktree(channel, project_id, execution_id)
-                await self._record_execution_fail(execution_id, combined_output)
-                await self._state_machine.transition(
-                    task_id,
-                    ev.BLOCKED,
-                    extra_payload={
-                        "failure_reason": combined_output,
-                        "qa_fix_attempts": qa_fix_attempts,
-                    },
-                )
-                return PipelineResult(
-                    success=False,
-                    task_id=task_id,
-                    execution_id=execution_id,
-                    failure_reason=combined_output,
-                )
-
-            # Attempt a Claude fix
-            fix_prompt = (
-                f"{spec.content}\n\n"
-                f"QA tools found errors after implementation was marked complete:"
-                f"\n{combined_output}"
-            )
-            logger.info(
-                "QA fix attempt %d/%d for task=%s",
-                qa_fix_attempts + 1,
-                qa_config.max_fix_attempts,
-                task_id,
-            )
-            fix_req = RunClaudeRequest(
-                type="run_claude",
-                request_id=str(uuid4()),
-                execution_id=str(execution_id),
-                prompt=fix_prompt,
-                model=WORKER_MODEL,
-                tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
-                cwd=worktree_path,
-            )
-            await channel.send_command(fix_req)
-
-            # Clean up this QA worktree and re-queue for QA
-            await self._try_remove_worktree(channel, project_id, execution_id)
-            await self._record_execution_fail(
-                execution_id, f"QA fix attempt {qa_fix_attempts + 1}, re-queuing"
-            )
-            await self._state_machine.transition(
-                task_id,
-                ev.READY_FOR_QA,
-                extra_payload={"qa_fix_attempts": qa_fix_attempts + 1},
-            )
-            return PipelineResult(
-                success=False,
-                task_id=task_id,
-                execution_id=execution_id,
-                failure_reason=combined_output,
-            )
-
-        except PipelineAbort as exc:
-            logger.error(
-                "QA pipeline aborted for task=%s at step=%s: %s",
-                task_id,
-                exc.step_name,
-                exc.error,
-            )
-            failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
             return await self._abort_pipeline(
                 channel, task_id, project_id, execution_id, failure
             )

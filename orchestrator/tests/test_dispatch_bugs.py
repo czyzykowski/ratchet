@@ -442,13 +442,12 @@ async def test_skips_waiting_for_input_task_with_unanswered_question():
 
 
 # ---------------------------------------------------------------------------
-# Bug: QA/merge dispatch must not transition to in_progress (invalid)
+# Bug: QA tasks in ready_for_qa are NOT dispatched (QA runs inside impl pipeline)
 # ---------------------------------------------------------------------------
 
 
-async def test_qa_dispatch_does_not_crash_on_transition():
-    """dispatch_pending should successfully dispatch a QA task without
-    trying an invalid ready_for_qa -> in_progress transition."""
+async def test_ready_for_qa_task_not_dispatched_by_dispatcher():
+    """dispatch_pending must NOT dispatch ready_for_qa tasks — QA runs inside impl pipeline."""
     store = InMemoryStore()
     _, project = await _setup_project(store)
     task_id = await _setup_task(store, project.id)
@@ -459,30 +458,15 @@ async def test_qa_dispatch_does_not_crash_on_transition():
     await sm.transition(task_id, ev.IN_PROGRESS)
     await sm.transition(task_id, ev.READY_FOR_QA)
 
-    # Record an execution branch so QA pipeline can find it
-    exec_id = str(uuid.uuid4())
-    await store.append_event(
-        aggregate_id=task_id,
-        aggregate_type="task_executions",
-        event_type=ev.EXECUTION_STARTED,
-        payload={
-            "execution_id": exec_id,
-            "task_id": str(task_id),
-            "spec_id": str(uuid.uuid4()),
-            "branch_name": f"execution/{exec_id}",
-            "status": "running",
-        },
-    )
-
     registry = _make_registry_with_worker()
 
     with patch(
-        "orchestrator.sequencer.PipelineSequencer.run_qa_pipeline",
+        "orchestrator.sequencer.PipelineSequencer.run_impl_pipeline",
         new_callable=AsyncMock,
     ):
         results = await dispatch_pending(store, registry)
 
-    assert len(results) == 1
+    assert len(results) == 0
     status = await sm.get_current_status(task_id)
     assert status == ev.READY_FOR_QA
 

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class DispatchResult:
     """Result of a single dispatch action."""
 
-    action: str  # "impl" | "qa" | "merge" | "resume" | "idle"
+    action: str  # "impl" | "merge" | "resume" | "idle"
     task_id: UUID | None = None
     success: bool = True
     detail: str = ""
@@ -42,7 +42,7 @@ class DispatchResult:
 async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[DispatchResult]:
     """Discover ready tasks in priority order and dispatch to available workers.
 
-    Priority: merge (ready_for_deployment) → QA (ready_for_qa) → impl (ready_for_implementation).
+    Priority: merge (ready_for_deployment) → impl (ready_for_implementation).
     Enforces one-pipeline-per-project: skips projects that already have an IN_PROGRESS task.
     Returns count of tasks dispatched in this pass.
     """
@@ -55,7 +55,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
 
     # Candidates by pipeline type: (task, project, spec | None)
     merge_candidates: list[tuple[Task, Project]] = []
-    qa_candidates: list[tuple[Task, Project, Spec]] = []
     impl_candidates: list[tuple[Task, Project, Spec]] = []
     resume_candidates: list[tuple[Task, Project, Spec]] = []
 
@@ -111,13 +110,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
                 if not any(e.event_type == ev.TASK_AUTO_MERGE_FAILED for e in task_events):
                     merge_candidates.append((task, project))
 
-            elif task.status == ev.READY_FOR_QA:
-                spec = await spec_manager.get_current_spec(task_id)
-                if spec is None:
-                    logger.warning("Task %s has no spec, skipping QA dispatch", task_id)
-                    continue
-                qa_candidates.append((task, project, spec))
-
             elif task.status == ev.WAITING_FOR_INPUT:
                 # Check if all questions have been answered
                 from core import qa_manager
@@ -153,7 +145,6 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
 
     # Sort each group by task creation time (oldest first)
     merge_candidates.sort(key=lambda c: c[0].created_at)
-    qa_candidates.sort(key=lambda c: c[0].created_at)
     resume_candidates.sort(key=lambda c: c[0].created_at)
     impl_candidates.sort(key=lambda c: c[0].created_at)
 
@@ -209,21 +200,15 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
             },
         )
         # Only transition to IN_PROGRESS for impl tasks (ready_for_implementation
-        # or waiting_for_input). QA and merge tasks stay in their current state —
+        # or waiting_for_input). Merge tasks stay in their current state —
         # the pipeline sequencer handles their transitions.
         if task_t.status in (ev.READY_FOR_IMPLEMENTATION, ev.WAITING_FOR_INPUT):
-            await state_machine.transition(
-                task_t.id, ev.IN_PROGRESS,
-                extra_payload={"qa_fix_attempts": 0},
-            )
+            await state_machine.transition(task_t.id, ev.IN_PROGRESS)
 
         dispatched_projects.add(project_t.id)
 
         if pipeline_type == "merge":
             coro = sequencer.run_merge_pipeline(channel, task_t, project_t)
-        elif pipeline_type == "qa":
-            assert spec_t is not None
-            coro = sequencer.run_qa_pipeline(channel, task_t, project_t, spec_t)
         elif pipeline_type == "resume":
             assert spec_t is not None
             coro = sequencer.run_resume_pipeline(channel, task_t, project_t, spec_t)
@@ -273,12 +258,9 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> list[Dispa
         )
         return True
 
-    # Process in priority order: merge → QA → impl
+    # Process in priority order: merge → impl
     for merge_task, merge_project in merge_candidates:
         await _start_pipeline("merge", merge_task, merge_project, None)
-
-    for qa_task, qa_project, qa_spec in qa_candidates:
-        await _start_pipeline("qa", qa_task, qa_project, qa_spec)
 
     # Baseline QA: before dispatching impl tasks, check that the project's
     # develop HEAD passes QA. This prevents wasting execution cycles when
