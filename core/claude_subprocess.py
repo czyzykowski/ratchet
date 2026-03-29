@@ -180,7 +180,7 @@ def run(
         config = request.sandbox_config if request.sandbox_config is not None else _SandboxConfig()
         loop = asyncio.new_event_loop()
         try:
-            coro = request.sandbox.start(cmd, config, request.cwd)
+            coro = request.sandbox.start(cmd, config, request.cwd, stdin=request.prompt)
             sandbox_result = loop.run_until_complete(coro)
         finally:
             loop.close()
@@ -250,7 +250,7 @@ async def async_start(request: ClaudeRequest) -> ClaudeResult:
 
         cmd = _build_cmd(request)
         config = request.sandbox_config if request.sandbox_config is not None else _SandboxConfig()
-        sandbox_result = await request.sandbox.start(cmd, config, request.cwd)
+        sandbox_result = await request.sandbox.start(cmd, config, request.cwd, stdin=request.prompt)
         return ClaudeResult(
             stdout=sandbox_result.stdout,
             stderr=sandbox_result.stderr,

@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Sandbox path in `async_start()` and `run()` now passes prompt via stdin; `NullSandbox.start()` accepts `stdin` parameter and forwards it to the subprocess — fixes "Input must be provided either through stdin" error on OSX worker
+
 ### Added
 - Pluggable sandbox protocol for isolated Claude Code execution with NullSandbox passthrough default
 - `worker/__main__.py` accepts `--sandbox {auto,none,<name>}` CLI argument (default `auto`)

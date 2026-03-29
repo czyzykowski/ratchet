@@ -27,7 +27,9 @@ class SandboxResult:
 
 
 class Sandbox(Protocol):
-    async def start(self, command: list[str], config: SandboxConfig, cwd: str) -> SandboxResult: ...
+    async def start(
+        self, command: list[str], config: SandboxConfig, cwd: str, stdin: str = ""
+    ) -> SandboxResult: ...
 
     async def cleanup(self) -> None: ...
 
@@ -41,16 +43,20 @@ class Sandbox(Protocol):
 class NullSandbox:
     """No-isolation sandbox: runs commands directly via asyncio subprocess."""
 
-    async def start(self, command: list[str], config: SandboxConfig, cwd: str) -> SandboxResult:
+    async def start(
+        self, command: list[str], config: SandboxConfig, cwd: str, stdin: str = ""
+    ) -> SandboxResult:
         merged_env = {**os.environ, **config.env}
         process = await asyncio.create_subprocess_exec(
             *command,
             cwd=cwd,
             env=merged_env,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await process.communicate()
+        stdin_bytes = stdin.encode("utf-8") if stdin else None
+        stdout_bytes, stderr_bytes = await process.communicate(input=stdin_bytes)
         return SandboxResult(
             returncode=process.returncode or 0,
             stdout=stdout_bytes.decode("utf-8", errors="replace"),
