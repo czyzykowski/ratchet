@@ -110,6 +110,9 @@ def _build_bootstrap_system_prompt() -> str:
     return "\n\n".join(sections)
 
 
+_BOOTSTRAP_CHAT_TEMPLATE = _build_bootstrap_system_prompt()
+
+
 class CreateSessionBody(BaseModel):
     working_directory: str | None = None
 

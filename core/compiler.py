@@ -19,30 +19,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
-    """Run claude -p non-interactively, stream output, and return full output."""
-    if debug:
-        print("\n--- DEBUG: PROMPT SENT TO CLAUDE ---", file=sys.stderr)
-        print(prompt, file=sys.stderr)
-        print("--- END PROMPT ---\n", file=sys.stderr)
-
-    request = ClaudeRequest(
-        prompt=prompt,
-        cwd=local_path,
-        model=CHAT_MODEL,
-        allowed_tools="Read,Glob,Bash",
-    )
-    result = run_claude_subprocess(
-        request,
-        on_stdout_line=lambda line: print(line, end="", flush=True),
-    )
-    return result.stdout
-
-
-def build_compile_prompt(intent_md: str, feature_title: str, hls: HighLevelSpec) -> str:
-    """Build the non-interactive compilation prompt for a single high-level spec."""
-    return f"""You are generating a detailed implementation spec for a software task.
+_COMPILE_PROMPT_TEMPLATE = """\
+You are generating a detailed implementation spec for a software task.
 
 ## Project Intent
 {intent_md}
@@ -51,9 +29,9 @@ def build_compile_prompt(intent_md: str, feature_title: str, hls: HighLevelSpec)
 {feature_title}
 
 ## High-Level Spec to Compile
-Title: {hls.title}
+Title: {hls_title}
 
-{hls.content}
+{hls_content}
 
 ## Instructions
 Read the codebase to understand current patterns and conventions.
@@ -92,6 +70,36 @@ preceded by '## SPEC READY' on its own line:
 
 Be specific about file paths, function names, and test requirements.
 Do not ask clarifying questions — produce the spec directly."""
+
+
+def run_claude(prompt: str, local_path: str, debug: bool = False) -> str:
+    """Run claude -p non-interactively, stream output, and return full output."""
+    if debug:
+        print("\n--- DEBUG: PROMPT SENT TO CLAUDE ---", file=sys.stderr)
+        print(prompt, file=sys.stderr)
+        print("--- END PROMPT ---\n", file=sys.stderr)
+
+    request = ClaudeRequest(
+        prompt=prompt,
+        cwd=local_path,
+        model=CHAT_MODEL,
+        allowed_tools="Read,Glob,Bash",
+    )
+    result = run_claude_subprocess(
+        request,
+        on_stdout_line=lambda line: print(line, end="", flush=True),
+    )
+    return result.stdout
+
+
+def build_compile_prompt(intent_md: str, feature_title: str, hls: HighLevelSpec) -> str:
+    """Build the non-interactive compilation prompt for a single high-level spec."""
+    return _COMPILE_PROMPT_TEMPLATE.format(
+        intent_md=intent_md,
+        feature_title=feature_title,
+        hls_title=hls.title,
+        hls_content=hls.content,
+    )
 
 
 def extract_spec(output: str) -> str:

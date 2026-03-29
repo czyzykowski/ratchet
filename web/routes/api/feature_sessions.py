@@ -23,19 +23,8 @@ router = APIRouter(prefix="/feature-sessions")
 
 _INTERRUPTED = "[Request interrupted by user]"
 
-
-def _clean_history(
-    messages: list[tuple[str, str, str | None, str | None]],
-) -> list[tuple[str, str, str | None, str | None]]:
-    return [
-        (u, a, img, mt)
-        for u, a, img, mt in messages
-        if a and _INTERRUPTED not in u
-    ]
-
-
-def _build_feature_system_prompt(intent_md: str) -> str:
-    return f"""You are helping design a software feature for this project.
+_FEATURE_SESSION_TEMPLATE = """\
+You are helping design a software feature for this project.
 
 ## Project Intent
 {intent_md}
@@ -77,6 +66,20 @@ Be specific about file paths, function names, and implementation requirements.
 Read the codebase to understand current patterns before generating specs.
 
 When the user says "done", "generate", or "go", produce the feature definition immediately."""
+
+
+def _clean_history(
+    messages: list[tuple[str, str, str | None, str | None]],
+) -> list[tuple[str, str, str | None, str | None]]:
+    return [
+        (u, a, img, mt)
+        for u, a, img, mt in messages
+        if a and _INTERRUPTED not in u
+    ]
+
+
+def _build_feature_system_prompt(intent_md: str) -> str:
+    return _FEATURE_SESSION_TEMPLATE.format(intent_md=intent_md)
 
 
 def _extract_feature_preview(text: str) -> dict[str, Any] | None:

@@ -309,20 +309,7 @@ def get_git_diff(cwd: str, execution_branch: str | None = None, base_ref: str = 
     return proc.stdout
 
 
-def build_review_prompt(
-    spec_content: str, diff: str, step_results: list[QaStepResult]
-) -> str:
-    """Assemble a Claude review prompt from spec, git diff, and QA step results.
-
-    Instructs Claude to output QA_PASSED: or QA_FAILED: marker.
-    """
-    steps_summary = "\n\n".join(
-        f"### Step: {r.step_name}\nCommand: `{r.command}`\n"
-        f"Return code: {r.returncode}\n```\n{r.output}\n```"
-        for r in step_results
-    )
-
-    return f"""\
+_REVIEW_PROMPT_TEMPLATE = """\
 You are performing a QA review of a completed implementation task.
 
 ## Spec
@@ -349,6 +336,26 @@ given the tool results and diff above.
 
 Your response MUST start with either QA_PASSED: or QA_FAILED: on its own line.
 """
+
+
+def build_review_prompt(
+    spec_content: str, diff: str, step_results: list[QaStepResult]
+) -> str:
+    """Assemble a Claude review prompt from spec, git diff, and QA step results.
+
+    Instructs Claude to output QA_PASSED: or QA_FAILED: marker.
+    """
+    steps_summary = "\n\n".join(
+        f"### Step: {r.step_name}\nCommand: `{r.command}`\n"
+        f"Return code: {r.returncode}\n```\n{r.output}\n```"
+        for r in step_results
+    )
+
+    return _REVIEW_PROMPT_TEMPLATE.format(
+        spec_content=spec_content,
+        diff=diff,
+        steps_summary=steps_summary,
+    )
 
 
 def parse_review_output(output: str) -> QaReviewResult:

@@ -13,6 +13,26 @@ from core.models import ReviewRun, Suggestion, SuggestionEvidence
 from core.models_config import WORKER_MODEL
 from core.review_collector import CollectedData
 
+_REVIEW_ENGINE_PROMPT_TEMPLATE = (
+    "You are an expert engineering coach reviewing an "
+    "AI-driven autonomous development system.\n"
+    "\n"
+    "## Output Instructions\n"
+    "Output a JSON array (optionally wrapped in a markdown code fence) "
+    "where each element has exactly these keys:\n"
+    '"target" (one of "project_claude_md", "global_claude_md", "ratchet_yaml",'
+    ' "completion_instructions"),\n'
+    '"target_path" (absolute path string),\n'
+    '"title", "reasoning",\n'
+    '"evidence" (object with keys: task_ids, execution_ids, '
+    "trace_excerpts, failure_reasons, spec_refinement_counts, "
+    "git_log_excerpts),\n"
+    '"confidence" ("low"/"medium"/"high"),\n'
+    '"priority" ("low"/"medium"/"high"),\n'
+    '"current_content_excerpt",\n'
+    '"suggested_diff"'
+)
+
 
 def _completion_instructions_path() -> str:
     """Return absolute path to context_assembler.py."""
@@ -75,11 +95,9 @@ class ReviewEngine:
     def _build_prompt(self, data: CollectedData, previous_run_summary: str) -> str:
         lines: list[str] = []
 
-        # 1. Role preamble
-        lines.append(
-            "You are an expert engineering coach reviewing an "
-            "AI-driven autonomous development system."
-        )
+        # 1. Role preamble (from _REVIEW_ENGINE_PROMPT_TEMPLATE)
+        _role, _ = _REVIEW_ENGINE_PROMPT_TEMPLATE.split("\n\n## Output Instructions\n", 1)
+        lines.append(_role)
         lines.append("")
 
         # 2. Stats block
@@ -227,26 +245,11 @@ class ReviewEngine:
             lines.append(previous_run_summary)
             lines.append("")
 
-        # 11. Output instruction
+        # 11. Output instruction (from _REVIEW_ENGINE_PROMPT_TEMPLATE)
+        _, _output_inst = _REVIEW_ENGINE_PROMPT_TEMPLATE.split(
+            "\n\n## Output Instructions\n", 1
+        )
         lines.append("## Output Instructions")
-        lines.append(
-            "Output a JSON array (optionally wrapped in a markdown code fence) "
-            "where each element has exactly these keys:"
-        )
-        lines.append(
-            '"target" (one of "project_claude_md", "global_claude_md", "ratchet_yaml",'
-            ' "completion_instructions"),'
-        )
-        lines.append('"target_path" (absolute path string),')
-        lines.append('"title", "reasoning",')
-        lines.append(
-            '"evidence" (object with keys: task_ids, execution_ids, '
-            "trace_excerpts, failure_reasons, spec_refinement_counts, "
-            "git_log_excerpts),"
-        )
-        lines.append('"confidence" ("low"/"medium"/"high"),')
-        lines.append('"priority" ("low"/"medium"/"high"),')
-        lines.append('"current_content_excerpt",')
-        lines.append('"suggested_diff"')
+        lines.append(_output_inst)
 
         return "\n".join(lines)

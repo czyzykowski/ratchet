@@ -26,6 +26,43 @@ _ARCHITECTURE_ALLOWED_TOOLS = (
     "Read,Glob,Grep,Bash(git log:*,git show:*,git diff:*,find:*,wc:*)"
 )
 
+_ARCHITECTURE_SESSION_TEMPLATE = (
+    "You are an architecture analyst. Your role is to:\n"
+    "- Identify coupling between modules and suggest improvements\n"
+    "- Analyze module boundaries and separation of concerns\n"
+    "- Evaluate dependency graphs and highlight problematic patterns\n"
+    "- Suggest refactoring opportunities to improve maintainability\n"
+    "- Propose tasks for concrete architectural improvements\n\n"
+    "You have read access to the full codebase. Use it to understand the structure before "
+    "making recommendations.\n\n"
+    "## Write Actions\n"
+    "To propose an architectural improvement task, output a fenced action block:\n\n"
+    "```action\n"
+    '{"action": "create_task", "title": "Task title here"}\n'
+    "```\n\n"
+    "To create a feature with high-level specs, use these actions in sequence:\n\n"
+    "```action\n"
+    '{"action": "create_feature", "title": "Feature title",'
+    ' "description": "Feature description"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "add_hls", "feature_id": "<feature_id from above>",'
+    ' "title": "Spec title", "order": 1,'
+    ' "content": "Detailed description", "dependencies": []}\n'
+    "```\n\n"
+    "The `dependencies` field is a list of 1-based order indices"
+    " referencing other specs in the same feature.\n\n"
+    "To add a spec to an existing task (advances it to ready_for_implementation):\n\n"
+    "```action\n"
+    '{"action": "add_spec", "task_id": "<uuid>",'
+    ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
+    "```\n\n"
+    "Rules:\n"
+    "- Explain the architectural problem before proposing a task\n"
+    "- Only propose tasks for concrete, actionable improvements\n"
+    "- Confirm with the user before creating multiple tasks at once"
+)
+
 
 def _clean_history(
     messages: list[tuple[str, str, str | None, str | None]],
@@ -79,34 +116,8 @@ def _build_architecture_system_prompt(
     )
     sections.append(f"## Role\n{role}")
 
-    write_actions = (
-        "To propose an architectural improvement task, output a fenced action block:\n\n"
-        "```action\n"
-        '{"action": "create_task", "title": "Task title here"}\n'
-        "```\n\n"
-        "To create a feature with high-level specs, use these actions in sequence:\n\n"
-        "```action\n"
-        '{"action": "create_feature", "title": "Feature title",'
-        ' "description": "Feature description"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "add_hls", "feature_id": "<feature_id from above>",'
-        ' "title": "Spec title", "order": 1,'
-        ' "content": "Detailed description", "dependencies": []}\n'
-        "```\n\n"
-        "The `dependencies` field is a list of 1-based order indices"
-        " referencing other specs in the same feature.\n\n"
-        "To add a spec to an existing task (advances it to ready_for_implementation):\n\n"
-        "```action\n"
-        '{"action": "add_spec", "task_id": "<uuid>",'
-        ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
-        "```\n\n"
-        "Rules:\n"
-        "- Explain the architectural problem before proposing a task\n"
-        "- Only propose tasks for concrete, actionable improvements\n"
-        "- Confirm with the user before creating multiple tasks at once"
-    )
-    sections.append(f"## Write Actions\n{write_actions}")
+    _write_actions = _ARCHITECTURE_SESSION_TEMPLATE.split("\n## Write Actions\n", 1)[1]
+    sections.append(f"## Write Actions\n{_write_actions}")
 
     return "\n\n".join(sections)
 

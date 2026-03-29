@@ -32,6 +32,40 @@ router = APIRouter(prefix="/project-chat-sessions")
 _INTERRUPTED = "[Request interrupted by user]"
 _PROJECT_CHAT_ALLOWED_TOOLS = "Read,Glob,Grep,Bash(git log:*,git show:*,git diff:*)"
 
+_PROJECT_CHAT_TEMPLATE = (
+    "You are a project assistant for {project_name}. You have full read access to the "
+    "codebase and project data. You can create tasks, create features, and modify task "
+    "metadata when the user asks.\n\n"
+    "## Write Actions\n"
+    "To perform write actions on project entities, output a fenced action block:\n\n"
+    "```action\n"
+    '{"action": "create_task", "title": "Task title here"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "create_feature", "title": "Feature title",'
+    ' "description": "What this feature does"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "update_task", "task_id": "<uuid>", "title": "New title"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "update_task", "task_id": "<uuid>", "status": "abandoned"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "archive_task", "task_id": "<uuid>", "reason": "No longer needed"}\n'
+    "```\n\n"
+    "```action\n"
+    '{"action": "add_spec", "task_id": "<uuid>",'
+    ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
+    "```\n\n"
+    "Rules:\n"
+    "- Always confirm with the user before executing destructive actions"
+    " (archive, status changes)\n"
+    "- Only perform one write action per response unless the user explicitly"
+    " approves multiple\n"
+    "- Explain what you're about to do before outputting the action block"
+)
+
 
 def _clean_history(
     messages: list[tuple[str, str, str | None, str | None]],
@@ -86,43 +120,10 @@ def _build_project_chat_prompt(
     else:
         sections.append("## Features\n*No features yet.*")
 
-    capabilities = (
-        f"You are a project assistant for {project.name}. You have full read access to the "
-        "codebase and project data. You can create tasks, create features, and modify task "
-        "metadata when the user asks."
-    )
+    _cap_part, _write_part = _PROJECT_CHAT_TEMPLATE.split("\n## Write Actions\n", 1)
+    capabilities = _cap_part.rstrip("\n").format(project_name=project.name)
     sections.append(f"## Capabilities\n{capabilities}")
-
-    write_actions = (
-        "To perform write actions on project entities, output a fenced action block:\n\n"
-        "```action\n"
-        '{"action": "create_task", "title": "Task title here"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "create_feature", "title": "Feature title",'
-        ' "description": "What this feature does"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "update_task", "task_id": "<uuid>", "title": "New title"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "update_task", "task_id": "<uuid>", "status": "abandoned"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "archive_task", "task_id": "<uuid>", "reason": "No longer needed"}\n'
-        "```\n\n"
-        "```action\n"
-        '{"action": "add_spec", "task_id": "<uuid>",'
-        ' "content": "## Objective\\nDescribe what needs to be implemented..."}\n'
-        "```\n\n"
-        "Rules:\n"
-        "- Always confirm with the user before executing destructive actions"
-        " (archive, status changes)\n"
-        "- Only perform one write action per response unless the user explicitly"
-        " approves multiple\n"
-        "- Explain what you're about to do before outputting the action block"
-    )
-    sections.append(f"## Write Actions\n{write_actions}")
+    sections.append(f"## Write Actions\n{_write_part}")
 
     return "\n\n".join(sections)
 

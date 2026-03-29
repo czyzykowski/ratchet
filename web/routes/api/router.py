@@ -13,6 +13,7 @@ from web.routes.api import (
     features,
     project_chat_sessions,
     projects,
+    settings,
     specs,
     tasks,
     worker,
@@ -34,3 +35,4 @@ api_router.include_router(project_chat_sessions.router)
 api_router.include_router(architecture_sessions.router)
 api_router.include_router(bootstrap_chat.router)
 api_router.include_router(specs.router)
+api_router.include_router(settings.router)
