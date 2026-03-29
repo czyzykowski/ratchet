@@ -64,3 +64,11 @@ def test_get_prompts_source_values_are_relative_paths(client: TestClient) -> Non
         assert not entry["source"].startswith("/"), (
             f"Source path should be relative, got: {entry['source']}"
         )
+
+
+def test_get_prompts_includes_qa_fix_template(client: TestClient) -> None:
+    response = client.get("/api/settings/prompts")
+    data = response.json()["data"]
+    matches = [p for p in data if p["name"] == "QA Fix Prompt"]
+    assert len(matches) == 1
+    assert matches[0]["source"] == "orchestrator/sequencer.py"

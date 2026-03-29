@@ -28,6 +28,7 @@ def _collect_prompts() -> list[dict[str, str]]:
     )
     from core.qa_runner import _REVIEW_PROMPT_TEMPLATE
     from core.review_engine import _REVIEW_ENGINE_PROMPT_TEMPLATE
+    from orchestrator.sequencer import _QA_FIX_PROMPT_TEMPLATE
     from web.routes.api.architecture_sessions import _ARCHITECTURE_SESSION_TEMPLATE
     from web.routes.api.bootstrap_chat import _BOOTSTRAP_CHAT_TEMPLATE
     from web.routes.api.feature_sessions import _FEATURE_SESSION_TEMPLATE
@@ -69,6 +70,13 @@ def _collect_prompts() -> list[dict[str, str]]:
             "description": "Instructions injected when Claude Code is resolving merge conflicts.",
             "source": "core/context_assembler.py",
             "template": _CONFLICT_RESOLUTION_INSTRUCTIONS,
+        },
+        {
+            "category": "Execution",
+            "name": "QA Fix Prompt",
+            "description": "Prompt sent to Claude when attempting to fix QA failures.",
+            "source": "orchestrator/sequencer.py",
+            "template": _QA_FIX_PROMPT_TEMPLATE,
         },
         {
             "category": "Compilation",

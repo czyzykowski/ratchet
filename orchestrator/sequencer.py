@@ -46,6 +46,12 @@ from orchestrator.channel import PipelineAbort, WorkerChannel
 
 logger = logging.getLogger(__name__)
 
+_QA_FIX_PROMPT_TEMPLATE = (
+    "{spec_content}\n\n"
+    "QA tools found errors after implementation was marked complete:"
+    "\n{qa_output}"
+)
+
 # Relative paths to symlink from project root into each worktree.
 # Keys are names relative to project root; the executor resolves
 # them to absolute src (project_root/name) → dst (worktree/name).
@@ -751,10 +757,9 @@ class PipelineSequencer:
                     )
 
                 # Attempt a Claude fix
-                fix_prompt = (
-                    f"{spec.content}\n\n"
-                    f"QA tools found errors after implementation was marked complete:"
-                    f"\n{combined_output}"
+                fix_prompt = _QA_FIX_PROMPT_TEMPLATE.format(
+                    spec_content=spec.content,
+                    qa_output=combined_output,
                 )
                 logger.info(
                     "QA fix attempt %d/%d for task=%s",
