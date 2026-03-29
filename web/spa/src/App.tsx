@@ -11,6 +11,7 @@ import { ProjectPage } from './pages/ProjectPage'
 import { SpecDetailPage } from './pages/SpecDetailPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
 import { WorkersPage } from './pages/WorkersPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { ArchitectureSessionPage } from './pages/ArchitectureSessionPage'
 import { ProjectChatPage } from './pages/ProjectChatPage'
 import { NotificationsContext, useNotificationsState } from './hooks/useNotifications'
@@ -32,6 +33,7 @@ function AppInner() {
         <NavLink to="/bootstrap">Bootstrap</NavLink>
         <NavLink to="/features">Features</NavLink>
         <NavLink to="/workers">Workers</NavLink>
+        <NavLink to="/settings">Settings</NavLink>
       </nav>
       <main style={{ display: 'contents' }}>
         <Routes>
@@ -47,6 +49,7 @@ function AppInner() {
           <Route path="/features/:feature_id" element={<FeatureDetailPage />} />
           <Route path="/executions/:execution_id" element={<ExecutionDetailPage />} />
           <Route path="/workers" element={<WorkersPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="/bootstrap" element={<BootstrapPage />} />
           <Route path="/bootstrap/:session_id" element={<BootstrapPage />} />
         </Routes>

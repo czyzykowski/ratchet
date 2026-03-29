@@ -1835,6 +1835,25 @@ body, #root {
 .dark-surface { border: 1px solid var(--color-surface-dark-border); border-radius: 4px; padding: 0.75rem; background: var(--color-surface-dark); }
 .dark-surface-text { color: var(--color-surface-dark-text); }
 
+/* ── Settings page ─────────────────────────────────────── */
+.settings-tabs { display: flex; gap: 0.25rem; border-bottom: 2px solid var(--color-border); margin-bottom: 1.5rem; }
+.settings-tab { padding: 0.5rem 1rem; background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--color-text-secondary); font-size: 0.9rem; cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+.settings-tab:hover { color: var(--color-text); }
+.settings-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 600; }
+.settings-tab-content { }
+.prompt-category-group { margin-bottom: 2rem; }
+.prompt-category-heading { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); margin: 0 0 0.75rem 0; }
+.prompt-card { border: 1px solid var(--color-border); border-radius: 6px; margin-bottom: 0.5rem; overflow: hidden; }
+.prompt-card-header { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.9rem; cursor: pointer; user-select: none; background: var(--color-bg-secondary); transition: background 0.12s; }
+.prompt-card-header:hover { background: var(--color-bg-tertiary); }
+.prompt-card-name { font-weight: 600; font-size: 0.875rem; flex: 1; }
+.prompt-card-source { font-size: 0.75rem; color: var(--color-text-muted); font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
+.prompt-card-chevron { font-size: 0.65rem; color: var(--color-text-muted); }
+.prompt-card-body { padding: 0.75rem 0.9rem; background: var(--color-bg); border-top: 1px solid var(--color-border-light); }
+.prompt-card-description { margin: 0 0 0.75rem 0; font-size: 0.875rem; color: var(--color-text-secondary); }
+.prompt-template { margin-top: 0.5rem; }
+.prompt-template-code { margin: 0; padding: 0.75rem; background: var(--color-bg-code); border: 1px solid var(--color-border-light); border-radius: 4px; font-size: 0.78rem; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; overflow-x: auto; white-space: pre; line-height: 1.5; color: var(--color-text); }
+
 /* ── Abandon section ───────────────────────────────────── */
 .abandon-section { border: 1px solid var(--color-danger-border); border-radius: 4px; padding: 1rem; background: var(--color-danger-bg); margin-bottom: 1rem; }
 .abandon-section-label { color: var(--color-danger); margin-bottom: 0.5rem; }
