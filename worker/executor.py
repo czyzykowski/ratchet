@@ -328,6 +328,14 @@ class CommandExecutor:
                         text=True,
                     )
                     if apply_result.returncode != 0:
+                        # Fallback to 3-way merge for context drift
+                        apply_result = subprocess.run(
+                            ["git", "apply", "--allow-empty", "--3way", patch_file],
+                            cwd=worktree_path,
+                            capture_output=True,
+                            text=True,
+                        )
+                    if apply_result.returncode != 0:
                         return CreateWorktreeResponse(
                             type="create_worktree_response",
                             request_id=request.request_id,

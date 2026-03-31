@@ -4,6 +4,9 @@
 
 ### Fixed
 - Sandbox path in `async_start()` and `run()` now passes prompt via stdin; `NullSandbox.start()` accepts `stdin` parameter and forwards it to the subprocess — fixes "Input must be provided either through stdin" error on OSX worker
+- Transient transport failures (WebSocket disconnect) now auto-retry instead of permanently blocking tasks; `PipelineAbort` carries a `transient` flag, and `_abort_pipeline` returns tasks to a dispatchable state for transient errors
+- Worker `create_worktree` patch apply falls back to `--3way` merge when plain `git apply` fails due to context drift
+- Sequencer checks session JSONL for COMPLETED/BLOCKED markers as fallback when stdout lacks them
 
 ### Added
 - Extracted QA fix prompt template as inspectable constant in Prompt Inspector

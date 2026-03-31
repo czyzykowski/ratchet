@@ -216,16 +216,44 @@ async def dispatch_pending(store: Store, registry: WorkerRegistry) -> None:
         ) -> None:
             try:
                 await _coro  # type: ignore[misc]
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Pipeline task failed unexpectedly for worker=%s", _worker_id
                 )
+                from orchestrator.channel import PipelineAbort
+
+                is_transient = isinstance(exc, PipelineAbort) and exc.transient
                 try:
-                    await state_machine.transition(
-                        task_id_for_recovery,
-                        ev.BLOCKED,
-                        extra_payload={"failure_reason": "pipeline crashed unexpectedly"},
-                    )
+                    if is_transient:
+                        current = await state_machine.get_current_status(
+                            task_id_for_recovery
+                        )
+                        if current == ev.IN_PROGRESS:
+                            await state_machine.transition(
+                                task_id_for_recovery,
+                                ev.READY_FOR_IMPLEMENTATION,
+                                extra_payload={
+                                    "failure_reason": "pipeline crashed (transient)",
+                                    "reason": "transient_transport_failure",
+                                },
+                            )
+                        elif current != ev.READY_FOR_DEPLOYMENT:
+                            await state_machine.transition(
+                                task_id_for_recovery,
+                                ev.BLOCKED,
+                                extra_payload={
+                                    "failure_reason": "pipeline crashed unexpectedly"
+                                },
+                            )
+                        # READY_FOR_DEPLOYMENT: already dispatchable, no transition
+                    else:
+                        await state_machine.transition(
+                            task_id_for_recovery,
+                            ev.BLOCKED,
+                            extra_payload={
+                                "failure_reason": "pipeline crashed unexpectedly"
+                            },
+                        )
                 except Exception:
                     logger.warning(
                         "Failed to recover task %s after pipeline crash",

@@ -21,11 +21,14 @@ class PipelineAbort(Exception):
     Carries context about which step failed and why.
     """
 
-    def __init__(self, step_name: str, error: str, request_id: str = "") -> None:
+    def __init__(
+        self, step_name: str, error: str, request_id: str = "", *, transient: bool = False
+    ) -> None:
         super().__init__(f"Pipeline aborted at {step_name!r}: {error}")
         self.step_name = step_name
         self.error = error
         self.request_id = request_id
+        self.transient = transient
 
 
 @runtime_checkable
@@ -100,6 +103,7 @@ class WebSocketWorkerChannel:
                 step_name=request.type,
                 error=str(exc),
                 request_id=request.request_id,
+                transient=True,
             ) from exc
 
         response = parse_command_response(raw)

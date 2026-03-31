@@ -298,18 +298,55 @@ class PipelineSequencer:
         project_id: UUID,
         execution_id: UUID | None,
         failure: str,
+        transient: bool = False,
     ) -> PipelineResult:
-        """Clean up and transition task to BLOCKED after a pipeline failure."""
+        """Clean up and transition task after a pipeline failure.
+
+        When transient=True (transport error), return task to a dispatchable
+        state so the next dispatch cycle retries automatically.
+        When transient=False (logical error), transition to BLOCKED.
+        """
         if execution_id is not None:
-            await self._try_remove_worktree(channel, project_id, execution_id)
+            try:
+                await self._try_remove_worktree(channel, project_id, execution_id)
+            except Exception:
+                pass  # transport may be dead for transient failures
             await self._record_execution_fail(execution_id, failure)
 
         current = await self._state_machine.get_current_status(task_id)
-        if current in (ev.READY_FOR_IMPLEMENTATION, ev.IN_PROGRESS,
-                       ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT):
-            if current == ev.READY_FOR_IMPLEMENTATION:
-                # Transition via IN_PROGRESS first since READY_FOR_IMPLEMENTATION → BLOCKED is valid
-                pass
+
+        if transient:
+            if current == ev.IN_PROGRESS:
+                logger.info(
+                    "Transient abort for task=%s, returning to ready_for_implementation",
+                    task_id,
+                )
+                await self._state_machine.transition(
+                    task_id,
+                    ev.READY_FOR_IMPLEMENTATION,
+                    extra_payload={
+                        "failure_reason": failure,
+                        "reason": "transient_transport_failure",
+                    },
+                )
+            elif current == ev.READY_FOR_DEPLOYMENT:
+                # Merge pipeline: task is already dispatchable, no transition needed
+                logger.info(
+                    "Transient abort for merge task=%s, leaving in %s for retry",
+                    task_id, current,
+                )
+            else:
+                logger.info(
+                    "Transient abort for task=%s in unexpected state %s, blocking",
+                    task_id, current,
+                )
+                await self._state_machine.transition(
+                    task_id,
+                    ev.BLOCKED,
+                    extra_payload={"failure_reason": failure},
+                )
+        elif current in (ev.READY_FOR_IMPLEMENTATION, ev.IN_PROGRESS,
+                         ev.READY_FOR_QA, ev.READY_FOR_DEPLOYMENT):
             await self._state_machine.transition(
                 task_id,
                 ev.BLOCKED,
@@ -493,9 +530,16 @@ class PipelineSequencer:
             # when the main task completed successfully.
             _has_completed = has_completed_marker(stdout)
             _has_blocked = has_blocked_marker(stdout) is not None
+
+            # Fallback: if stdout lacks a completion marker, scan the session
+            # JSONL. Extra turns (notifications, background tasks) can push
+            # the COMPLETED marker out of the final stdout capture.
+            if not _has_completed and session_jsonl:
+                _has_completed = has_completed_marker(session_jsonl)
+            if not _has_blocked and session_jsonl:
+                _has_blocked = has_blocked_marker(session_jsonl) is not None
+
             is_completed = _has_completed and not _has_blocked
-            # is_blocked is implicit: not is_completed covers all blocked cases
-            # (BLOCKED marker, status=="blocked", or non-zero exit without COMPLETED)
 
             if not is_completed:
                 failure = f"Claude returned BLOCKED or non-zero exit: {stdout[:500]}"
@@ -595,7 +639,9 @@ class PipelineSequencer:
                         )
                         try:
                             await channel.send_command(autofix_req)
-                        except PipelineAbort:
+                        except PipelineAbort as exc:
+                            if exc.transient:
+                                raise  # transport failure — let outer handler retry
                             pass  # auto-fix failures are non-fatal
 
                 # Run each QA step via RunCommand
@@ -621,6 +667,8 @@ class PipelineSequencer:
                         else:
                             qa_step_lines.append(f"[{step.name}] PASS")
                     except PipelineAbort as exc:
+                        if exc.transient:
+                            raise  # transport failure — let outer handler retry
                         failed_steps.append((step.name, exc.error))
                         qa_step_lines.append(f"[{step.name}] FAIL — {exc.error[:200]}")
                         break
@@ -789,15 +837,17 @@ class PipelineSequencer:
 
         except PipelineAbort as exc:
             logger.error(
-                "Impl pipeline aborted for task=%s at step=%s: %s",
+                "Impl pipeline aborted for task=%s at step=%s: %s (transient=%s)",
                 task_id,
                 exc.step_name,
                 exc.error,
+                exc.transient,
             )
             failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
             _save_trace()
             return await self._abort_pipeline(
-                channel, task_id, project_id, execution_id, failure
+                channel, task_id, project_id, execution_id, failure,
+                transient=exc.transient,
             )
 
     # ------------------------------------------------------------------
@@ -938,9 +988,13 @@ class PipelineSequencer:
 
         except PipelineAbort as exc:
             failure = f"Resume aborted at {exc.step_name!r}: {exc.error}"
-            logger.error("Resume pipeline aborted for task=%s: %s", task_id, failure)
+            logger.error(
+                "Resume pipeline aborted for task=%s: %s (transient=%s)",
+                task_id, failure, exc.transient,
+            )
             return await self._abort_pipeline(
-                channel, task_id, project_id, execution_id, failure
+                channel, task_id, project_id, execution_id, failure,
+                transient=exc.transient,
             )
 
     # ------------------------------------------------------------------
@@ -1075,7 +1129,9 @@ class PipelineSequencer:
                     )
                     try:
                         await channel.send_command(autofix_req)
-                    except PipelineAbort:
+                    except PipelineAbort as exc:
+                        if exc.transient:
+                            raise
                         pass
 
             failed_steps: list[tuple[str, str]] = []
@@ -1096,6 +1152,8 @@ class PipelineSequencer:
                             failed_steps.append((step.name, output))
                             break
                     except PipelineAbort as exc:
+                        if exc.transient:
+                            raise
                         failed_steps.append((step.name, exc.error))
                         break
 
@@ -1194,12 +1252,13 @@ class PipelineSequencer:
 
         except PipelineAbort as exc:
             logger.error(
-                "Merge pipeline aborted for task=%s at step=%s: %s",
-                task_id, exc.step_name, exc.error,
+                "Merge pipeline aborted for task=%s at step=%s: %s (transient=%s)",
+                task_id, exc.step_name, exc.error, exc.transient,
             )
             failure = f"Pipeline aborted at {exc.step_name!r}: {exc.error}"
             return await self._abort_pipeline(
-                channel, task_id, project_id, execution_id, failure
+                channel, task_id, project_id, execution_id, failure,
+                transient=exc.transient,
             )
 
 
